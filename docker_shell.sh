@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 declare name='lolosia-backend'
-
+declare user=$(users)
+echo "当前用户为：${user}"
 
 echo '停止容器:' ${name}
 docker stop ${name}
