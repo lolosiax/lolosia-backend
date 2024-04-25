@@ -1,5 +1,5 @@
 #制定java镜像的版本
-FROM java:17
+FROM openjdk:17
 
 #声明作者
 LABEL org.opencontainers.image.authors="Lolosia"
