@@ -14,14 +14,14 @@ import jakarta.persistence.Entity
 import jakarta.persistence.Table
 import jakarta.persistence.Id
 
-@DbName("session")
+@DbName("db")
 @Entity
 @Table(name = "Sessions")
-class SessionEntity : Model("session") {
+class SessionEntity : Model("db") {
 
     companion object : ModelCompanion {
         @JvmStatic
-        override val database get() = DB.byName("session")
+        override val database get() = DB.byName("db")
     }
 
     @Id

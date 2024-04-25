@@ -1,27 +1,12 @@
 datasource:
   db:
-    username: "root"
-    password: "123456"
-    driver: "org.sqlite.JDBC"
-    url: "jdbc:sqlite:work/database/db.sqlite"
-  decision:
-    username: "root"
-    password: "123456"
-    driver: "org.sqlite.JDBC"
-    url: "jdbc:sqlite:work/database/decision.sqlite"
-  session:
-    username: "root"
-    password: "123456"
-    driver: "org.sqlite.JDBC"
-    url: "jdbc:sqlite:work/database/session.sqlite"
-  system:
-    username: "root"
-    password: "123456"
-    driver: "org.sqlite.JDBC"
-    url: "jdbc:sqlite:work/database/system.sqlite"
+    username: ""
+    password: ""
+    driver: "org.mariadb.jdbc.Driver"
+    url: "jdbc:mariadb://172.17.0.1:3306/lolosia?useUnicode=true&characterEncoding=utf8&serverTimezone=GMT%2B8"
 
 server:
-  port: 8002
+  port: 58801
 
 spring:
   devtools:

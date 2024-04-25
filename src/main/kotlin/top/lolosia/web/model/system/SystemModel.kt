@@ -12,12 +12,12 @@ import java.sql.Timestamp
 import java.util.UUID
 import jakarta.persistence.MappedSuperclass
 
-@DbName("system")
+@DbName("db")
 @MappedSuperclass
-abstract class SystemModel : Model("system") {
+abstract class SystemModel : Model("db") {
     companion object : ModelCompanion {
         @JvmStatic
-        override val database get() = DB.byName("system")
+        override val database get() = DB.byName("db")
     }
 
     var createdBy: UUID? = null
