@@ -8,6 +8,7 @@ LABEL org.opencontainers.image.authors="Lolosia"
 WORKDIR /app/
 
 #复制fat.jar到镜像内app目录下
+ADD /home/lolosia-web/application.yml /app/
 ADD ./build/libs/*-fat.jar /app/
 
 RUN mv *-fat.jar app.jar
