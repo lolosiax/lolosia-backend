@@ -40,4 +40,4 @@ fi
 echo "启动新版容器: $name..."
 
 mkdir -p /home/lolosia-web/work
-docker run -p 58801:58801 -d --restart=always -v -v /home/lolosia-web/work:/app/work --name ${name} ${name}
+docker run -p 58801:58801 -d --restart=always -v /home/lolosia-web/work:/app/work --name ${name} ${name}
