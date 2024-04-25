@@ -20,7 +20,7 @@ class HomeController {
     @Autowired
     lateinit var service: HomeService
 
-    @GetMapping(path = ["/", "/api/"])
+    @GetMapping(path = ["/", "/api/", "/home/api/"])
     fun home(resp: ServerHttpResponse): Mono<Void> {
         // resp.statusCode = HttpStatus.FOUND
         // resp.headers.location = URI.create("/oAuth/")
