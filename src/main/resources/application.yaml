@@ -1,0 +1,42 @@
+datasource:
+  db:
+    username: "root"
+    password: "123456"
+    driver: "org.sqlite.JDBC"
+    url: "jdbc:sqlite:work/database/db.sqlite"
+  decision:
+    username: "root"
+    password: "123456"
+    driver: "org.sqlite.JDBC"
+    url: "jdbc:sqlite:work/database/decision.sqlite"
+  session:
+    username: "root"
+    password: "123456"
+    driver: "org.sqlite.JDBC"
+    url: "jdbc:sqlite:work/database/session.sqlite"
+  system:
+    username: "root"
+    password: "123456"
+    driver: "org.sqlite.JDBC"
+    url: "jdbc:sqlite:work/database/system.sqlite"
+
+server:
+  port: 8002
+
+spring:
+  devtools:
+    restart:
+      enabled: true
+  jackson:
+    time-zone: GMT+8
+  application:
+    name: "lolosia-backend"
+
+logging:
+  charset:
+    console: GB18030
+  pattern:
+    console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:%-5p}) %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:%wEx}"
+  level:
+    root: INFO
+  config: "classpath:logback-spring.xml"
