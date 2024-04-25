@@ -16,10 +16,6 @@ java {
     sourceCompatibility = JavaVersion.VERSION_17
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
