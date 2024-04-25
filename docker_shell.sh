@@ -29,6 +29,8 @@ if [ -n "$imageId" ];then
 fi
 
 echo "构建新版镜像: $name..."
+# 拷贝 application.yml
+cp /home/lolosia-web/application.yml ./
 docker build -t "$name" .
 
 if [ -n "$imageId" ];then
