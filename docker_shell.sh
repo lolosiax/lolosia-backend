@@ -11,12 +11,12 @@ echo '删除容器:' ${name}
 docker rm ${name}
 
 
-decare imageId=$(docker images -q --filter "reference=$name")
+declare imageId=$(docker images -q --filter "reference=$name")
 
 # 判断旧镜像是否存在
 if [ -n "$imageId" ];then
 
-  decare imageId2=$(docker images -q --filter "reference=$name:old")
+  declare imageId2=$(docker images -q --filter "reference=$name:old")
 
   # 判断之前是否还有其他的旧镜像
   if [ -n "$imageId2" ];then
