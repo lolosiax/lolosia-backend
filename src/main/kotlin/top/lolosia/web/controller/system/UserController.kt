@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ServerWebExchange
 
 @RestController
-@RequestMapping("/api/user")
+@RequestMapping("/home/api/user")
 class UserController {
 
     @Autowired
