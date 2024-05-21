@@ -2,6 +2,7 @@ package top.lolosia.web.interceptor
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.NullNode
+import kotlinx.coroutines.isActive
 import top.lolosia.web.util.bundle.bundleScope
 import top.lolosia.web.util.kotlin.pass
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -48,7 +49,9 @@ class ErrorWebFilter : OrderedWebFilter {
                 else if (e::class.qualifiedName == "kotlinx.coroutines.JobCancellationException") pass
                 else logger.error(e.message, e)
 
-                if (exchange.response.isCommitted) return@mono
+                // 如果响应体被提交，或者连接被切断，直接返回
+                if (exchange.response.isCommitted || !isActive) return@mono
+
 
                 val obj = bundleScope {
                     "data" set NullNode.instance

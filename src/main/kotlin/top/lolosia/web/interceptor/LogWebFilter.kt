@@ -62,7 +62,8 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
         fun time(s: Long) = if (s < 10000) String.format("%4dms", s)
         else String.format("%5ds", s / 1000)
         // 请求处理步骤
-        val reqJob = launch {
+        // 防止被客户端断开连接而意外取消日志记录器
+        val reqJob = CoroutineScope(NonCancellable).launch {
             try {
                 val f = suspend {
                     var bytes: ByteArray? = null
@@ -76,7 +77,7 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
                     if (str.length > 200) str = str.s200()
                     logger.value.info("$up       $str")
                 }
-                if (url.startsWith("/api/")) f()
+                if (url.startsWith("/home/api/")) f()
                 else writeInfo = f
             } catch (_: Throwable) {
             }
@@ -102,24 +103,27 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
                 if (e is HttpStatusCodeException) code = e.statusCode.value()
                 throw e
             } finally {
-                val f = suspend {
-                    // 响应处理步骤
-                    val length = data.length
-                    if (length > 200) data = data.s200()
-                    val end1 = System.currentTimeMillis()
-                    // 消费掉请求体，避免由于空请求体导致下方的方法死锁。
-                    request.consume()
-                    // 等待请求处理完成
-                    reqJob.join()
-                    if (code in 200 until 400) {
-                        logger.value.info("$down${time(end1 - start)}$end $data")
-                    } else {
-                        writeInfo?.let { it() }
-                        logger.value.warn("$err0 \u001B[1;30;43m $code $err1 $data  $end")
+                // 避免因客户端断开连接而捕获不到信息
+                CoroutineScope(NonCancellable).launch {
+                    val f = suspend {
+                        // 响应处理步骤
+                        val length = data.length
+                        if (length > 200) data = data.s200()
+                        val end1 = System.currentTimeMillis()
+                        // 消费掉请求体，避免由于空请求体导致下方的方法死锁。
+                        request.consume()
+                        // 等待请求处理完成
+                        reqJob.join()
+                        if (code in 200 until 400) {
+                            logger.value.info("$down${time(end1 - start)}$end $data")
+                        } else {
+                            writeInfo?.let { it() }
+                            logger.value.warn("$err0 \u001B[1;30;43m $code $err1 $data  $end")
+                        }
                     }
+                    if (url.startsWith("/home/api/")) f()
+                    else if (code !in 200 until 400) f()
                 }
-                if (url.startsWith("/api/")) f()
-                else if (code !in 200 until 400) f()
             }
         }.then()
     }
