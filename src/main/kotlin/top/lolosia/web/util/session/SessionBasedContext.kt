@@ -11,7 +11,7 @@ open class SessionBasedContext(
 ) : Context() {
     private val sessionManager by lazy { applicationContext.getBean(SessionManager::class.java) }
     private val mSession by lazy { sessionManager[this.sessionId] }
-    override val session: Bundle
+    override val session: SessionMap
         get() {
             mSession["session:lastAccess"] = Date().time
             return mSession

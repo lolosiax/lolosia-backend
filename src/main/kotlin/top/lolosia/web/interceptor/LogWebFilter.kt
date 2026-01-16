@@ -2,6 +2,7 @@ package top.lolosia.web.interceptor
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import top.lolosia.web.util.kotlin.PromiseContinuation
+import top.lolosia.web.util.packageLogger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.reactor.flux
@@ -9,7 +10,6 @@ import kotlinx.coroutines.reactor.mono
 import org.reactivestreams.Publisher
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import org.springframework.boot.web.reactive.filter.OrderedWebFilter
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.io.buffer.DataBufferUtils
 import org.springframework.core.io.buffer.DefaultDataBufferFactory
@@ -19,7 +19,6 @@ import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator
 import org.springframework.http.server.reactive.ServerHttpResponse
 import org.springframework.http.server.reactive.ServerHttpResponseDecorator
-import org.springframework.stereotype.Component
 import org.springframework.web.ErrorResponse
 import org.springframework.web.client.HttpStatusCodeException
 import org.springframework.web.server.ServerWebExchange
@@ -32,8 +31,11 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-@Component
-class LogWebFilter : OrderedWebFilter, CoroutineScope {
+abstract class LogWebFilter(order: Int) : AbstractWebFilter(order), CoroutineScope {
+
+    companion object{
+        val logger = packageLogger<LogWebFilter>()
+    }
 
     private val mapper = ObjectMapper()
     private val bufferFactory = DefaultDataBufferFactory.sharedInstance
@@ -46,14 +48,10 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
     override val coroutineContext: CoroutineContext
         get() = Dispatchers.IO
 
-    override fun getOrder(): Int {
-        return -4
-    }
-
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         var url = exchange.request.path.pathWithinApplication().toString()
         if (url.contains('?')) url = url.split("?", limit = 1)[0]
-        val logger = lazy { getLogger(url) }
+        // val logger = lazy { getLogger(url) }
         val start = System.currentTimeMillis()
         val request = Request(exchange.request)
         val response = Response(exchange.response)
@@ -61,6 +59,8 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
         fun String.s200() = slice(0..200) + "...(${length - 200} more)"
         fun time(s: Long) = if (s < 10000) String.format("%4dms", s)
         else String.format("%5ds", s / 1000)
+        var logUrl = ""
+
         // 请求处理步骤
         // 防止被客户端断开连接而意外取消日志记录器
         val reqJob = CoroutineScope(NonCancellable).launch {
@@ -75,9 +75,13 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
                     bytes = bytes ?: mapper.writeValueAsBytes(request.queryParams)
                     var str = bytes!!.toString(Charsets.UTF_8)
                     if (str.length > 200) str = str.s200()
-                    logger.value.info("$up       $str")
+
+                    logUrl = "${request.method} - ${request.remoteAddress?.hostName} - $url"
+
+                    logger.info("$up$end $logUrl")
+                    logger.info("$up        $str")
                 }
-                if (url.startsWith("/home/api/")) f()
+                if (url.startsWith("/api/")) f()
                 else writeInfo = f
             } catch (_: Throwable) {
             }
@@ -101,6 +105,7 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
                 }.value()
                 data = e.message ?: "未知异常"
                 if (e is HttpStatusCodeException) code = e.statusCode.value()
+                if (!isActive && !response.isCommitted) data = "与客户端的连接已被关闭"
                 throw e
             } finally {
                 // 避免因客户端断开连接而捕获不到信息
@@ -115,19 +120,22 @@ class LogWebFilter : OrderedWebFilter, CoroutineScope {
                         // 等待请求处理完成
                         reqJob.join()
                         if (code in 200 until 400) {
-                            logger.value.info("$down${time(end1 - start)}$end $data")
+                            logger.info("$down$end $logUrl")
+                            logger.info("$down${time(end1 - start)}$end  $data")
                         } else {
                             writeInfo?.let { it() }
-                            logger.value.warn("$err0 \u001B[1;30;43m $code $err1 $data  $end")
+                            logger.info("$err0$end $logUrl")
+                            logger.warn("$err0 \u001B[1;30;43m $code $err1  $data  $end")
                         }
                     }
-                    if (url.startsWith("/home/api/")) f()
+                    if (url.startsWith("/api/")) f()
                     else if (code !in 200 until 400) f()
                 }
             }
         }.then()
     }
 
+    @Deprecated("此方法等待移除")
     fun getLogger(url: String): Logger {
         val end = if (url.endsWith("/")) "/" else ""
         val name = run {

@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
-@RequestMapping("/home/api")
+@RequestMapping("/api")
 class LoginController {
 
     @Autowired
@@ -27,4 +27,5 @@ class LoginController {
     suspend fun logout(context: Context): Any {
         return loginService.logout(context)
     }
+
 }

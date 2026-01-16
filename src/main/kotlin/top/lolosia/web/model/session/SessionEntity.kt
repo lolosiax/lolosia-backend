@@ -1,26 +1,27 @@
 package top.lolosia.web.model.session
 
 import com.fasterxml.jackson.annotation.JsonFormat
+import top.lolosia.web.util.ebean.AbstractModel
 import top.lolosia.web.model.ModelCompanion
 import io.ebean.DB
-import io.ebean.Model
 import io.ebean.annotation.DbName
 import io.ebean.annotation.SoftDelete
 import io.ebean.annotation.WhenCreated
 import io.ebean.annotation.WhenModified
-import java.sql.Timestamp
-import java.util.UUID
 import jakarta.persistence.Entity
-import jakarta.persistence.Table
 import jakarta.persistence.Id
+import jakarta.persistence.Table
+import java.sql.Timestamp
+import java.util.*
 
 @DbName("db")
 @Entity
-@Table(name = "Sessions")
-class SessionEntity : Model("db") {
+@Table(name = "sys_sessions")
+class SessionEntity : AbstractModel("db") {
 
     companion object : ModelCompanion {
         @JvmStatic
+        @Deprecated("use spring bean instead.", replaceWith = ReplaceWith("ctx.database", "ctx"))
         override val database get() = DB.byName("db")
     }
 

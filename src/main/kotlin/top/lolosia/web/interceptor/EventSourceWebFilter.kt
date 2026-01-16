@@ -5,6 +5,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import top.lolosia.web.manager.EventSourceManager
 import top.lolosia.web.util.bundle.bundleScope
 import top.lolosia.web.util.ebean.toUuid
+import top.lolosia.web.util.event.Event
+import top.lolosia.web.util.event.EventHandle
 import top.lolosia.web.util.spring.EventSource
 import kotlinx.coroutines.*
 import kotlinx.coroutines.reactor.asMono
@@ -13,7 +15,6 @@ import kotlinx.coroutines.reactor.mono
 import org.apache.commons.logging.LogFactory
 import org.reactivestreams.Publisher
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.web.reactive.filter.OrderedWebFilter
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.io.buffer.DefaultDataBufferFactory
 import org.springframework.http.HttpHeaders
@@ -22,7 +23,6 @@ import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator
 import org.springframework.http.server.reactive.ServerHttpResponse
 import org.springframework.http.server.reactive.ServerHttpResponseDecorator
-import org.springframework.stereotype.Component
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilterChain
 import reactor.core.publisher.Flux
@@ -34,10 +34,9 @@ import kotlin.coroutines.Continuation
 import kotlin.coroutines.suspendCoroutine
 import kotlin.time.Duration.Companion.seconds
 
-@Component
-class EventSourceWebFilter : OrderedWebFilter {
+abstract class EventSourceWebFilter(order: Int) : AbstractWebFilter(order) {
 
-    val log = LogFactory.getLog(EventSourceWebFilter::class.java)
+    val logger = LogFactory.getLog(EventSourceWebFilter::class.java)
 
     @Autowired
     lateinit var manager: EventSourceManager
@@ -47,10 +46,6 @@ class EventSourceWebFilter : OrderedWebFilter {
     }
 
     val wrapper get() = DefaultDataBufferFactory.sharedInstance
-
-    override fun getOrder(): Int {
-        return -5
-    }
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val req = exchange.request
@@ -75,7 +70,8 @@ class EventSourceWebFilter : OrderedWebFilter {
                 val resp = Response(exchange.response, id)
                 resp.writerStatus.asMono(Dispatchers.Default).then()
             } else {
-                val (req1, body) = manager.getRequest(id)!!
+                val (req1, body) = manager.getRequest(id)
+                    ?: throw NoSuchElementException("no event source $id found!")
                 val exchange1 = exchange.mutate()
                     .request(Request(req1, body, id))
                     .response(Response(exchange.response, id, true))
@@ -172,12 +168,14 @@ class EventSourceWebFilter : OrderedWebFilter {
      * 消息源，向客户端发送信息的实现。
      */
     private inner class InnerEventSource(
-        val id: UUID
+        override val sseId: UUID
     ) : EventSource {
         private lateinit var flux: Flux<DataBuffer>
         var slink: FluxSink<DataBuffer>? = null
         private var mClosed = false
         override val isClosed: Boolean get() = mClosed
+
+        override val onClose = EventHandle<Event>()
 
         fun init(response: Response) {
             if (isClosed) throw IllegalStateException("EventSource has been closed!")
@@ -193,13 +191,16 @@ class EventSourceWebFilter : OrderedWebFilter {
             }
 
             // 发生错误后自动关闭请求
-            response.writeWith0(flux).doOnError {
+            response.writeWith0(flux).doOnError { e ->
                 slink = null
+                logger.warn("EventSource连接发生异常, SSE-ID: $sseId")
+                logger.warn("${e::class.qualifiedName}: ${e.message}")
                 CoroutineScope(Dispatchers.Default).launch {
                     delay(60.seconds)
                     if (slink == null) {
                         mClosed = true
-                        manager.removeEventSource(id)
+                        onClose fire Event(this)
+                        manager.removeEventSource(sseId)
                     }
                 }
             }.subscribe()
@@ -213,12 +214,12 @@ class EventSourceWebFilter : OrderedWebFilter {
             }
         }
 
-        override fun send(event: String, data: Any?) {
+        override fun send(event: String, data: Any?, retry: Int) {
             if (mClosed) throw IllegalStateException("EventSource has been closed!")
             // log.info("$event / $data")
             val id = mInnerEventSourceId.incrementAndGet()
             val dataBytes = mapper.writeValueAsString(data)
-            val text = "id: ${id}\nevent: ${event}\ndata: ${dataBytes}\nretry: 10000\n\n"
+            val text = "id: ${id}\nevent: ${event}\ndata: ${dataBytes}\nretry: ${retry}\n\n"
             slink?.next(wrapper.wrap(text.toByteArray()))
         }
 
@@ -227,7 +228,8 @@ class EventSourceWebFilter : OrderedWebFilter {
             send("close")
             slink?.complete()
             slink = null
-            manager.removeEventSource(id)
+            onClose fire Event(this)
+            manager.removeEventSource(sseId)
             mClosed = true
         }
     }

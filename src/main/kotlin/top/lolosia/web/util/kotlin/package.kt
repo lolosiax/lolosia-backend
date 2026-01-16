@@ -4,7 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import org.apache.commons.collections4.BidiMap
 import org.apache.commons.collections4.bidimap.DualLinkedHashBidiMap
 import org.slf4j.LoggerFactory
+import java.sql.Timestamp
 import java.time.Instant
+import java.time.LocalDateTime
 import java.util.*
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.CoroutineContext
@@ -59,4 +61,8 @@ fun <T> createContinuation(block: (result: T?, error: Throwable?) -> Unit?): Con
 
 fun <K, V> Map<K, V>.toBidiMap(): BidiMap<K, V> {
     return DualLinkedHashBidiMap(this)
+}
+
+fun LocalDateTime.toTimestamp(): Timestamp {
+    return Timestamp.valueOf(this)
 }

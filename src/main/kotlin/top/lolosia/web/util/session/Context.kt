@@ -1,19 +1,19 @@
 package top.lolosia.web.util.session
 
 import top.lolosia.web.util.ErrorResponseException
-import top.lolosia.web.util.bundle.Bundle
-import top.lolosia.web.util.bundle.invoke
 import top.lolosia.web.util.ebean.toUuid
+import top.lolosia.web.util.spring.ApplicationContextProvider
 import org.springframework.context.ApplicationContext
 import org.springframework.http.HttpStatus
 import java.util.*
 import kotlin.reflect.KProperty
 
-abstract class Context {
-    abstract val applicationContext: ApplicationContext
-    abstract val session: Bundle
+abstract class Context : ApplicationContextProvider {
+    abstract override val applicationContext: ApplicationContext
+    abstract val session: SessionMap
     protected val proxy = proxy()
     protected fun proxy(prop: String? = null) = SessionProxy(prop)
+    open fun java() = JavaContext(this)
 
     //
     // 变量表
@@ -25,12 +25,18 @@ abstract class Context {
             HttpStatus.UNAUTHORIZED,
             "身份认证失败，请重新登录"
         )
+    val userIdOrNull : UUID?
+        get() = try {
+            session.invoke<String>("id")?.toUuid()
+        } catch (e: Exception) {
+            null
+        }
 
     val user = UserInfo(this)
 
-    /** 决策竞赛实例ID */
-    var decisionGameId: String? by proxy
-    var decisionTeamId: String? by proxy
+    inline operator fun <R> invoke(block: Context.() -> R) : R{
+        return block(this)
+    }
 
     override fun equals(other: Any?): Boolean {
         return if (other is Context) other.sessionId == sessionId

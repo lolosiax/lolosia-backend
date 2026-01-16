@@ -1,36 +1,49 @@
 package top.lolosia.web.config
 
-import top.lolosia.web.util.bundle.Bundle
-import org.yaml.snakeyaml.Yaml
-import top.lolosia.web.LolosiaApplication
-import java.io.File
+import top.lolosia.web.util.bundle.bundleOf
+import top.lolosia.web.util.config.NodeChainConfigRoot
+import org.yaml.snakeyaml.nodes.MappingNode
+import java.io.StringReader
 import kotlin.io.path.Path
 import kotlin.io.path.exists
 import kotlin.io.path.readText
+import kotlin.io.path.writer
 
-object SConfig : ChangeableMap() {
-    public override val data by lazy { init() }
+object SConfig : NodeChainConfigRoot() {
 
-    /**
-     * 服务器启动端口
-     */
-    val serverPort: Int by this(8002)
+    private const val CONFIG_FILE = "application.yaml"
+    private var initialized = false
+    private var initializeNeedSave = false
 
-    private fun init(): Bundle {
-        if (!Path("config.yml").exists()) {
-            releaseConfigFile()
+    override val node: MappingNode by lazy { init() }
+    val host by lazy { HostConfig(this, node) }
+    val aiServer by lazy { AiServerConfig(this, getMappingNodeOrCreate("ai-server")) }
+    val server by lazy { ServerConfig(this, getMappingNodeOrCreate("server")) }
+    val openApi by lazy { OpenAiConfig(this, getMappingNodeOrCreate("openApi")) }
+
+    private fun init(): MappingNode {
+        if (!Path(CONFIG_FILE).exists()) {
+            return mapper.represent(bundleOf()) as MappingNode
         }
-
-        return Yaml().load(Path("config.yml").readText()) as Bundle
+        val text = Path(CONFIG_FILE).readText()
+        return mapper.compose(StringReader(text)) as MappingNode
     }
 
-    private fun releaseConfigFile() {
-        val clazz = LolosiaApplication::class.java
-        val classpath = clazz.packageName.replace(".", "/")
-        val stream = clazz.classLoader.getResourceAsStream("${classpath}/config.yml")!!
-        val file = File("config.yml")
-        file.outputStream().use {
-            stream.transferTo(it)
+    override fun save() {
+        if (!initialized) {
+            initializeNeedSave = true
+            return
+        }
+        beforeSaving()
+        Path(CONFIG_FILE).writer(Charsets.UTF_8).use {
+            mapper.serialize(node, it)
+        }
+    }
+
+    init {
+        initialized = true
+        if (initializeNeedSave) {
+            save()
         }
     }
 }

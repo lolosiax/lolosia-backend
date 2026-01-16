@@ -4,16 +4,20 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import top.lolosia.web.event.system.UserLoginEvent
 import top.lolosia.web.event.system.UserLogoutEvent
+import top.lolosia.web.manager.CacheManager
 import top.lolosia.web.manager.SessionManager
 import top.lolosia.web.model.system.query.QSysUserEntity
-import top.lolosia.web.util.session.Context
+import top.lolosia.web.service.system.UserService
 import top.lolosia.web.util.bundle.*
 import top.lolosia.web.util.ebean.or
+import top.lolosia.web.util.ebean.query
+import top.lolosia.web.util.session.Context
 import top.lolosia.web.util.success
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.stereotype.Service
+import org.thymeleaf.spring6.SpringWebFluxTemplateEngine
 
 @Service
 class LoginService {
@@ -32,14 +36,13 @@ class LoginService {
     lateinit var publisher: ApplicationEventPublisher
 
     suspend fun login(ctx: Context, userName: String, password: String?): Bundle {
-        val user = QSysUserEntity().run {
+        val user = ctx.query<QSysUserEntity> {
             or {
                 this.userName.eq(userName)
                 this.phone.eq(userName)
             }
             deleted.ne(true)
-            findOne()
-        } ?: throw NoSuchElementException("用户不存在！")
+        }.findOne() ?: throw NoSuchElementException("用户不存在！")
         var firstLogin = false
         if (user.password.isNullOrEmpty() && password.isNullOrEmpty()) {
             firstLogin = true
@@ -48,9 +51,9 @@ class LoginService {
         else if (user.password.isNullOrEmpty() || !encoder.matches(password, user.password)) {
             throw IllegalAccessException("密码不正确")
         }
-        val obj = session.get().scope {
-            "id" set user.id.toString()
-        }
+        val obj = session.get()
+        obj["id"] = user.id.toString()
+
         session.save(obj["sessionId"]!!.toString())
         val out = bundleScope {
             current.putAll(mapper.toBundle(user))

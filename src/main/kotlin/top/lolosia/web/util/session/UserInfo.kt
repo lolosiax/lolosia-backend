@@ -1,20 +1,43 @@
 package top.lolosia.web.util.session
 
+import top.lolosia.web.api.SystemApi
+import top.lolosia.web.model.system.SysRoleEntity
 import top.lolosia.web.model.system.query.QSysRoleEntity
 import top.lolosia.web.model.system.query.QSysUserEntity
 import top.lolosia.web.model.system.query.QSysUserRolesEntity
+import top.lolosia.web.util.ebean.query
 import top.lolosia.web.util.ebean.toUuid
+import top.lolosia.web.util.isClient
+import kotlinx.coroutines.runBlocking
 import java.util.*
 
 class UserInfo(val context: Context) {
     val id: UUID by lazy { context.userId.toUuid() }
-    private val userEntity by lazy {
-        QSysUserEntity().id.eq(id).findOne() ?: throw NoSuchElementException("未找到用户 $id")
+    val userEntity by lazy {
+        if (isClient) {
+            return@lazy runBlocking {
+                SystemApi.myUserInfo(context)
+            }
+        }
+        context.query<QSysUserEntity>().id.eq(id).findOne() ?: throw NoSuchElementException("未找到用户 $id")
     }
 
-    private val roleEntity by lazy {
-        val ae = QSysUserRolesEntity().userId.eq(id).findOne() ?: throw NoSuchElementException("未找到用户角色 $id")
-        return@lazy QSysRoleEntity().id.eq(ae.roleId).findOne() ?: throw NoSuchElementException("找不到角色 ${ae.id}")
+    private val roleEntity: SysRoleEntity by lazy {
+        if (isClient) {
+            return@lazy runBlocking {
+                val role = SystemApi.myRole(context)
+                SysRoleEntity().apply {
+                    id = role["roleId"] as Int
+                    roleName = role["roleName"] as String
+                    type = role["roleType"] as String
+                }
+            }
+        }
+        val ae = context.query<QSysUserRolesEntity>().userId.eq(id).findOne()
+        ae ?: throw NoSuchElementException("未找到用户角色 $id")
+        val role = context.query<QSysRoleEntity>().id.eq(ae.roleId).findOne()
+        role ?: throw NoSuchElementException("找不到角色 ${ae.id}")
+        return@lazy role
     }
 
     val userName get() = userEntity.userName

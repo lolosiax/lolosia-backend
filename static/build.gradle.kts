@@ -1,5 +1,7 @@
 import com.fasterxml.jackson.databind.json.JsonMapper
 import kotlinx.coroutines.*
+import java.text.SimpleDateFormat
+import java.util.Date
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -77,6 +79,8 @@ suspend fun buildPlatform(name: String, dirPath: String) {
             directory(path.toFile())
             val env = environment()
             env["VITE_APP_BASE_MODE"] = "local"
+            env["VITE_BUILD_TIMESTAMP"] = SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(Date())
+            env["VITE_PROJECT_VERSION"] = rootProject.version.toString()
         }.start()
 
         CoroutineScope(Dispatchers.IO).launch {

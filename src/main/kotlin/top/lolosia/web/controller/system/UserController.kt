@@ -9,17 +9,18 @@ import top.lolosia.web.util.bundle.bundleScope
 import top.lolosia.web.util.bundle.invoke
 import top.lolosia.web.util.bundle.scope
 import top.lolosia.web.util.session.Context
-import kotlinx.coroutines.reactor.awaitSingle
+import top.lolosia.web.util.session.SessionMap
+import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.core.io.FileSystemResource
+import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.multipart.FilePart
-import org.springframework.http.codec.multipart.FormFieldPart
 import org.springframework.web.bind.annotation.*
-import org.springframework.web.server.ServerWebExchange
+import reactor.core.publisher.Flux
 
 @RestController
-@RequestMapping("/home/api/user")
+@RequestMapping("/api/user")
 class UserController {
 
     @Autowired
@@ -36,6 +37,11 @@ class UserController {
     @PostMapping("/myRole")
     fun myRole(context: Context): Bundle {
         return userService.myUserRole(context)
+    }
+
+    @PostMapping("/mySession")
+    fun mySession(context: Context): SessionMap? {
+        return userService.mySession(context)
     }
 
     data class ListParam(
@@ -127,7 +133,8 @@ class UserController {
             if (!sessionManager.contains(session)) {
                 throw ErrorResponseException(HttpStatus.UNAUTHORIZED, "身份认证失败，请重新登陆")
             }
-            params.id = sessionManager[session]("id")
+            val session1 = sessionManager[session]
+            params.id = session1.invoke("id")
         } else if (sessionManager.mySession(context) == null) {
             throw ErrorResponseException(HttpStatus.UNAUTHORIZED, "身份认证失败，请重新登陆")
         }
@@ -136,15 +143,25 @@ class UserController {
     }
 
     @GetMapping("/avatar")
-    fun getAvatar(context: Context, @RequestParam("id") id: String): FileSystemResource {
+    fun getAvatar(context: Context, @RequestParam("id") id: String): ResponseEntity<Flux<DataBuffer>> {
         return userService.avatar(context, id)
     }
 
+    @GetMapping("/avatar/get/{userId}")
+    fun getAvatarStatic(
+        context: Context,
+        @PathVariable("userId") userId: String
+    ): ResponseEntity<Flux<DataBuffer>> {
+        return userService.avatar(context, userId)
+    }
+
     @PutMapping("/avatar")
-    suspend fun setAvatar(context: Context, exchange: ServerWebExchange): Any {
-        val form = exchange.multipartData.awaitSingle()
-        val file = form["file"] as FilePart
-        val id = (form["id"] as FormFieldPart?)?.value() ?: throw IllegalArgumentException("用户ID不存在")
+    suspend fun setAvatar(
+        context: Context,
+        @RequestPart("file") filePart: Flux<FilePart>,
+        @RequestParam("id") id: String
+    ): ResponseEntity<ByteArray> {
+        val file = filePart.awaitSingle()
         return userService.avatar(context, id, file)
     }
 }

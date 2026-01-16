@@ -2,8 +2,8 @@ package top.lolosia.web.controller.system
 
 import top.lolosia.web.model.system.SysRoleEntity
 import top.lolosia.web.service.system.RoleService
-import top.lolosia.web.util.session.Context
 import top.lolosia.web.util.bundle.Bundle
+import top.lolosia.web.util.session.Context
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
-@RequestMapping("/home/api/role")
+@RequestMapping("/api/role")
 class RoleController {
 
     @Autowired
@@ -19,7 +19,7 @@ class RoleController {
 
     @PostMapping("/list")
     fun list(context: Context): MutableList<SysRoleEntity> {
-        return roleService.list()
+        return roleService.list(context)
     }
 
 

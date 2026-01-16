@@ -1,8 +1,8 @@
 package top.lolosia.web.event
 
 import top.lolosia.web.util.bundle.bundleOf
-import org.springframework.context.ApplicationEvent
+import top.lolosia.web.util.event.Event
 
-open class BaseEvent(source: Any) : ApplicationEvent(source) {
+open class BaseEvent(source: Any) : Event(source) {
     val attached = bundleOf()
 }

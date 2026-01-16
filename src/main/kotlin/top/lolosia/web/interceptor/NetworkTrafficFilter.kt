@@ -2,13 +2,11 @@ package top.lolosia.web.interceptor
 
 import kotlinx.coroutines.*
 import org.reactivestreams.Publisher
-import org.springframework.boot.web.reactive.filter.OrderedWebFilter
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator
 import org.springframework.http.server.reactive.ServerHttpResponse
 import org.springframework.http.server.reactive.ServerHttpResponseDecorator
-import org.springframework.stereotype.Component
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilterChain
 import reactor.core.publisher.Flux
@@ -17,8 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.seconds
 
-//@Component
-class NetworkTrafficFilter : OrderedWebFilter {
+abstract class NetworkTrafficFilter(order: Int) : AbstractWebFilter(order) {
 
     companion object {
         val inboundBytes: Long get() = mLastInboundBytes
@@ -59,10 +56,6 @@ class NetworkTrafficFilter : OrderedWebFilter {
                 }
             }
         }
-    }
-
-    override fun getOrder(): Int {
-        return -9
     }
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {

@@ -8,6 +8,7 @@ import io.ebean.Model
 import io.ebean.Transaction
 import io.ebean.bean.EntityBean
 import io.ebean.typequery.TQRootBean
+import jakarta.persistence.Table
 import java.util.*
 import kotlin.reflect.KProperty
 
@@ -70,11 +71,19 @@ inline fun <T, R> TQRootBean<T, R>.orderBy(block: () -> Unit) {
  * @return the number of beans/rows that were deleted.
  */
 fun <T, R> TQRootBean<T, R>.delete(tran: Transaction): Int {
-    return query().delete(tran)
+    usingTransaction(tran)
+    return delete()
+    // return query().delete(tran)
 }
 
-inline fun <R> ModelCompanion.transaction(block: (it: Transaction) -> R): R {
-    val transaction = database.createTransaction()
+@Suppress("DEPRECATION")
+@Deprecated(message = "database must use spring bean instead.",
+    replaceWith = ReplaceWith("ctx.database.transaction(block)", "ctx")
+)
+inline fun <R> ModelCompanion.transaction(block: (tran: Transaction) -> R): R = database.transaction(block)
+
+inline fun <R> Database.transaction(block: (tran: Transaction) -> R): R {
+    val transaction = this.createTransaction()
     var err: Throwable? = null
     try {
         return block(transaction)
@@ -159,4 +168,8 @@ fun Model.unmark(vararg prop: KProperty<*>) {
 fun Model.mark(bundle: Bundle) {
     val props = props - ((bundle.keys - listOf("createdAt", "updatedAt")) intersect props)
     unmark(*props.toTypedArray())
+}
+
+inline fun <reified T : Model> tableName(): String {
+    return T::class.java.getAnnotation(Table::class.java).name
 }

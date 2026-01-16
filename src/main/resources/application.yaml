@@ -1,17 +1,21 @@
 datasource:
   db:
-    username: ""
-    password: ""
+    username: "kotlin-spring"
+    password: "123456"
     driver: "org.mariadb.jdbc.Driver"
     url: "jdbc:mariadb://172.17.0.1:3306/lolosia?useUnicode=true&characterEncoding=utf8&serverTimezone=GMT%2B8"
 
 server:
   port: 58801
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,image/png,image/jpeg
+    min-response-size: 2048
 
 spring:
   devtools:
     restart:
-      enabled: true
+      enabled: false
   jackson:
     time-zone: GMT+8
   application:
@@ -19,9 +23,10 @@ spring:
 
 logging:
   charset:
-    console: GB18030
+    console: UTF-8
   pattern:
     console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:%-5p}) %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:%wEx}"
   level:
     root: INFO
-  # config: "classpath:logback-spring.xml"
+    org.springframework.ai.chat.model: OFF
+  config: "classpath:logback-spring.xml"

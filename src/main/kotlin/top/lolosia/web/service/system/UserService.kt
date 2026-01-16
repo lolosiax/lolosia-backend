@@ -5,7 +5,7 @@ import top.lolosia.web.interceptor.ErrorWebFilter
 import top.lolosia.web.manager.SessionManager
 import top.lolosia.web.model.system.SysUserEntity
 import top.lolosia.web.model.system.SysUserRolesEntity
-import top.lolosia.web.model.system.SystemModel
+import top.lolosia.web.model.system.ViewUserRoleEntity
 import top.lolosia.web.model.system.query.QSysRoleEntity
 import top.lolosia.web.model.system.query.QSysUserEntity
 import top.lolosia.web.model.system.query.QSysUserRolesEntity
@@ -13,17 +13,23 @@ import top.lolosia.web.model.system.query.QViewUserRoleEntity
 import top.lolosia.web.util.bundle.*
 import top.lolosia.web.util.ebean.*
 import top.lolosia.web.util.session.Context
+import top.lolosia.web.util.session.IWebExchangeContext
+import top.lolosia.web.util.session.SessionMap
 import top.lolosia.web.util.success
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.core.io.FileSystemResource
+import org.springframework.core.io.buffer.DataBuffer
+import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.core.io.buffer.DefaultDataBufferFactory
+import org.springframework.http.*
 import org.springframework.http.codec.multipart.FilePart
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
+import reactor.core.publisher.Flux
 import java.io.IOException
+import java.time.Duration
 import java.util.*
 import kotlin.io.path.Path
-import kotlin.io.path.absolutePathString
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 
@@ -50,27 +56,31 @@ class UserService {
         val arrList = bundleOf()
         if (!keys.isNullOrEmpty()) {
             // 查询User匹配信息
-            QSysUserEntity().run {
+            ctx.query<QSysUserEntity> {
                 or {
                     userName.contains(keys)
                     realName.contains(keys)
                     phone.contains(keys)
+                    email.contains(keys)
                 }
-                val idList = findList().map { it.id }.toSet()
+                select(id)
+                val idList = findSingleAttributeSet<UUID>()
                 if (idList.isNotEmpty()) arrList["userId"] = idList
             }
             // 查询角色匹配信息
-            QSysRoleEntity().run {
+            ctx.query<QSysRoleEntity> {
                 roleName.contains(keys)
-                val rs = findList().map { it.id }.toSet()
+                select(id)
+                val rs = findSingleAttributeSet<Int>()
                 if (rs.isNotEmpty()) arrList["roleId"] = rs
             }
         }
 
         val offset = (pageNo - 1) * pageSize
 
-        val (userRoles, count) = QViewUserRoleEntity().run {
-            roleId.ne(1)
+        // 从视图中查询所有用户。
+        val (userRoles, count) = ctx.query<QViewUserRoleEntity> {
+
             if (arrList.isNotEmpty()) {
                 if (arrList.size > 1) or()
                 arrList.forEach { (k, v) ->
@@ -83,21 +93,20 @@ class UserService {
             }
             orderBy {
                 roleId.asc()
-                userId.asc()
+                userName.asc()
             }
             setFirstRow(offset)
             setMaxRows(pageSize)
-            findPagedList().run {
-                list.map(mapper::toBundle) to totalCount
-            }
+
+        }.findPagedList().run {
+            list.map(mapper::toBundle) to totalCount
         }
 
         if (userRoles.isNotEmpty()) {
-            val users = QSysUserEntity().run {
+            val users = ctx.query<QSysUserEntity> {
                 id.isIn(userRoles.map { it.getAs<String>("userId")!!.toUuid() })
                 id.asMapKey()
-                findMap<UUID>().mapValues { (_, v) -> mapper.toBundle(v) }
-            }
+            }.findMap<UUID>().mapValues { (_, v) -> mapper.toBundle(v) }
             userRoles.forEach {
                 it.scope {
                     "realName" set ""
@@ -121,15 +130,14 @@ class UserService {
      * @param keys 关键字
      */
     fun userSearching(ctx: Context, keys: String?): List<SysUserEntity> {
-        QSysUserEntity().run {
+        return ctx.query<QSysUserEntity> {
             if (!keys.isNullOrEmpty()) or {
                 userName.contains(keys)
                 realName.contains(keys)
                 phone.contains(keys)
             }
             setMaxRows(10)
-            return findList()
-        }
+        }.findList()
     }
 
     /**
@@ -137,79 +145,95 @@ class UserService {
      * @param idList ID列表。根据经验，元素可能为 null。
      */
     fun get(ctx: Context, idList: List<String?>): List<Bundle> {
-        QSysUserEntity().run {
+        val list = ctx.query<QSysUserEntity> {
             id.isIn(idList.filterNotNull().map { it.toUuid() })
-            return mapper.toBundle(findList()).onEach {
-                it.remove("password")
-            }
+        }.findList()
+        return mapper.toBundle(list).onEach {
+            it.remove("password")
         }
     }
 
-    fun create(ctx: Context, data: Bundle): Any {
-        if ("userName" !in data) data["userName"] = data["phone"]
-        val phone: String = data("phone")!!
+    fun create(ctx: Context, data: Bundle): ViewUserRoleEntity = ctx {
+        val phone: String? = data("phone")
+        val email: String? = data("email")
+
+        if ((phone ?: email) == null) throw IllegalArgumentException("请输入手机号或邮箱")
+
         val roleId: Int = data("roleId")!!
+        // 如果没有输入用户名，用户名将被设置为以手机号或邮箱
+        if ("userName" !in data) data["userName"] = phone ?: email
+
+        // 如果存在密码，则对密码进行加密
+        data["password"]?.let {
+            data["password"] = encoder.encode(it.toString())
+        }
+
         val userName: String = data("userName")!!
 
         // 查询或创建用户
-        val exists = QSysUserEntity().run {
+        val exists = query<QSysUserEntity> {
             or {
-                this.phone.eq(phone)
+                phone?.let { this.phone.eq(it) }
+                email?.let { this.email.eq(it) }
                 this.userName.eq(userName)
             }
-            exists()
-        }
+        }.exists()
 
         if (exists) {
             throw IllegalStateException("同名用户已存在")
         }
-
-        SystemModel.transaction { tran ->
-            val userDetail = mapper.toModel<SysUserEntity>(data).apply {
-                id = UUID.randomUUID()
+        val userId = UUID.randomUUID()
+        transaction { tran ->
+            mapper.toModel<SysUserEntity>(data).apply {
+                applyDatabase(ctx)
+                id = userId
                 insert(tran)
             }
 
-            QSysUserRolesEntity().run {
-                userId.eq(userDetail.id)
-                findOne()
-            } ?: SysUserRolesEntity().apply {
-                this.userId = userDetail.id
-                this.roleId = roleId
-                this.createdBy = ctx.user.id
-                insert(tran)
-                return this
+            val hasRole = query<QSysUserRolesEntity> {
+                this.userId.eq(userId)
+            }.exists()
+
+            if (!hasRole) {
+                createModel<SysUserRolesEntity> {
+                    this.userId = userId
+                    this.roleId = roleId
+                    this.createdBy = ctx.userIdOrNull ?: userId
+                    insert(tran)
+                }
             }
-            return success()
         }
+
+        return@ctx query<QViewUserRoleEntity>().userId.eq(userId).findOne()!!
     }
 
-    fun getUserInfo(ctx: Context, id: String): Bundle {
+    fun getUserInfo(ctx: Context, id: String): Bundle = ctx {
         val id1 = id.toUuid()
-        val userInfo = QSysUserEntity().run {
+        val userInfo = query<QSysUserEntity> {
             this.id.eq(id1)
-            mapper.toBundle(findOne() ?: throw NoSuchElementException("找不到用户"))
-        }
+        }.findOne()?.let { mapper.toBundle(it) }
 
-        val roleId = QSysUserRolesEntity().run {
+        userInfo ?: throw NoSuchElementException("找不到用户")
+
+        val roleId = query<QSysUserRolesEntity> {
             userId.eq(id1)
-            findOne()
-        }
-        if (roleId != null) {
-            userInfo["roleId"] = roleId.roleId
-        } else {
-            SysUserRolesEntity().apply {
-                this.userId = id1
-                this.roleId = 7
-                this.createdBy = ctx.user.id
-            }
-            userInfo["roleId"] = 7
-        }
+        }.findOne()
+        // 神仙也不知道这一段代码究竟干了什么。
+        // if (roleId != null) {
+        userInfo["roleId"] = roleId?.roleId ?: 3
+        //} else {
+        //    SysUserRolesEntity().apply {
+        //        this.userId = id1
+        //        this.roleId = 7
+        //        this.createdBy = ctx.user.id
+        //    }
+        //    userInfo["roleId"] = 7
+        // }
         return userInfo
     }
 
     /** 修改用户 */
-    fun update(ctx: Context, data: Bundle): Any {
+    fun update(ctx: Context, data: Bundle): Any = ctx {
         // 加密或移除密码
         data["password"]?.let {
             val str = it.toString()
@@ -217,40 +241,41 @@ class UserService {
                 data["password"] = encoder.encode(str)
             } else data.remove("password")
         }
-        SystemModel.transaction { tran ->
+        transaction { tran ->
             // 更新用户信息
-            mapper.toModel<SysUserEntity>(data).update(tran)
+            val model = ctx.createModel<SysUserEntity>(data, true)
+            model.update(tran)
+
             // 更新角色信息
             data.getAs<Int>("roleId")?.let { roleId ->
                 val id: UUID = data["id"]!!.toString().toUuid()
-                val role = QSysUserRolesEntity().userId.eq(id).findOne()
+                val role = query<QSysUserRolesEntity>().userId.eq(id).findOne()
                 if (role != null && role.roleId != roleId) {
                     role.roleId = roleId
                     role.save(tran)
                 } else if (role == null) {
-                    SysUserRolesEntity().apply {
+                    createModel<SysUserRolesEntity> {
                         this.roleId = roleId
                         this.userId = id
-                        save(tran)
-                    }
+                    }.save(tran)
                 }
             }
         }
         return success()
     }
 
-    fun delete(ctx: Context, ids: List<String>): Any {
-        SystemModel.transaction { tran ->
-            QSysUserRolesEntity().apply {
+    fun delete(ctx: Context, ids: List<String>): Any = ctx {
+        transaction { tran ->
+            query<QSysUserRolesEntity> {
                 this.userId.isIn(ids.map { it.toUuid() })
-                delete(tran)
-            }
+            }.delete(tran)
         }
         return success()
     }
 
     fun updatePassword(ctx: Context, id: String, origin: String, target: String): Any {
-        val user = QSysUserEntity().id.eq(id.toUuid()).findOne() ?: throw NoSuchElementException("用户不存在")
+        val user = ctx.query<QSysUserEntity>().id.eq(id.toUuid()).findOne()
+        user ?: throw NoSuchElementException("用户不存在")
         if (!user.password.isNullOrEmpty() && !encoder.matches(origin, user.password)) {
             throw IllegalStateException("密码错误！")
         }
@@ -261,11 +286,10 @@ class UserService {
 
     fun myUserInfo(ctx: Context): Bundle {
         val obj = ctx.session
-        val user = QSysUserEntity().run {
+        val user = ctx.query<QSysUserEntity> {
             id.eq(ctx.user.id)
             deleted.ne(true)
-            findOne()!!
-        }
+        }.findOne()!!
         return bundleOf().also {
             it.putAll(obj)
             it.putAll(mapper.toBundle(user))
@@ -279,27 +303,60 @@ class UserService {
         })
     }
 
-    fun avatar(ctx: Context, id: String): FileSystemResource {
-        val avatar = QSysUserEntity().run {
-            this.id.eq(id.toUuid())
-            findOne()?.avatar
-        }
-        if (avatar != null && Path("work/image/avatar", avatar).exists()) {
-            return FileSystemResource(Path("work/image/avatar", avatar).absolutePathString())
-        }
-        throw object : IOException("文件 \"$avatar\" 不存在"), ErrorWebFilter.Ignore {
-            override fun fillInStackTrace(): Throwable {
-                return this
-            }
-        }
+    fun mySession(ctx: Context) : SessionMap?{
+        return session.mySession(ctx)
     }
 
-    suspend fun avatar(ctx: Context, id: String, file: FilePart): Any {
+    fun avatar(ctx: Context, id: String): ResponseEntity<Flux<DataBuffer>> {
+        ctx as IWebExchangeContext
+
+        val avatar = ctx.query<QSysUserEntity> {
+            this.id.eq(id.toUuid())
+        }.findOne()?.avatar
+        val path = Path("work/image/avatar", avatar.toString())
+        if (avatar == null || !path.exists()) {
+            throw object : IOException("文件 \"$avatar\" 不存在"), ErrorWebFilter.Ignore {
+                override fun fillInStackTrace(): Throwable {
+                    return this
+                }
+            }
+        }
+
+        // 文件更新检查
+        val lastModified = ctx.exchange.request.headers.ifModifiedSince;
+        val fileLastModified = path.toFile().lastModified()
+
+        if (lastModified == fileLastModified) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
+                .lastModified(fileLastModified)
+                .build()
+        }
+
+        // 返回文件
+        val fileFlux: Flux<DataBuffer> = DataBufferUtils.read(path, DefaultDataBufferFactory.sharedInstance, 8192)
+        val mime = MediaTypeFactory.getMediaType(avatar).orElse(MediaType.APPLICATION_OCTET_STREAM)
+        return ResponseEntity.ok()
+            .contentType(mime)
+            .contentLength(path.toFile().length())
+            .headers {
+                it.setCacheControl(CacheControl.maxAge(Duration.ofMinutes(1)))
+                it.lastModified = path.toFile().lastModified()
+            }
+            .body(fileFlux)
+    }
+
+    suspend fun avatar(ctx: Context, id: String, file: FilePart): ResponseEntity<ByteArray> {
         val ext = file.filename().split(".").last()
         val filename = "${id}.${ext}"
         val outFile = Path("work/image/avatar", filename).toFile()
         if (outFile.exists()) outFile.delete()
         file.transferTo(outFile).awaitSingleOrNull()
+        val user = ctx.query<QSysUserEntity> {
+            this.id.eq(id.toUuid())
+        }.findOne()!!
+        user.avatar = filename
+        // user.applyDatabase(ctx)
+        user.save()
         return success()
     }
 }

@@ -1,11 +1,11 @@
 package top.lolosia.web.model.system
 
 import io.ebean.annotation.DbComment
-import java.util.UUID
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
-import jakarta.persistence.Table
 import jakarta.persistence.Id
+import jakarta.persistence.Table
+import java.util.*
 
 @Entity
 @Table(name = "sys_user")
@@ -26,8 +26,10 @@ class SysUserEntity : SystemModel() {
     var password: String? = null
 
     @DbComment("手机号")
-    @Column(nullable = false)
-    var phone = ""
+    var phone: String? = null
+
+    @DbComment("邮箱")
+    var email: String? = null
 
     @DbComment("用户头像")
     var avatar: String? = null

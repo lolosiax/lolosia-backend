@@ -8,6 +8,8 @@ import top.lolosia.web.model.system.query.QViewUserRoleEntity
 import top.lolosia.web.util.bundle.Bundle
 import top.lolosia.web.util.bundle.bundleScope
 import top.lolosia.web.util.bundle.toBundle
+import top.lolosia.web.util.ebean.createModel
+import top.lolosia.web.util.ebean.query
 import top.lolosia.web.util.ebean.toModel
 import top.lolosia.web.util.ebean.toUuid
 import top.lolosia.web.util.session.Context
@@ -27,46 +29,39 @@ class UserRoleService {
     }
 
     fun getByUserId(ctx: Context, userId: String): Bundle {
-        return QViewUserRoleEntity().run {
+        val rs = ctx.query<QViewUserRoleEntity> {
             this.userId.eq(ctx.user.id)
-            val rs = findOne()
-            rs?.let { mapper.toBundle(it) } ?: bundleScope {
-                "roleId" set 0
-                "userId" set 0
-            }
+        }.findOne()
+        return rs?.let { mapper.toBundle(it) } ?: bundleScope {
+            "roleId" set 0
+            "userId" set 0
         }
     }
 
     /**
      * 根据用户ID获取关联的角色信息
      */
-    fun getRoleByUserId(ctx: Context, user: Bundle): Bundle {
+    fun getRoleByUserId(ctx: Context, user: Bundle): Bundle = ctx {
         val userId = user["userId"]?.toString()!!.toUuid()
-        val has = QSysUserRolesEntity().run {
-            this.userId.eq(userId)
-            exists()
-        }
-        // 找不到角色时自动创建学生角色
+        val has = query<QSysUserRolesEntity>().userId.eq(userId).exists()
+        // 找不到角色时自动创建用户角色
         if (!has) {
-            val student = QSysRoleEntity().run {
-                type.eq("student")
-                findOne() ?: throw NoSuchElementException("找不到学生角色")
-            }
-            SysUserRolesEntity().apply {
+            val roleUser = query<QSysRoleEntity> {
+                type.eq("user")
+            }.findOne() ?: throw NoSuchElementException("找不到用户角色")
+            createModel<SysUserRolesEntity> {
                 this.userId = userId
-                this.roleId = student.id
-                insert()
-            }
+                this.roleId = roleUser.id
+            }.insert()
         }
-        val db = QViewUserRoleEntity().run {
+        val rs = query<QViewUserRoleEntity> {
             this.userId.eq(userId)
-            val rs = findOne()
-            rs?.let { mapper.toBundle(it) } ?: bundleScope {
-                "roleId" set 0
-                "userId" set 0
-            }
+        }.findOne()
+        val out = rs?.let { mapper.toBundle(it) } ?: bundleScope {
+            "roleId" set 0
+            "userId" set 0
         }
-        db["roleType"] = db["type"]
-        return db
+        out["roleType"] = out["type"]
+        return out
     }
 }

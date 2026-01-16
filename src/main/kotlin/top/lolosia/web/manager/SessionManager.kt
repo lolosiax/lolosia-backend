@@ -1,14 +1,18 @@
 package top.lolosia.web.manager
 
 import com.fasterxml.jackson.databind.json.JsonMapper
+import top.lolosia.web.api.SystemApi
 import top.lolosia.web.model.session.SessionEntity
 import top.lolosia.web.model.session.query.QSessionEntity
 import top.lolosia.web.util.bundle.Bundle
 import top.lolosia.web.util.bundle.bundleScope
 import top.lolosia.web.util.bundle.readBundle
-import top.lolosia.web.util.ebean.toUuid
+import top.lolosia.web.util.ebean.*
+import top.lolosia.web.util.isClient
 import top.lolosia.web.util.session.Context
-import top.lolosia.web.util.session.WebExchangeContext
+import top.lolosia.web.util.session.IWebExchangeContext
+import top.lolosia.web.util.session.SessionMap
+import top.lolosia.web.util.spring.ApplicationContextProvider
 import kotlinx.coroutines.*
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.DisposableBean
@@ -24,26 +28,28 @@ import java.util.*
 class SessionManager : DisposableBean, CoroutineScope {
     override val coroutineContext get() = Dispatchers.Default
     private val logger = LoggerFactory.getLogger(SessionManager::class.java)
-    private val mSessions = mutableMapOf<UUID, Bundle>()
-    private val mDatabase by lazy { SessionEntity.database }
+
+    private val mSessions = mutableMapOf<UUID, SessionMapImpl>()
+
+    @Autowired
+    private lateinit var acp: ApplicationContextProvider
 
     @Autowired
     private lateinit var mapper: JsonMapper
 
     fun get() = get(UUID.randomUUID().toString())
     operator fun get(sessionId: String) = get(sessionId.toUuid())
-    operator fun get(sessionId: UUID): Bundle {
+    operator fun get(sessionId: UUID): SessionMap {
         var data = mSessions[sessionId] ?: findDatabase(sessionId)
         if (data.isNullOrEmpty()) {
             data = bundleScope {
-                "sessionId" set sessionId
-            }
+                "sessionId" set sessionId.toString()
+            }.toSession()
             mSessions[sessionId] = data
-            SessionEntity().apply {
+            acp.createModel<SessionEntity> {
                 this.id = sessionId
                 this.data = mapper.writeValueAsString(data)
-                this.save()
-            }
+            }.save()
         }
         data["session:lastAccess"] = Date().time
         return data
@@ -54,32 +60,32 @@ class SessionManager : DisposableBean, CoroutineScope {
         synchronized(mSessions) {
             mSessions.remove(sessionId)
         }
-        QSessionEntity().apply {
+        acp.query<QSessionEntity> {
             id.eq(sessionId)
-            delete()
-        }
+
+        }.delete()
     }
 
     val size get() = mSessions.size
 
     fun getUserSessions(userId: UUID) = getUserSessions(userId.toString())
-    fun getUserSessions(userId: String): Map<UUID, Bundle> {
+    fun getUserSessions(userId: String): Map<UUID, SessionMap> {
         synchronized(mSessions) {
             return mSessions.filterValues { it["userId"] == userId }
         }
     }
 
-    fun mySession(context: Context): Bundle? {
-        return if (context is WebExchangeContext) mySession(context.exchange)
+    fun mySession(context: Context): SessionMap? {
+        return if (context is IWebExchangeContext) mySession(context.exchange)
         else mySession(context.sessionId)
     }
 
-    fun mySession(exchange: ServerWebExchange): Bundle? = mySession(exchange.request)
+    fun mySession(exchange: ServerWebExchange): SessionMap? = mySession(exchange.request)
 
     /**
      * 获取本次请求的Session
      */
-    fun mySession(req: ServerHttpRequest): Bundle? {
+    fun mySession(req: ServerHttpRequest): SessionMap? {
         var auth = req.headers.getFirst(HttpHeaders.AUTHORIZATION) ?: return null
         if (auth.contains(' ')) auth = auth.split(' ', limit = 2)[1]
 
@@ -93,7 +99,7 @@ class SessionManager : DisposableBean, CoroutineScope {
     }
 
     private fun mySession(sessionId: String) = mySession(sessionId.toUuid())
-    private fun mySession(sessionId: UUID): Bundle? {
+    private fun mySession(sessionId: UUID): SessionMap? {
         return if (sessionId in this) return this[sessionId]
         else null
     }
@@ -109,14 +115,29 @@ class SessionManager : DisposableBean, CoroutineScope {
      * 若找到，返回它；若找不到或解析失败，返回null
      * @param sessionId SessionID
      */
-    private fun findDatabase(sessionId: UUID): Bundle? {
-        val entity = QSessionEntity().run {
+    private fun findDatabase(sessionId: UUID): SessionMapImpl? {
+
+        if (isClient) {
+            return runBlocking {
+                val bundle = withTimeout(5000) {
+                    SystemApi.mySession(sessionId)
+                }
+                val session = bundle.toSession()
+                synchronized(mSessions) {
+                    mSessions[sessionId] = session
+                }
+                session
+            }
+        }
+
+        // 非服务器模式，查询数据库
+
+        val entity = acp.query<QSessionEntity> {
             id.eq(sessionId)
             deleted.ne(true)
-            findOne()
-        } ?: return null
+        }.findOne() ?: return null
         return try {
-            val data = mapper.readBundle(entity.data)
+            val data = SessionMapImpl(mapper.readBundle(entity.data))
             synchronized(mSessions) {
                 mSessions[sessionId] = data
             }
@@ -131,12 +152,12 @@ class SessionManager : DisposableBean, CoroutineScope {
     fun save(sessionId: String) = save(sessionId.toUuid())
     fun save(sessionId: UUID) {
         val session = mSessions[sessionId] ?: return
-        val obj = QSessionEntity().run {
+        val obj = acp.query<QSessionEntity> {
             id.eq(sessionId)
-            findOne()
-        } ?: SessionEntity().apply {
+        }.findOne() ?: acp.createModel<SessionEntity> {
             id = sessionId
         }
+        obj.applyDatabase(acp)
         obj.data = mapper.writeValueAsString(session)
         obj.save()
     }
@@ -146,7 +167,7 @@ class SessionManager : DisposableBean, CoroutineScope {
         var saveCounts = 0
         val needRelease = mutableSetOf<UUID>()
         val now = Date().time
-        val entities = QSessionEntity().run {
+        val entities = acp.query<QSessionEntity>().run {
             synchronized(mSessions) {
                 id.isIn(mSessions.keys)
                 findMap<UUID>()
@@ -169,7 +190,7 @@ class SessionManager : DisposableBean, CoroutineScope {
                 if (now - lastAccess > 5 * 60_000) needRelease.add(key)
             }
         }
-        mDatabase.saveAll(entities.values)
+        acp.database.saveAll(entities.values)
         // 仅在有session需要保存时打印日志
         if (saveCounts > 0) {
             logger.info("Auto saving $saveCounts of sessions.")
@@ -187,6 +208,9 @@ class SessionManager : DisposableBean, CoroutineScope {
 
     @Scheduled(fixedDelay = 10000)
     private fun saveTimer() {
+        // 客户端不需要触发Session保存
+        if (isClient) return
+
         if (saveTimerJob != null) return
         saveTimerJob = launch(Dispatchers.IO) {
             try {
@@ -210,6 +234,39 @@ class SessionManager : DisposableBean, CoroutineScope {
             //saveAll()
         } catch (e: Throwable) {
             logger.error("保存Session信息时发生错误", e)
+        }
+    }
+
+    //
+    // Session 实体
+    //
+
+    private fun Bundle.toSession(): SessionMapImpl {
+        return SessionMapImpl(this)
+    }
+
+
+    inner class SessionMapImpl private constructor(
+        val map: MutableMap<String, Any?>, var2: Boolean
+    ) : SessionMap, Map<String, Any?> by map {
+        constructor() : this(mutableMapOf())
+        constructor(map: Map<String, Any?>) : this(map.toMutableMap(), true)
+
+        val id
+            get() = map["sessionId"]?.toString()?.toUuid()
+                ?: throw NoSuchElementException("No SessionId found!")
+
+        val userId
+            get() = map["userId"]?.toString()?.toUuid()
+                ?: throw NoSuchElementException("No UserId found!")
+
+        override operator fun set(key: String, value: Any?) {
+            map[key] = value
+        }
+
+        override fun remove(key: String): Any? {
+            val obj = map.remove(key)
+            return obj
         }
     }
 }

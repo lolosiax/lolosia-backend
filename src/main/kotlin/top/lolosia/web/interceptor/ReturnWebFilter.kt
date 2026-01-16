@@ -5,29 +5,22 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.TextNode
 import org.reactivestreams.Publisher
 import org.slf4j.LoggerFactory
-import org.springframework.boot.web.reactive.filter.OrderedWebFilter
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.io.buffer.DataBufferUtils
 import org.springframework.core.io.buffer.DefaultDataBufferFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.server.reactive.ServerHttpResponse
 import org.springframework.http.server.reactive.ServerHttpResponseDecorator
-import org.springframework.stereotype.Component
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilterChain
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 
-@Component
-class ReturnWebFilter : OrderedWebFilter {
+abstract class ReturnWebFilter(order: Int) : AbstractWebFilter(order) {
     companion object {
         private val logger = LoggerFactory.getLogger(ReturnWebFilter::class.java)
         private val mapper = ObjectMapper()
         private val bufferFactory = DefaultDataBufferFactory.sharedInstance
-    }
-
-    override fun getOrder(): Int {
-        return -2
     }
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
