@@ -1,14 +1,13 @@
-import com.fasterxml.jackson.databind.json.JsonMapper
 import org.hidetake.groovy.ssh.core.Remote
 import org.hidetake.groovy.ssh.core.RunHandler
 import org.hidetake.groovy.ssh.session.SessionHandler
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import tools.jackson.databind.json.JsonMapper
 
 plugins {
     id("io.ebean") version "15.0.2"
 
-    id("org.springframework.boot") version "3.5.7"
-    id("io.spring.dependency-management") version "1.1.7"
+    id("org.springframework.boot") version "4.0.3"
+    // id("io.spring.dependency-management") version "1.1.7"
 
     id("org.hidetake.ssh") version "2.11.2"
 
@@ -27,25 +26,27 @@ version = "1.0.0-SNAPSHOT"
 
 dependencies {
 
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
+    implementation("org.jetbrains.kotlin:kotlin-reflect:2.2.21")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.10.2")
 
-    implementation("org.springframework.boot:spring-boot-starter-webflux:3.5.6")
-    implementation("org.springframework.boot:spring-boot-starter-thymeleaf:3.5.6")
-    implementation("org.springframework.security:spring-security-crypto:6.2.4")
-    testImplementation("org.springframework.boot:spring-boot-starter-test:3.5.6")
-    developmentOnly("org.springframework.boot:spring-boot-starter-actuator:3.5.6")
-    //developmentOnly("org.springframework.boot:spring-boot-devtools:3.5.6")
+    implementation("org.springframework.boot:spring-boot-starter-webflux:4.0.3")
+    implementation("org.springframework.boot:spring-boot-starter-mail:4.0.3")
+    implementation("org.springframework.boot:spring-boot-starter-thymeleaf:4.0.3")
+    implementation("org.springframework.security:spring-security-crypto:7.0.3")
+    testImplementation("org.springframework.boot:spring-boot-starter-test:4.0.3")
+    developmentOnly("org.springframework.boot:spring-boot-starter-actuator:4.0.3")
+    //developmentOnly("org.springframework.boot:spring-boot-devtools:4.0.3")
 
     // implementation("org.springframework.ai:spring-ai-openai-spring-boot-starter:1.0.0-M6"){
     //     exclude("org.springframework.boot","spring-boot-starter")
     // }
-    implementation("org.springframework.ai:spring-ai-client-chat:1.1.0-M4")
-    implementation("org.springframework.ai:spring-ai-openai:1.1.0-M4")
-    implementation("org.springframework.ai:spring-ai-starter-mcp-client-webflux:1.1.0-M4")
-    implementation("org.springframework.ai:spring-ai-milvus-store:1.1.0-M4")
+    implementation("org.springframework.ai:spring-ai-client-chat:2.0.0-M2")
+    implementation("org.springframework.ai:spring-ai-openai:2.0.0-M2")
+    implementation("org.springframework.ai:spring-ai-anthropic:2.0.0-M2")
+    implementation("org.springframework.ai:spring-ai-starter-mcp-client-webflux:2.0.0-M2")
+    implementation("org.springframework.ai:spring-ai-milvus-store:2.0.0-M2")
     // implementation("org.springframework.ai:spring-ai-pdf-document-reader:1.1.0-M4")
-    // implementation("org.springframework.ai:spring-ai-tika-document-reader:1.1.0-M4")
+    // implementation("org.springframework.ai:spring-ai-tika-document-reader:2.0.0-M2")
 
     implementation("org.apache.httpcomponents.client5:httpclient5:5.5.1")
     implementation("io.micrometer:micrometer-observation:1.14.6")
@@ -71,6 +72,7 @@ dependencies {
 
     implementation("co.elastic.clients:elasticsearch-java:8.18.2")
 
+    implementation("cn.hutool:hutool-captcha:5.8.28")
     implementation("org.apache.commons:commons-collections4:4.4")
     implementation("org.jmdns:jmdns:3.5.12")
 

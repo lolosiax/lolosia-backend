@@ -5,6 +5,7 @@ import org.springframework.http.CacheControl
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
+import kotlin.compareTo
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
 
@@ -19,7 +20,7 @@ private typealias Builder<T> = suspend ResponseEntity.BodyBuilder.() -> Response
  * @param data 响应体数据
  * @param block 响应体创建回调
  */
-suspend fun <T> IWebExchangeContext.createFileResponse(
+suspend fun <T: Any> IWebExchangeContext.createFileResponse(
     lastModified: Long,
     cacheControl: CacheControl? = null,
     contentType: MediaType = MediaType.APPLICATION_OCTET_STREAM,
@@ -47,7 +48,7 @@ suspend fun <T> IWebExchangeContext.createFileResponse(
  * @param data 响应体数据
  * @param block 响应体创建回调
  */
-suspend fun <T> IWebExchangeContext.createFileResponse(
+suspend fun <T: Any> IWebExchangeContext.createFileResponse(
     lastModified: Long,
     maxAge: Duration,
     contentType: MediaType = MediaType.APPLICATION_OCTET_STREAM,
@@ -72,7 +73,7 @@ suspend fun <T> IWebExchangeContext.createFileResponse(
  * @param data 响应体数据
  * @param block 响应体创建回调
  */
-suspend fun <T> IWebExchangeContext.createStaticFileResponse(
+suspend fun <T: Any> IWebExchangeContext.createStaticFileResponse(
     contentType: MediaType = MediaType.APPLICATION_OCTET_STREAM,
     contentLength: Long? = null,
     maxAge: Duration? = null,

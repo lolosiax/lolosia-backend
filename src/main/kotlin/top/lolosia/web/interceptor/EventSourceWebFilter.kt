@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.suspendCoroutine
 import kotlin.time.Duration.Companion.seconds
+import kotlin.toString
 
 abstract class EventSourceWebFilter(order: Int) : AbstractWebFilter(order) {
 
@@ -66,7 +67,7 @@ abstract class EventSourceWebFilter(order: Int) : AbstractWebFilter(order) {
             }.then()
         } else if ("eventSourceId" in req.queryParams) {
             val id = req.queryParams.getFirst("eventSourceId")!!.toUuid()
-            return if ("last-event-id" in req.headers) {
+            return if (req.headers.containsHeader("last-event-id")) {
                 val resp = Response(exchange.response, id)
                 resp.writerStatus.asMono(Dispatchers.Default).then()
             } else {
@@ -91,7 +92,7 @@ abstract class EventSourceWebFilter(order: Int) : AbstractWebFilter(order) {
         private val data: ByteArray,
         id: UUID,
     ) : ServerHttpRequestDecorator(delegate) {
-        private val mHeaders = HttpHeaders.writableHttpHeaders(delegate.headers)
+        private val mHeaders = HttpHeaders(delegate.headers)
 
         init {
             mHeaders["event-source-id"] = id.toString()

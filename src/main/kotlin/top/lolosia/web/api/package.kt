@@ -156,7 +156,7 @@ suspend fun <T> post(
 
 @OptIn(FlowPreview::class)
 @Suppress("UNCHECKED_CAST")
-private suspend fun <T> handleResponse(
+private suspend fun <T : Any> handleResponse(
     spec: WebClient.RequestHeadersSpec<*>,
     baseUrl: String,
     url: String,
@@ -192,7 +192,7 @@ private suspend fun <T> handleResponse(
                     }
                 } else {
                     val type1 = ParameterizedTypeReference.forType<T>(type.javaType)
-                    val rs = resp.bodyToMono<T>(type1).awaitSingleOrNull()
+                    val rs = resp.bodyToMono(type1).awaitSingleOrNull()
                     send(rs)
                 }
 
@@ -304,10 +304,10 @@ suspend fun <T : Any> get(
         .get()
         .uri { builder ->
             builder.path(url)
-
             query?.forEach { (k, v) ->
-                if (v is Iterable<*>) builder.queryParam(k, v.toList())
-                else builder.queryParam(k, v)
+                @Suppress("UNCHECKED_CAST")
+                if (v is Iterable<*>) builder.queryParam(k, *(v.toList() as List<Any>).toTypedArray())
+                else builder.queryParam(k, v as Any)
             }
 
             builder.build()
@@ -480,8 +480,8 @@ suspend fun sse(
 data class ApiResponseEntity<T>(
     var data: T? = null,
     var code: Int = 200,
-    @JsonProperty("msg")
-    @JsonAlias("detail")
+    @field:JsonProperty("msg")
+    @field:JsonAlias("detail", "desc")
     var msg: String = ""
 )
 
@@ -503,13 +503,15 @@ private suspend fun ClientResponse.json() = json<Any?>(Any::class.createType(nul
 private suspend fun <T> ClientResponse.json(type: KType): ApiResponseEntity<T> {
     val mono = bodyToMono(type.responseType().parameterizedTypeReference<ApiResponseEntity<T>>())
     val out = mono.awaitSingle()
-    if (out.code != 200) {
-        throw ErrorResponseException(HttpStatus.BAD_GATEWAY, out.msg)
+    if (out.code !in arrayOf(0, 200)) {
+        val e = ErrorResponseException(HttpStatus.BAD_GATEWAY, "${out.msg}, 错误代码: ${out.code}")
+        e.body.setProperty("response-entity", out)
+        throw e
     }
     return out
 }
 
-private suspend fun <T> ClientResponse.rawJson(type: KType): T {
+private suspend fun <T : Any> ClientResponse.rawJson(type: KType): T {
     return bodyToMono(type.parameterizedTypeReference<T>()).awaitSingle()
 }
 

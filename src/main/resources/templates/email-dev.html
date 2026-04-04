@@ -1,0 +1,21 @@
+<!--/*@thymesVar id="files" type="java.util.List<java.lang.String>"*/-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Email - 测试页面</title>
+    <style>
+        .main{
+            max-width: 1024px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+<div class="main">
+    <div th:each="file : ${files}">
+        <a th:href="${file}" th:text="${file}"></a>
+    </div>
+</div>
+</body>
+</html>

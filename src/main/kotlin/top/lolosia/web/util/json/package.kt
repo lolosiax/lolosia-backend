@@ -17,6 +17,6 @@ fun <T> KType.typeReference(): TypeReference<T> {
     }
 }
 
-fun <T> KType.parameterizedTypeReference() : ParameterizedTypeReference<T>{
+fun <T: Any> KType.parameterizedTypeReference() : ParameterizedTypeReference<T>{
     return ParameterizedTypeReference.forType(this.javaType)
 }

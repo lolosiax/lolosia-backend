@@ -14,6 +14,7 @@ import top.lolosia.web.util.session.IWebExchangeContext
 import top.lolosia.web.util.session.SessionMap
 import top.lolosia.web.util.spring.ApplicationContextProvider
 import kotlinx.coroutines.*
+import kotlinx.coroutines.plus
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.DisposableBean
 import org.springframework.beans.factory.annotation.Autowired

@@ -100,7 +100,7 @@ class HomeService {
             val p = Path(path)
             if (!p.exists() || p.isDirectory()) return null
             // 判断文件是否被缓存且时间戳一致
-            if (fileCaches.containsKey(path) && fileCaches[path]?.second == p.toFile().lastModified()){
+            if (fileCaches.containsKey(path) && fileCaches[path]?.second == p.toFile().lastModified()) {
                 return fileCaches[path]
             }
 
