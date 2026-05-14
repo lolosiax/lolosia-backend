@@ -1,6 +1,7 @@
 package moe.lolosia.web.service.system
 
 import com.fasterxml.jackson.databind.json.JsonMapper
+import kotlinx.coroutines.Dispatchers
 import moe.lolosia.web.interceptor.ErrorWebFilter
 import moe.lolosia.web.manager.SessionManager
 import moe.lolosia.web.model.system.SysUserEntity
@@ -17,6 +18,7 @@ import moe.lolosia.web.util.session.IWebExchangeContext
 import moe.lolosia.web.util.session.SessionMap
 import moe.lolosia.web.util.success
 import kotlinx.coroutines.reactor.awaitSingleOrNull
+import kotlinx.coroutines.withContext
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.io.buffer.DataBufferUtils
@@ -52,7 +54,7 @@ class UserService {
     lateinit var userRoleService: UserRoleService
 
     @Suppress("UNCHECKED_CAST")
-    fun list(ctx: Context, pageNo: Int = 1, pageSize: Int = 10, keys: String? = null): Pair<List<Bundle>, Int> {
+    suspend fun list(ctx: Context, pageNo: Int = 1, pageSize: Int = 10, keys: String? = null): Pair<List<Bundle>, Int> {
         val arrList = bundleOf()
         if (!keys.isNullOrEmpty()) {
             // 查询User匹配信息
@@ -64,14 +66,14 @@ class UserService {
                     email.contains(keys)
                 }
                 select(id)
-                val idList = findSingleAttributeSet<UUID>()
+                val idList = toAsync().findSingleAttributeSet<UUID>()
                 if (idList.isNotEmpty()) arrList["userId"] = idList
             }
             // 查询角色匹配信息
             ctx.query<QSysRoleEntity> {
                 roleName.contains(keys)
                 select(id)
-                val rs = findSingleAttributeSet<Int>()
+                val rs = toAsync().findSingleAttributeSet<Int>()
                 if (rs.isNotEmpty()) arrList["roleId"] = rs
             }
         }
@@ -98,7 +100,7 @@ class UserService {
             setFirstRow(offset)
             setMaxRows(pageSize)
 
-        }.findPagedList().run {
+        }.toAsync().findPagedList().run {
             list.map(mapper::toBundle) to totalCount
         }
 
@@ -106,7 +108,7 @@ class UserService {
             val users = ctx.query<QSysUserEntity> {
                 id.isIn(userRoles.map { it.getAs<String>("userId")!!.toUuid() })
                 id.asMapKey()
-            }.findMap<UUID>().mapValues { (_, v) -> mapper.toBundle(v) }
+            }.toAsync().findMap<UUID>().mapValues { (_, v) -> mapper.toBundle(v) }
             userRoles.forEach {
                 it.scope {
                     "realName" set ""
@@ -129,7 +131,7 @@ class UserService {
      * 按照文本搜索用户，默认只显示10行
      * @param keys 关键字
      */
-    fun userSearching(ctx: Context, keys: String?): List<SysUserEntity> {
+    suspend fun userSearching(ctx: Context, keys: String?): List<SysUserEntity> {
         return ctx.query<QSysUserEntity> {
             if (!keys.isNullOrEmpty()) or {
                 userName.contains(keys)
@@ -137,23 +139,23 @@ class UserService {
                 phone.contains(keys)
             }
             setMaxRows(10)
-        }.findList()
+        }.toAsync().findList()
     }
 
     /**
      * 查找用户
      * @param idList ID列表。根据经验，元素可能为 null。
      */
-    fun get(ctx: Context, idList: List<String?>): List<Bundle> {
+    suspend fun get(ctx: Context, idList: List<String?>): List<Bundle> {
         val list = ctx.query<QSysUserEntity> {
             id.isIn(idList.filterNotNull().map { it.toUuid() })
-        }.findList()
+        }.toAsync().findList()
         return mapper.toBundle(list).onEach {
             it.remove("password")
         }
     }
 
-    fun create(ctx: Context, data: Bundle): ViewUserRoleEntity = ctx {
+    suspend fun create(ctx: Context, data: Bundle): ViewUserRoleEntity = ctx {
         val phone: String? = data("phone")
         val email: String? = data("email")
 
@@ -177,7 +179,7 @@ class UserService {
                 email?.let { this.email.eq(it) }
                 this.userName.eq(userName)
             }
-        }.exists()
+        }.toAsync().exists()
 
         if (exists) {
             throw IllegalStateException("同名用户已存在")
@@ -187,19 +189,23 @@ class UserService {
             mapper.toModel<SysUserEntity>(data).apply {
                 applyDatabase(ctx)
                 id = userId
-                insert(tran)
+                withContext(Dispatchers.IO){
+                    insert(tran)
+                }
             }
 
             val hasRole = query<QSysUserRolesEntity> {
                 this.userId.eq(userId)
-            }.exists()
+            }.toAsync().exists()
 
             if (!hasRole) {
                 createModel<SysUserRolesEntity> {
                     this.userId = userId
                     this.roleId = roleId
                     this.createdBy = ctx.userIdOrNull ?: userId
-                    insert(tran)
+                    withContext(Dispatchers.IO){
+                        insert(tran)
+                    }
                 }
             }
         }
@@ -207,17 +213,17 @@ class UserService {
         return@ctx query<QViewUserRoleEntity>().userId.eq(userId).findOne()!!
     }
 
-    fun getUserInfo(ctx: Context, id: String): Bundle = ctx {
+    suspend fun getUserInfo(ctx: Context, id: String): Bundle = ctx {
         val id1 = id.toUuid()
         val userInfo = query<QSysUserEntity> {
             this.id.eq(id1)
-        }.findOne()?.let { mapper.toBundle(it) }
+        }.toAsync().findOne()?.let { mapper.toBundle(it) }
 
         userInfo ?: throw NoSuchElementException("找不到用户")
 
         val roleId = query<QSysUserRolesEntity> {
             userId.eq(id1)
-        }.findOne()
+        }.toAsync().findOne()
         // 神仙也不知道这一段代码究竟干了什么。
         // if (roleId != null) {
         userInfo["roleId"] = roleId?.roleId ?: 3
@@ -233,7 +239,7 @@ class UserService {
     }
 
     /** 修改用户 */
-    fun update(ctx: Context, data: Bundle): Any = ctx {
+    suspend fun update(ctx: Context, data: Bundle): Any = ctx {
         // 加密或移除密码
         data["password"]?.let {
             val str = it.toString()
@@ -244,52 +250,58 @@ class UserService {
         transaction { tran ->
             // 更新用户信息
             val model = ctx.createModel<SysUserEntity>(data, true)
-            model.update(tran)
+            withContext(Dispatchers.IO){
+                model.update(tran)
+            }
 
             // 更新角色信息
             data.getAs<Int>("roleId")?.let { roleId ->
                 val id: UUID = data["id"]!!.toString().toUuid()
-                val role = query<QSysUserRolesEntity>().userId.eq(id).findOne()
-                if (role != null && role.roleId != roleId) {
-                    role.roleId = roleId
-                    role.save(tran)
-                } else if (role == null) {
-                    createModel<SysUserRolesEntity> {
-                        this.roleId = roleId
-                        this.userId = id
-                    }.save(tran)
+                val role = query<QSysUserRolesEntity>().userId.eq(id).toAsync().findOne()
+                withContext(Dispatchers.IO){
+                    if (role != null && role.roleId != roleId) {
+                        role.roleId = roleId
+                        role.save(tran)
+                    } else if (role == null) {
+                        createModel<SysUserRolesEntity> {
+                            this.roleId = roleId
+                            this.userId = id
+                        }.save(tran)
+                    }
                 }
             }
         }
         return success()
     }
 
-    fun delete(ctx: Context, ids: List<String>): Any = ctx {
+    suspend fun delete(ctx: Context, ids: List<String>): Any = ctx {
         transaction { tran ->
             query<QSysUserRolesEntity> {
                 this.userId.isIn(ids.map { it.toUuid() })
-            }.delete(tran)
+            }.toAsync().delete(tran)
         }
         return success()
     }
 
-    fun updatePassword(ctx: Context, id: String, origin: String, target: String): Any {
-        val user = ctx.query<QSysUserEntity>().id.eq(id.toUuid()).findOne()
+    suspend fun updatePassword(ctx: Context, id: String, origin: String, target: String): Any {
+        val user = ctx.query<QSysUserEntity>().id.eq(id.toUuid()).toAsync().findOne()
         user ?: throw NoSuchElementException("用户不存在")
         if (!user.password.isNullOrEmpty() && !encoder.matches(origin, user.password)) {
             throw IllegalStateException("密码错误！")
         }
-        user.password = target
-        user.update()
+        withContext(Dispatchers.IO){
+            user.password = encoder.encode(target)
+            user.update()
+        }
         return success()
     }
 
-    fun myUserInfo(ctx: Context): Bundle {
+    suspend fun myUserInfo(ctx: Context): Bundle {
         val obj = ctx.session
         val user = ctx.query<QSysUserEntity> {
             id.eq(ctx.user.id)
             deleted.ne(true)
-        }.findOne()!!
+        }.toAsync().findOne()!!
         return bundleOf().also {
             it.putAll(obj)
             it.putAll(mapper.toBundle(user))
@@ -297,22 +309,24 @@ class UserService {
         }
     }
 
-    fun myUserRole(ctx: Context): Bundle {
+    suspend fun myUserRole(ctx: Context): Bundle {
         return userRoleService.getRoleByUserId(ctx, bundleScope {
             "userId" set ctx.userId
         })
     }
 
-    fun mySession(ctx: Context) : SessionMap?{
-        return session.mySession(ctx)
+    suspend fun mySession(ctx: Context) : SessionMap?{
+        return withContext(Dispatchers.IO){
+            session.mySession(ctx)
+        }
     }
 
-    fun avatar(ctx: Context, id: String): ResponseEntity<Flux<DataBuffer>> {
+    suspend fun avatar(ctx: Context, id: String): ResponseEntity<Flux<DataBuffer>> {
         ctx as IWebExchangeContext
 
         val avatar = ctx.query<QSysUserEntity> {
             this.id.eq(id.toUuid())
-        }.findOne()?.avatar
+        }.toAsync().findOne()?.avatar
         val path = Path("work/image/avatar", avatar.toString())
         if (avatar == null || !path.exists()) {
             throw object : IOException("文件 \"$avatar\" 不存在"), ErrorWebFilter.Ignore {
@@ -353,7 +367,7 @@ class UserService {
         file.transferTo(outFile).awaitSingleOrNull()
         val user = ctx.query<QSysUserEntity> {
             this.id.eq(id.toUuid())
-        }.findOne()!!
+        }.toAsync().findOne()!!
         user.avatar = filename
         // user.applyDatabase(ctx)
         user.save()

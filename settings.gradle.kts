@@ -1,14 +1,13 @@
 rootProject.name = "lolosia-backend"
-include(":static")
 include(":orm")
 
 pluginManagement {
     repositories {
+        gradlePluginPortal()
         maven("https://maven.aliyun.com/repository/public/")
         maven("https://maven.aliyun.com/repository/gradle-plugin")
         maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
         google()
-        gradlePluginPortal()
     }
 
     plugins {

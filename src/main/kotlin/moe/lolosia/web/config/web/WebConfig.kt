@@ -1,8 +1,14 @@
 package moe.lolosia.web.config.web
 
+import com.alibaba.cloud.ai.dashscope.api.DashScopeApi
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import moe.lolosia.web.LolosiaApplication.Companion.applicationContext
+import moe.lolosia.web.config.IOpenAiConfig
+import moe.lolosia.web.config.OpenAiType
 import moe.lolosia.web.config.ParentConfig
 import moe.lolosia.web.config.SConfig
 import moe.lolosia.web.util.property.PropertyCallback
@@ -11,6 +17,9 @@ import moe.lolosia.web.util.spring.ApplicationContextProvider
 import moe.lolosia.web.util.spring.ContextArgumentResolver
 import moe.lolosia.web.util.spring.THYMELEAF_APP
 import org.slf4j.LoggerFactory
+import org.springframework.ai.anthropic.AnthropicChatModel
+import org.springframework.ai.anthropic.AnthropicChatOptions
+import org.springframework.ai.anthropic.api.AnthropicApi
 import org.springframework.ai.chat.client.ChatClient
 import org.springframework.ai.openai.OpenAiChatModel
 import org.springframework.ai.openai.OpenAiChatOptions
@@ -26,7 +35,6 @@ import org.springframework.web.reactive.config.EnableWebFlux
 import org.springframework.web.reactive.config.WebFluxConfigurer
 import org.springframework.web.reactive.result.method.annotation.ArgumentResolverConfigurer
 import org.thymeleaf.spring6.web.webflux.SpringWebFluxWebApplication
-import moe.lolosia.web.LolosiaApplication
 import javax.jmdns.JmDNS
 import javax.jmdns.ServiceInfo
 import javax.jmdns.impl.JmDNSImpl
@@ -65,7 +73,7 @@ class WebConfig : WebFluxConfigurer {
 
     @Bean
     fun getApplicationContextProvider(): ApplicationContextProvider {
-        return ApplicationContextProvider { LolosiaApplication.applicationContext }
+        return ApplicationContextProvider { applicationContext }
     }
 
     private lateinit var jmDnsHook: PropertyCallback<ParentConfig.HostType>
@@ -75,7 +83,7 @@ class WebConfig : WebFluxConfigurer {
         // JmDNS创建可能会失败
         try {
             val jmDns = JmDNS.create()
-            val serviceName = "kotlin-spring-dns-service"
+            val serviceName = "lolosia-home-dns-service"
             val parent = SConfig.host.serviceParent
 
             jmDnsHook = parent::mode.asProperty().addListener {
@@ -114,23 +122,99 @@ class WebConfig : WebFluxConfigurer {
 
     @Bean
     fun chatClient(): ChatClient {
-        val api = OpenAiApi.builder()
-            .baseUrl(SConfig.openApi.baseUrl)
-            .apiKey(SConfig.openApi.apiKey)
-            .build()
+        return createChatClient(SConfig.openApi)
+    }
 
-        val options = OpenAiChatOptions.builder()
-            .model(SConfig.openApi.model)
-            .temperature(0.7)
-            .build()
+    class ChatClients(private val clients: MutableMap<String, ChatClient>) : Map<String, ChatClient> by clients
 
-        val model = OpenAiChatModel.builder()
-            .openAiApi(api)
-            .defaultOptions(options)
-            .build()
+    @Bean
+    fun chatClients(): ChatClients {
+        val map = mutableMapOf<String, ChatClient>()
+
+        val configClients = SConfig.openApi.clients
+
+        configClients.keys.forEach { key ->
+            if (key == "default") {
+                map["default"] = chatClient()
+                return@forEach
+            }
+
+            val config = configClients[key]
+            try {
+                map[key] = createChatClient(config)
+            } catch (e: Throwable) {
+                logger.error("创建ChatClient时发生异常", e)
+            }
+        }
+
+        return ChatClients(map)
+    }
+
+    private fun createChatClient(config: IOpenAiConfig): ChatClient {
+        val model = when (config.type) {
+            OpenAiType.OPENAI -> {
+                val api = OpenAiApi.builder()
+                    .baseUrl(config.baseUrl)
+                    .completionsPath(config.completionsPath)
+                    .apiKey(config.apiKey)
+                    .build()
+
+                val options = OpenAiChatOptions.builder()
+                    .model(config.model)
+                    .temperature(0.7)
+                    .build()
+
+                OpenAiChatModel.builder()
+                    .openAiApi(api)
+                    .defaultOptions(options)
+                    .build()
+
+            }
+
+            OpenAiType.ANTHROPIC -> {
+                val api = AnthropicApi.builder()
+                    .baseUrl(config.baseUrl)
+                    .completionsPath(config.completionsPath)
+                    .apiKey(config.apiKey)
+                    .build()
+
+                val options = AnthropicChatOptions.builder()
+                    .model(config.model)
+                    .temperature(0.7)
+                    .maxTokens(4096)
+                    .build()
+
+                AnthropicChatModel.builder()
+                    .anthropicApi(api)
+                    .defaultOptions(options)
+                    .build()
+            }
+
+            OpenAiType.DASH_SCOPE -> {
+                val api = DashScopeApi.builder()
+                    .baseUrl(config.baseUrl)
+                    .completionsPath(config.completionsPath)
+                    .apiKey(config.apiKey)
+                    .build()
+
+                val options = DashScopeChatOptions.builder()
+                    .model(config.model)
+                    .temperature(0.7)
+                    .enableThinking(!config.noThink)
+                    .multiModel(true)
+                    .build()
+
+                DashScopeChatModel.builder()
+                    .dashScopeApi(api)
+                    .defaultOptions(options)
+                    .build()
+            }
+
+            else -> throw UnsupportedOperationException("OpenAiType ${config.type} is not supported")
+        }
 
         val builder = ChatClient.builder(model)
-        return builder.defaultSystem("你是一个智能机器人,你的名字叫 Spring AI智能机器人")
-            .build();
+        return builder.defaultSystem("A user has raised a question. Please answer him.")
+            .build()
     }
 }

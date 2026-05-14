@@ -5,6 +5,8 @@ import cn.hutool.captcha.generator.MathGenerator
 import cn.hutool.core.math.Calculator
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import moe.lolosia.web.event.system.UserLoginEvent
 import moe.lolosia.web.event.system.UserLogoutEvent
 import moe.lolosia.web.manager.CacheManager
@@ -25,6 +27,7 @@ import org.springframework.stereotype.Service
 import org.thymeleaf.spring6.SpringWebFluxTemplateEngine
 import moe.lolosia.web.model.system.ViewUserRoleEntity
 import moe.lolosia.web.util.ebean.applyDatabase
+import moe.lolosia.web.util.ebean.toAsync
 import moe.lolosia.web.util.session.IWebExchangeContext
 import moe.lolosia.web.util.spring.ThymeleafContext
 import java.awt.Color
@@ -64,7 +67,7 @@ class LoginService {
                 this.phone.eq(userName)
             }
             deleted.ne(true)
-        }.findOne() ?: throw NoSuchElementException("用户不存在！")
+        }.toAsync().findOne() ?: throw NoSuchElementException("用户不存在！")
         var firstLogin = false
         if (user.password.isNullOrEmpty() && password.isNullOrEmpty()) {
             firstLogin = true

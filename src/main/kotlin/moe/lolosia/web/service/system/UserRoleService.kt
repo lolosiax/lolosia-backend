@@ -1,6 +1,8 @@
 package moe.lolosia.web.service.system
 
 import com.fasterxml.jackson.databind.json.JsonMapper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import moe.lolosia.web.model.system.SysUserRolesEntity
 import moe.lolosia.web.model.system.query.QSysRoleEntity
 import moe.lolosia.web.model.system.query.QSysUserRolesEntity
@@ -16,6 +18,7 @@ import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.success
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
+import moe.lolosia.web.util.ebean.toAsync
 
 @Service
 class UserRoleService {
@@ -23,15 +26,17 @@ class UserRoleService {
     @Autowired
     lateinit var mapper: JsonMapper
 
-    fun create(context: Context, userRole: Bundle): Any {
-        mapper.toModel<SysUserRolesEntity>(userRole).insert()
+    suspend fun create(context: Context, userRole: Bundle): Any {
+        withContext(Dispatchers.IO) {
+            mapper.toModel<SysUserRolesEntity>(userRole).insert()
+        }
         return success()
     }
 
-    fun getByUserId(ctx: Context, userId: String): Bundle {
+    suspend fun getByUserId(ctx: Context, userId: String): Bundle {
         val rs = ctx.query<QViewUserRoleEntity> {
             this.userId.eq(ctx.user.id)
-        }.findOne()
+        }.toAsync().findOne()
         return rs?.let { mapper.toBundle(it) } ?: bundleScope {
             "roleId" set 0
             "userId" set 0
@@ -41,22 +46,24 @@ class UserRoleService {
     /**
      * 根据用户ID获取关联的角色信息
      */
-    fun getRoleByUserId(ctx: Context, user: Bundle): Bundle = ctx {
+    suspend fun getRoleByUserId(ctx: Context, user: Bundle): Bundle = ctx {
         val userId = user["userId"]?.toString()!!.toUuid()
-        val has = query<QSysUserRolesEntity>().userId.eq(userId).exists()
-        // 找不到角色时自动创建用户角色
+        val has = query<QSysUserRolesEntity>().userId.eq(userId).toAsync().exists()
+        // 找不到角色时自动创建学生角色
         if (!has) {
             val roleUser = query<QSysRoleEntity> {
-                type.eq("user")
-            }.findOne() ?: throw NoSuchElementException("找不到用户角色")
-            createModel<SysUserRolesEntity> {
-                this.userId = userId
-                this.roleId = roleUser.id
-            }.insert()
+                type.eq("student")
+            }.toAsync().findOne() ?: throw NoSuchElementException("找不到用户角色")
+            withContext(Dispatchers.IO){
+                createModel<SysUserRolesEntity> {
+                    this.userId = userId
+                    this.roleId = roleUser.id
+                }.insert()
+            }
         }
         val rs = query<QViewUserRoleEntity> {
             this.userId.eq(userId)
-        }.findOne()
+        }.toAsync().findOne()
         val out = rs?.let { mapper.toBundle(it) } ?: bundleScope {
             "roleId" set 0
             "userId" set 0

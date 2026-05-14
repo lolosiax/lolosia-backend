@@ -19,12 +19,12 @@ class UserRoleController {
     data class GetByUserIdParam(val userId: String)
 
     @PostMapping("/getByUserId")
-    fun getByUserId(context: Context, @RequestBody param: GetByUserIdParam): Bundle {
+    suspend fun getByUserId(context: Context, @RequestBody param: GetByUserIdParam): Bundle {
         return service.getByUserId(context, param.userId)
     }
 
     @PostMapping("/getUserRole")
-    fun getUserRole(context: Context, @RequestBody param: GetByUserIdParam): Bundle {
+    suspend fun getUserRole(context: Context, @RequestBody param: GetByUserIdParam): Bundle {
         return service.getRoleByUserId(context, mutableMapOf("userId" to param.userId))
     }
 }

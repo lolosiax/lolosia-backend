@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 declare name='lolosia-backend'
-declare workdir=$(cd ../ && pwd)
-echo "当前工作目录为：${workdir}"
+declare user=$(users)
+echo "当前用户为：${user}"
 
 echo '停止容器:' ${name}
 docker stop ${name}
@@ -30,7 +30,7 @@ fi
 
 echo "构建新版镜像: $name..."
 # 拷贝 application.yaml
-cp "${workdir}/application.yaml" ./
+cp "/srv/$name/application.yaml" ./
 docker build -t "$name" .
 
 if [ -n "$imageId" ];then
@@ -41,5 +41,5 @@ fi
 
 echo "启动新版容器: $name..."
 
-mkdir -p "${workdir}/work"
-docker run -p 58801:58801 -d --restart=always -v "${workdir}/work:/app/work" --name ${name} ${name}
+mkdir -p "/srv/$name/work"
+docker run -p 58801:58801 -d --restart=always -v "/srv/$name/work":/app/work" --name ${name} ${name}

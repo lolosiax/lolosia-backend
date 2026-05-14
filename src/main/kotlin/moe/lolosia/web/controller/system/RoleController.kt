@@ -18,7 +18,7 @@ class RoleController {
     lateinit var roleService: RoleService
 
     @PostMapping("/list")
-    fun list(context: Context): MutableList<SysRoleEntity> {
+    suspend fun list(context: Context): List<SysRoleEntity?> {
         return roleService.list(context)
     }
 
@@ -33,25 +33,25 @@ class RoleController {
      * 角色分页查询
      */
     @PostMapping("/queryRoleByPage")
-    fun queryRoleByPage(context: Context, @RequestBody param: QueryRoleByPageParam): Bundle {
+    suspend fun queryRoleByPage(context: Context, @RequestBody param: QueryRoleByPageParam): Bundle {
         val (a, b, c) = param
         return roleService.queryRoleByPage(context, a, b, c)
     }
 
     @PostMapping("/create")
-    fun create(context: Context, @RequestBody params: Bundle): SysRoleEntity {
+    suspend fun create(context: Context, @RequestBody params: Bundle): SysRoleEntity {
         return roleService.create(context, params)
     }
 
     @PostMapping("/update")
-    fun update(context: Context, @RequestBody params: Bundle): Any {
+    suspend fun update(context: Context, @RequestBody params: Bundle): Any {
         return roleService.update(context, params)
     }
 
     data class DestroyParam(var id: Int)
 
     @PostMapping("/destroy")
-    fun destroy(context: Context, @RequestBody params: DestroyParam): Any {
+    suspend fun destroy(context: Context, @RequestBody params: DestroyParam): Any {
         return roleService.destroy(context, params.id)
     }
 }

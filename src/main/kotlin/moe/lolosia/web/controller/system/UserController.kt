@@ -30,17 +30,17 @@ class UserController {
     lateinit var sessionManager: SessionManager
 
     @PostMapping("/myInfo")
-    fun myInfo(context: Context): Bundle {
+    suspend fun myInfo(context: Context): Bundle {
         return userService.myUserInfo(context)
     }
 
     @PostMapping("/myRole")
-    fun myRole(context: Context): Bundle {
+    suspend fun myRole(context: Context): Bundle {
         return userService.myUserRole(context)
     }
 
     @PostMapping("/mySession")
-    fun mySession(context: Context): SessionMap? {
+    suspend fun mySession(context: Context): SessionMap? {
         return userService.mySession(context)
     }
 
@@ -51,7 +51,7 @@ class UserController {
     )
 
     @PostMapping("/list")
-    fun list(context: Context, @RequestBody param: ListParam): Bundle {
+    suspend fun list(context: Context, @RequestBody param: ListParam): Bundle {
         val (a, b, c) = param
         val (rows, count) = userService.list(context, a, b, c)
         return bundleScope {
@@ -63,20 +63,21 @@ class UserController {
     data class UserSearchingParam(var keys: String?)
 
     @PostMapping("/searching")
-    fun userSearching(context: Context, params: UserSearchingParam): List<SysUserEntity> {
+    suspend fun userSearching(context: Context, params: UserSearchingParam): List<SysUserEntity> {
         return userService.userSearching(context, params.keys)
     }
 
     data class GetParam(var idList: List<String>)
 
     @PostMapping("/get")
-    fun get(context: Context, @RequestBody param: GetParam): List<Bundle> {
+    suspend fun get(context: Context, @RequestBody param: GetParam): List<Bundle> {
         return userService.get(context, param.idList)
     }
 
     data class CreateParam(
-        var phone: String,
-        var userName: String?,
+        var phone: String?,
+        var email: String?,
+        var userName: String,
         var realName: String?,
         var password: String?,
         var isUse: Boolean,
@@ -84,10 +85,11 @@ class UserController {
     )
 
     @PostMapping("/create")
-    fun create(context: Context, @RequestBody param: CreateParam): Any {
+    suspend fun create(context: Context, @RequestBody param: CreateParam): Any {
         return userService.create(context, bundleScope {
+            use(param::userName)
             use(param::phone)
-            use(param::userName) { param.phone }
+            use(param::email)
             use(param::realName)
             use(param::isUse)
             use(param::roleId)
@@ -97,7 +99,7 @@ class UserController {
     }
 
     @PostMapping("/userInfo")
-    fun getUserInfo(context: Context): Bundle {
+    suspend fun getUserInfo(context: Context): Bundle {
         return userService.getUserInfo(context, context.userId).scope {
             // 我也不知道这句话什么意思。
             "permissions" set listOf(current["userName"])
@@ -105,7 +107,7 @@ class UserController {
     }
 
     @PostMapping("/edit")
-    fun edit(context: Context, @RequestBody data: Bundle): Any {
+    suspend fun edit(context: Context, @RequestBody data: Bundle): Any {
         if ("id" !in data) throw IllegalArgumentException("必须提供UserID")
         data["updatedBy"] = context.userId
         return userService.update(context, data)
@@ -114,7 +116,7 @@ class UserController {
     data class DeleteParam(var ids: List<String>)
 
     @PostMapping("/delete")
-    fun delete(context: Context, @RequestBody data: DeleteParam): Any {
+    suspend fun delete(context: Context, @RequestBody data: DeleteParam): Any {
         return userService.delete(context, data.ids)
     }
 
@@ -127,7 +129,7 @@ class UserController {
 
     /** 修改密码 */
     @PostMapping("/updatePassword")
-    fun updatePassword(context: Context, @RequestBody params: UpdatePasswordParam): Any {
+    suspend fun updatePassword(context: Context, @RequestBody params: UpdatePasswordParam): Any {
         if (params.session != null) {
             val session = params.session!!
             if (!sessionManager.contains(session)) {
@@ -143,12 +145,12 @@ class UserController {
     }
 
     @GetMapping("/avatar")
-    fun getAvatar(context: Context, @RequestParam("id") id: String): ResponseEntity<Flux<DataBuffer>> {
+    suspend fun getAvatar(context: Context, @RequestParam("id") id: String): ResponseEntity<Flux<DataBuffer>> {
         return userService.avatar(context, id)
     }
 
     @GetMapping("/avatar/get/{userId}")
-    fun getAvatarStatic(
+    suspend fun getAvatarStatic(
         context: Context,
         @PathVariable("userId") userId: String
     ): ResponseEntity<Flux<DataBuffer>> {

@@ -3,6 +3,7 @@ package moe.lolosia.web.controller
 import moe.lolosia.web.service.HomeService
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.IWebExchangeContext
+import moe.lolosia.web.VITE_DEFAULT
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -21,7 +22,7 @@ class HomeController {
     @GetMapping("/")
     fun home(resp: ServerHttpResponse): Mono<Void> {
         resp.statusCode = HttpStatus.FOUND
-        resp.headers.location = URI.create("/home/")
+        resp.headers.location = URI.create("/${VITE_DEFAULT}/")
         return resp.writeWith(Mono.empty())
     }
 
@@ -31,8 +32,8 @@ class HomeController {
             return request.path.toString().split("/", limit = 3)[2]
         }
 
-    @GetMapping("/home/**")
+    @GetMapping("/${VITE_DEFAULT}/**")
     suspend fun home(ctx: Context): ResponseEntity<ByteArray> {
-        return service.handlePlatform(ctx, "home", ctx.sub)
+        return service.handlePlatform(ctx, VITE_DEFAULT, ctx.sub)
     }
 }

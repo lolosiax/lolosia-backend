@@ -1,6 +1,7 @@
 package moe.lolosia.web.service
 
 import moe.lolosia.web.LolosiaApplication
+import moe.lolosia.web.config.SConfig
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.IWebExchangeContext
 import moe.lolosia.web.util.spring.createFileResponse
@@ -41,24 +42,24 @@ class HomeService {
 
         for (path in paths) {
             // 1. 获取原始文件数据
-            val (data, lastModified) = getFileData(path) ?: continue
+            var (data, lastModified) = getFileData(path) ?: continue
 
-            // 2. 判断是否为 CSS 文件，如果是则进行处理
-            val finalData = if (fileName.endsWith(".css")) {
-                processCssContent(data, request)
-            } else {
-                data
+            if (SConfig.server.hookCssHostUrl) {
+                // 2. 判断是否为 CSS 文件，如果是则进行处理
+                if (fileName.endsWith(".css")) {
+                    data = processCssContent(data, request)
+                }
             }
 
             val contentType = MediaTypeFactory.getMediaType(path).orElse(MediaType.APPLICATION_OCTET_STREAM)
 
-            // 3. 返回响应，注意 Content-Length 必须使用处理后的 finalData.size
+            // 3. 返回响应，注意 Content-Length 必须使用处理后的 data.size
             return ctx.createFileResponse(
                 lastModified,
                 CacheControl.noCache(), // 动态内容建议使用 noCache
                 contentType,
-                finalData.size.toLong(),
-                finalData
+                data.size.toLong(),
+                data
             )
         }
 

@@ -1,15 +1,18 @@
-import org.hidetake.groovy.ssh.core.Remote
-import org.hidetake.groovy.ssh.core.RunHandler
-import org.hidetake.groovy.ssh.session.SessionHandler
-import tools.jackson.databind.json.JsonMapper
+import com.fasterxml.jackson.databind.json.JsonMapper
+
+buildscript {
+    dependencies {
+        classpath("com.fasterxml.jackson.core:jackson-databind:2.14.2")
+    }
+}
 
 plugins {
     id("io.ebean") version "15.0.2"
 
-    id("org.springframework.boot") version "4.0.3"
+    id("org.springframework.boot") version "3.5.6"
     // id("io.spring.dependency-management") version "1.1.7"
 
-    id("org.hidetake.ssh") version "2.11.2"
+    id("dev.reformator.stacktracedecoroutinator") version "2.6.2"
 
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -19,9 +22,11 @@ plugins {
     kotlin("plugin.spring")
 
     application
+
+    id("moe.lolosia")
 }
 
-group = "top.lolosia"
+group = "moe.lolosia"
 version = "1.0.0-SNAPSHOT"
 
 dependencies {
@@ -29,24 +34,26 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect:2.2.21")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.10.2")
 
-    implementation("org.springframework.boot:spring-boot-starter-webflux:4.0.3")
-    implementation("org.springframework.boot:spring-boot-starter-mail:4.0.3")
-    implementation("org.springframework.boot:spring-boot-starter-thymeleaf:4.0.3")
+    implementation("org.springframework.boot:spring-boot-starter-webflux:3.5.6")
+    implementation("org.springframework.boot:spring-boot-starter-thymeleaf:3.5.6")
+    implementation("org.springframework.boot:spring-boot-starter-mail:3.5.6")
+    implementation("org.springframework.boot:spring-boot-starter-thymeleaf:3.5.6")
     implementation("org.springframework.security:spring-security-crypto:7.0.3")
-    testImplementation("org.springframework.boot:spring-boot-starter-test:4.0.3")
-    developmentOnly("org.springframework.boot:spring-boot-starter-actuator:4.0.3")
-    //developmentOnly("org.springframework.boot:spring-boot-devtools:4.0.3")
+    testImplementation("org.springframework.boot:spring-boot-starter-test:3.5.6")
+    developmentOnly("org.springframework.boot:spring-boot-starter-actuator:3.5.6")
+    //developmentOnly("org.springframework.boot:spring-boot-devtools:3.5.6")
 
     // implementation("org.springframework.ai:spring-ai-openai-spring-boot-starter:1.0.0-M6"){
     //     exclude("org.springframework.boot","spring-boot-starter")
     // }
-    implementation("org.springframework.ai:spring-ai-client-chat:2.0.0-M2")
-    implementation("org.springframework.ai:spring-ai-openai:2.0.0-M2")
-    implementation("org.springframework.ai:spring-ai-anthropic:2.0.0-M2")
-    implementation("org.springframework.ai:spring-ai-starter-mcp-client-webflux:2.0.0-M2")
-    implementation("org.springframework.ai:spring-ai-milvus-store:2.0.0-M2")
+    implementation("org.springframework.ai:spring-ai-client-chat:1.1.0-M4")
+    implementation("org.springframework.ai:spring-ai-openai:1.1.0-M4")
+    implementation("org.springframework.ai:spring-ai-anthropic:1.1.0-M4")
+    implementation("com.alibaba.cloud.ai:spring-ai-alibaba-dashscope:1.1.2.2")
+    implementation("org.springframework.ai:spring-ai-starter-mcp-client-webflux:1.1.0-M4")
+    implementation("org.springframework.ai:spring-ai-milvus-store:1.1.0-M4")
     // implementation("org.springframework.ai:spring-ai-pdf-document-reader:1.1.0-M4")
-    // implementation("org.springframework.ai:spring-ai-tika-document-reader:2.0.0-M2")
+    // implementation("org.springframework.ai:spring-ai-tika-document-reader:1.1.0-M4")
 
     implementation("org.apache.httpcomponents.client5:httpclient5:5.5.1")
     implementation("io.micrometer:micrometer-observation:1.14.6")
@@ -106,14 +113,14 @@ ebean {
 }
 
 springBoot {
-    mainClass = "moe.lolosia.web.LolosiaApplication"
+    mainClass = "moe.lolosia.web.AiWeb"
 }
 
 tasks.jar {
     archiveFileName = "${rootProject.name}-${rootProject.version}.jar"
     manifest {
         val at = attributes
-        at["Main-Class"] = "moe.lolosia.web.LolosiaApplication"
+        at["Main-Class"] = "moe.lolosia.web.AiWeb"
         at["Implementation-Title"] = rootProject.name
         at["Implementation-Version"] = rootProject.version
     }
@@ -121,73 +128,44 @@ tasks.jar {
 
 tasks.bootJar {
     dependsOn(tasks.jar)
-    dependsOn(":static:jar")
     archiveClassifier = "fat"
-
-    val staticJar = project(":static").tasks.jar.get().outputs.files.singleFile
-    from(zipTree(staticJar)) {
-        exclude("META-INF/MANIFEST.MF")
-        into("BOOT-INF/classes")
-    }
 }
 
-tasks.create("deploy") {
-    group = "deploy"
-    dependsOn(tasks.bootJar)
-    doLast {
 
-        val file = rootDir.resolve("platforms.json")
-        val text = if (!file.exists()) """{"ssh": {}}"""
-        else file.readText()
+lolosia {
+    packageName = "moe.lolosia.web"
+    projectName = "洛洛希雅的小网站"
 
-        @Suppress("UNCHECKED_CAST")
-        var map = JsonMapper().readValue(text, Map::class.java) as MutableMap<String, Any>
-        @Suppress("UNCHECKED_CAST")
-        map = map["ssh"] as? MutableMap<String, Any> ?: mutableMapOf()
-        map["name"] = "Server"
-        if ("host" !in map) map["host"] = "localhost"
-        if ("port" !in map) map["port"] = 22
-        if ("user" !in map) map["user"] = "root"
-        if ("password" !in map) map["password"] = "123456"
+    val platformsFile = rootDir.resolve("platforms.json")
 
-        val remote = Remote(map)
-        ssh.run(delegateClosureOf<RunHandler> {
-            session(remote, delegateClosureOf<SessionHandler> {
+    @Suppress("UNCHECKED_CAST")
+    val platformConfig = if (!platformsFile.exists()) emptyMap()
+    else JsonMapper().readValue(platformsFile, Map::class.java) as Map<String, Any?>
 
-                val pwd = "/srv/lolosia-backend/docker_build/"
+    @Suppress("UNCHECKED_CAST")
+    deploy {
+        val deployConfig = platformConfig["deploy"] as? Map<String, Any?>
 
-                execute("mkdir -p $pwd")
-                execute("cd $pwd && rm -rf *-fat.jar")
+        activate = deployConfig?.get("active") as? String
+        val servers = deployConfig?.get("servers") as? List<Map<String, Any?>>
 
-                put(
-                    hashMapOf(
-                        "from" to rootDir.resolve("Dockerfile"),
-                        "into" to "${pwd}Dockerfile"
-                    )
-                )
+        servers?.forEach { server ->
+            server(server["name"] as String) {
+                host = server["host"] as String
+                port = (server["port"] as? Number)?.toInt() ?: 22
+                user = server["user"] as String
+                password = server["password"] as String
+            }
+        }
+    }
 
-                val jarFile = tasks.bootJar.get().outputs.files.singleFile
-                put(
-                    hashMapOf(
-                        "from" to jarFile,
-                        "into" to "$pwd${jarFile.name}"
-                    )
-                )
-                val exits = execute(
-                    hashMapOf("ignoreError" to true),
-                    "cd $pwd && ls | cat"
-                ).split("\n").any { it == "docker_shell.sh" }
-                if (!exits) {
-                    put(
-                        hashMapOf(
-                            "from" to rootDir.resolve("docker_shell.sh"),
-                            "into" to "${pwd}docker_shell.sh"
-                        )
-                    )
-                }
-
-                execute("cd $pwd && bash docker_shell.sh")
-            })
-        })
+    viteJar {
+        val webPath = platformConfig["webPath"] as? String
+        if (!webPath.isNullOrBlank()) {
+            platform("default") {
+                contextPath = "home"
+                dir = webPath
+            }
+        }
     }
 }

@@ -8,8 +8,8 @@ LABEL org.opencontainers.image.authors="Lolosia"
 WORKDIR /app/
 
 RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/' /etc/apt/sources.list.d/ubuntu.sources \
-    && apt update && apt upgrade -y \
-    && apt install -y openjdk-21-jdk locales \
+    && apt-get update && apt-get upgrade -y \
+    && apt-get install -y openjdk-21-jdk locales \
     && sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
     && locale-gen
 
