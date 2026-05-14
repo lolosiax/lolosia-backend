@@ -113,14 +113,14 @@ ebean {
 }
 
 springBoot {
-    mainClass = "moe.lolosia.web.AiWeb"
+    mainClass = "moe.lolosia.web.LolosiaApplication"
 }
 
 tasks.jar {
     archiveFileName = "${rootProject.name}-${rootProject.version}.jar"
     manifest {
         val at = attributes
-        at["Main-Class"] = "moe.lolosia.web.AiWeb"
+        at["Main-Class"] = "moe.lolosia.web.LolosiaApplication"
         at["Implementation-Title"] = rootProject.name
         at["Implementation-Version"] = rootProject.version
     }
