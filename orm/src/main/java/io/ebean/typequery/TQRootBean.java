@@ -70,7 +70,7 @@ public abstract class TQRootBean<T, R> implements IQueryBean<T, R> {
 
   static {
       try {
-        Class<?> aClass = Class.forName("top.lolosia.web.util.ebean.AbstractModel");
+        Class<?> aClass = Class.forName("moe.lolosia.web.util.ebean.AbstractModel");
         Field field = aClass.getDeclaredField("databaseCallback");
         field.setAccessible(true);
         // noinspection unchecked
@@ -662,7 +662,7 @@ public abstract class TQRootBean<T, R> implements IQueryBean<T, R> {
 
   /**
    * 对实体设置数据库信息
-   * @see top.lolosia.web.util.ebean.AbstractModel#databaseCallback
+   * @see moe.lolosia.web.util.ebean.AbstractModel#databaseCallback
    * @param obj 实体
    * @return 实体
    */

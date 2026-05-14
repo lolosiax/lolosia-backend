@@ -1,4 +1,4 @@
-package top.lolosia.web
+package moe.lolosia.web
 
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest

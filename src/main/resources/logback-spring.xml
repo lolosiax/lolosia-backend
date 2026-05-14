@@ -33,7 +33,7 @@
         </triggeringPolicy>
     </appender>
 
-    <appender name="LISTENER" class="top.lolosia.web.logging.ConsoleListenerAppender">
+    <appender name="LISTENER" class="moe.lolosia.web.logging.ConsoleListenerAppender">
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>INFO</level>
         </filter>

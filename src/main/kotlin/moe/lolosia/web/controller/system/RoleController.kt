@@ -1,0 +1,57 @@
+package moe.lolosia.web.controller.system
+
+import moe.lolosia.web.model.system.SysRoleEntity
+import moe.lolosia.web.service.system.RoleService
+import moe.lolosia.web.util.bundle.Bundle
+import moe.lolosia.web.util.session.Context
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+
+@RestController
+@RequestMapping("/api/role")
+class RoleController {
+
+    @Autowired
+    lateinit var roleService: RoleService
+
+    @PostMapping("/list")
+    fun list(context: Context): MutableList<SysRoleEntity> {
+        return roleService.list(context)
+    }
+
+
+    data class QueryRoleByPageParam(
+        val pageNo: Int,
+        val pageSize: Int,
+        val roleName: String?,
+    )
+
+    /**
+     * 角色分页查询
+     */
+    @PostMapping("/queryRoleByPage")
+    fun queryRoleByPage(context: Context, @RequestBody param: QueryRoleByPageParam): Bundle {
+        val (a, b, c) = param
+        return roleService.queryRoleByPage(context, a, b, c)
+    }
+
+    @PostMapping("/create")
+    fun create(context: Context, @RequestBody params: Bundle): SysRoleEntity {
+        return roleService.create(context, params)
+    }
+
+    @PostMapping("/update")
+    fun update(context: Context, @RequestBody params: Bundle): Any {
+        return roleService.update(context, params)
+    }
+
+    data class DestroyParam(var id: Int)
+
+    @PostMapping("/destroy")
+    fun destroy(context: Context, @RequestBody params: DestroyParam): Any {
+        return roleService.destroy(context, params.id)
+    }
+}
