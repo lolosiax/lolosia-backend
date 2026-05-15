@@ -34,6 +34,33 @@ open class PlatformConfig(val name: String) : Serializable {
     @Optional
     var dir: String? = null
 
+    @Input
+    @Optional
+    var cache: CacheConfig = CacheConfig()
+
+    fun cache(action: Action<CacheConfig>) {
+        action.execute(cache)
+    }
+
+    companion object {
+        private const val serialVersionUID = 1L
+    }
+}
+
+open class CacheConfig : Serializable {
+
+    @Input
+    @Optional
+    var dirs: MutableList<String> = mutableListOf("src", "typings", "public")
+
+    @Input
+    @Optional
+    var files: MutableList<String> = mutableListOf("package.json")
+
+    @Input
+    @Optional
+    var filePatterns: MutableList<String> = mutableListOf("vite*.ts")
+
     companion object {
         private const val serialVersionUID = 1L
     }

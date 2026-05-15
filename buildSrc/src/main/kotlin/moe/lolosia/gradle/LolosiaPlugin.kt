@@ -30,7 +30,7 @@ class LolosiaPlugin : Plugin<Project> {
             configureGitArchive(project, lolosiaExtension)
             configureDeploy(project, lolosiaExtension)
             configureViteJar(project, lolosiaExtension.viteJar)
-            configureGenerateViteConstants(project, lolosiaExtension)
+            configureGenerateConstants(project, lolosiaExtension)
         }
     }
 
@@ -82,6 +82,22 @@ class LolosiaPlugin : Plugin<Project> {
 
         val viteJarTask = project.tasks.register("viteJar", ViteJarTask::class.java) {
             platforms = viteJarExt.platforms
+
+            viteJarExt.platforms.forEach { (_, config) ->
+                config.dir?.let { dirPath ->
+                    val baseDir = project.file(dirPath)
+                    val cache = config.cache
+                    cache.dirs.forEach { inputs.dir(baseDir.resolve(it)) }
+                    cache.files.forEach { inputs.file(baseDir.resolve(it)) }
+                    cache.filePatterns.forEach { pattern ->
+                        project.fileTree(baseDir) { include(pattern) }.forEach {
+                            inputs.file(it)
+                        }
+                    }
+                }
+            }
+
+            outputs.cacheIf { true }
         }
 
         project.tasks.named("bootJar", Jar::class.java) {
@@ -94,7 +110,7 @@ class LolosiaPlugin : Plugin<Project> {
         }
     }
 
-    private fun configureGenerateViteConstants(project: Project, lolosiaExt: LolosiaExtension) {
+    private fun configureGenerateConstants(project: Project, lolosiaExt: LolosiaExtension) {
         val vitePlatforms = lolosiaExt.viteJar.platforms
         if (vitePlatforms.isEmpty()) return
 
