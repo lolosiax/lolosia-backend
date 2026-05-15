@@ -168,4 +168,11 @@ lolosia {
             }
         }
     }
+
+    docker {
+        image("eclipse-temurin:21-jre"){
+            mirror = "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/eclipse-temurin:21-jre"
+            autoUntagMirror = true
+        }
+    }
 }

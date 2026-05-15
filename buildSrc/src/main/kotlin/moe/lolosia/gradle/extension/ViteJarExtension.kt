@@ -14,10 +14,13 @@ open class ViteJarExtension {
 
     internal val platforms = linkedMapOf<String, PlatformConfig>()
 
-    fun platform(name: String, action: Action<PlatformConfig>) {
-        val config = PlatformConfig(name)
-        action.execute(config)
-        platforms[name] = config
+    @JvmOverloads
+    fun platform(name: String, action: Action<PlatformConfig>? = null): PlatformConfig {
+        val config = platforms.getOrPut(name) {
+            PlatformConfig(name)
+        }
+        action?.execute(config)
+        return config
     }
 }
 

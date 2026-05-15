@@ -17,15 +17,16 @@ open class DeployExtension {
 
     internal val servers = linkedMapOf<String, ServerConfig>()
 
-    fun server(name: String, action: Action<ServerConfig>) {
-        val config = ServerConfig(name)
-        action.execute(config)
-        servers[name] = config
+    @JvmOverloads
+    fun server(name: String, action: Action<ServerConfig>? = null): ServerConfig {
+        val config = servers.getOrPut(name) { ServerConfig(name) }
+        action?.execute(config)
+        return config
     }
 
     fun activeServer(): ServerConfig {
         val name = activate ?: servers.keys.firstOrNull()
-            ?: throw IllegalStateException("No deploy server configured")
+        ?: throw IllegalStateException("No deploy server configured")
         return servers[name]
             ?: throw IllegalStateException("Active server '$name' not found in deploy configuration")
     }

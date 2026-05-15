@@ -1,9 +1,9 @@
 package moe.lolosia.gradle
 
-import moe.lolosia.gradle.extension.DeployExtension
 import moe.lolosia.gradle.extension.LolosiaExtension
 import moe.lolosia.gradle.extension.ViteJarExtension
 import moe.lolosia.gradle.task.DeployTask
+import moe.lolosia.gradle.task.DockerImageInfo
 import moe.lolosia.gradle.task.GenerateConstantsTask
 import moe.lolosia.gradle.task.ViteJarTask
 import org.gradle.api.Plugin
@@ -26,16 +26,21 @@ class LolosiaPlugin : Plugin<Project> {
         val lolosiaExtension = project.extensions.create("lolosia", LolosiaExtension::class.java)
 
         project.afterEvaluate {
-            configureDeploy(project, lolosiaExtension.deploy)
+            configureDeploy(project, lolosiaExtension)
             configureViteJar(project, lolosiaExtension.viteJar)
             configureGenerateViteConstants(project, lolosiaExtension)
         }
     }
 
-    private fun configureDeploy(project: Project, deployExt: DeployExtension) {
+    private fun configureDeploy(project: Project, lolosiaExt: LolosiaExtension) {
+        val deployExt = lolosiaExt.deploy
         if (deployExt.servers.isEmpty()) return
 
         val bootJarTask = project.tasks.named("bootJar")
+
+        val dockerImageMap = lolosiaExt.docker.images.mapValues {
+            DockerImageInfo(mirror = it.value.mirror ?: "", autoUntagMirror = it.value.autoUntagMirror)
+        }
 
         deployExt.servers.forEach { (name, serverConfig) ->
             val taskName = "deploy${name.replaceFirstChar { it.uppercase() }}"
@@ -48,6 +53,7 @@ class LolosiaPlugin : Plugin<Project> {
                 serverUser = serverConfig.user
                 serverPassword = serverConfig.password
                 serverPwd = serverConfig.pwd
+                dockerImages = dockerImageMap
             }
         }
 
