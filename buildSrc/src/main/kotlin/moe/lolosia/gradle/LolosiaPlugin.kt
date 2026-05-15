@@ -5,6 +5,7 @@ import moe.lolosia.gradle.extension.ViteJarExtension
 import moe.lolosia.gradle.task.DeployTask
 import moe.lolosia.gradle.task.DockerImageInfo
 import moe.lolosia.gradle.task.GenerateConstantsTask
+import moe.lolosia.gradle.task.GitArchiveTask
 import moe.lolosia.gradle.task.ViteJarTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -26,9 +27,16 @@ class LolosiaPlugin : Plugin<Project> {
         val lolosiaExtension = project.extensions.create("lolosia", LolosiaExtension::class.java)
 
         project.afterEvaluate {
+            configureGitArchive(project, lolosiaExtension)
             configureDeploy(project, lolosiaExtension)
             configureViteJar(project, lolosiaExtension.viteJar)
             configureGenerateViteConstants(project, lolosiaExtension)
+        }
+    }
+
+    private fun configureGitArchive(project: Project, lolosiaExt: LolosiaExtension) {
+        project.tasks.register("gitArchive", GitArchiveTask::class.java) {
+            platforms = lolosiaExt.viteJar.platforms
         }
     }
 
