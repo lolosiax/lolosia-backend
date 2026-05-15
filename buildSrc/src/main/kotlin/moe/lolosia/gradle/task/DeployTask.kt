@@ -1,6 +1,8 @@
 package moe.lolosia.gradle.task
 
 import groovy.lang.Closure
+import moe.lolosia.gradle.ui.ApplicationYamlDialog
+import moe.lolosia.gradle.ui.YamlDialogResult
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.Optional
@@ -53,9 +55,13 @@ open class DeployTask : DefaultTask() {
     fun deploy() {
         val remote = createRemote()
         val sshService = project.extensions.getByType(Service::class.java)
-        val basePwd = serverPwd ?: "/srv/${project.rootProject.name}"
+        var basePwd = serverPwd ?: "/srv/${project.rootProject.name}"
+        if (basePwd.endsWith("/")) basePwd = basePwd.dropLast(1)
+
         val pwd = "$basePwd/docker_build/"
         val jarFile = project.tasks.named("bootJar").get().outputs.files.singleFile
+
+        val yamlContent = resolveApplicationYaml(sshService, remote, basePwd)
 
         val tempDir = Files.createTempDirectory("deploy-extract").toFile()
         try {
@@ -67,9 +73,12 @@ open class DeployTask : DefaultTask() {
                 session(remote, delegateClosureOf<SessionHandler> {
                     ensureDockerImages(dockerImages)
                     ensureDirectories(pwd)
+                    if (yamlContent != null) {
+                        uploadContent(yamlContent, "${basePwd}/application.yaml")
+                    }
                     uploadFile(dockerfile, "${pwd}Dockerfile")
                     uploadFile(slimResult.slimJarFile, "${pwd}slim.jar")
-                    uploadLibsWithCache(pwd, slimResult.libManifest, slimResult.libDir)
+                    uploadLibsWithCache(slimResult.libManifest, slimResult.libDir)
                     repackageJar(pwd, slimResult.libManifest, jarFile.name)
                     ensureDockerShell(pwd, dockerShell)
                     execute("cd $pwd && bash docker_shell.sh")
@@ -112,6 +121,51 @@ open class DeployTask : DefaultTask() {
     private fun getKnownHostsFile(): File? {
         val sshDir = File(System.getProperty("user.home"), ".ssh")
         return if (sshDir.exists()) File(sshDir, "known_hosts") else null
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun resolveApplicationYaml(sshService: Service, remote: Remote, workDir: String): String? {
+        if (checkRemoteFileExists(sshService, remote, "${workDir}/application.yaml")) return null
+
+        val localYaml = project.rootDir.resolve("application.yaml")
+        val defaultContent = if (localYaml.exists()) localYaml.readText() else ""
+
+        val result = ApplicationYamlDialog.show(defaultContent)
+        return when (result) {
+            is YamlDialogResult.UseContent -> result.content
+            is YamlDialogResult.CreateEmpty -> ""
+            is YamlDialogResult.Abort -> throw RuntimeException("部署已取消：用户选择中止部署")
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun checkRemoteFileExists(sshService: Service, remote: Remote, path: String): Boolean {
+        var exists = false
+        sshService.run(delegateClosureOf<RunHandler> {
+            session(remote, delegateClosureOf<SessionHandler> {
+                val output = execute(
+                    hashMapOf("ignoreError" to true),
+                    "test -f $path && echo 'EXISTS' || echo 'NOT_FOUND'"
+                )
+                exists = output.contains("EXISTS")
+            } as Closure<Any>)
+        })
+        return exists
+    }
+
+    private fun SessionHandler.uploadContent(content: String, remotePath: String) {
+        val tempFile = File.createTempFile("deploy-yaml-", ".tmp")
+        try {
+            tempFile.writeText(content)
+            put(
+                hashMapOf(
+                    "from" to tempFile,
+                    "into" to remotePath
+                )
+            )
+        } finally {
+            tempFile.delete()
+        }
     }
 
     private fun prepareSlimJar(jarFile: File, tempDir: File): SlimJarResult {
@@ -187,7 +241,7 @@ open class DeployTask : DefaultTask() {
         )
     }
 
-    private fun SessionHandler.uploadLibsWithCache(pwd: String, libManifest: List<LibEntry>, libDir: File) {
+    private fun SessionHandler.uploadLibsWithCache(libManifest: List<LibEntry>, libDir: File) {
         val homeDir = execute("echo \$HOME").trim()
         val libCacheDir = "$homeDir/.cache/lolosia-gradle-cache/"
 
