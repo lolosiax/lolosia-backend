@@ -19,7 +19,8 @@ class ResourcesController {
     @GetMapping("/res/resources/**")
     suspend fun getResources(exchange: ServerWebExchange): ResponseEntity<*> {
         val path = exchange.request.uri.path.removePrefix("/res")
-        return service.get(exchange, "work", path)
+        val webp = exchange.request.queryParams.contains("webp")
+        return service.get(exchange, "work", path, webp)
     }
 
     data class CheckFilesFn(val dir: String)

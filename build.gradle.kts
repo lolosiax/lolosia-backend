@@ -82,6 +82,7 @@ dependencies {
     implementation("cn.hutool:hutool-captcha:5.8.28")
     implementation("org.apache.commons:commons-collections4:4.4")
     implementation("org.jmdns:jmdns:3.5.12")
+    implementation("org.sejda.imageio:webp-imageio:0.1.6")
 
     // Kotlin Compose
     implementation(compose.desktop.currentOs)

@@ -21,14 +21,25 @@ import org.springframework.web.reactive.function.client.awaitBody
 import org.springframework.web.reactive.function.client.awaitExchange
 import org.springframework.web.server.ServerWebExchange
 import java.io.File
+import java.io.FileInputStream
 import java.io.OutputStream
 import java.net.URI
 import java.security.MessageDigest
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import javax.imageio.ImageIO
 import kotlin.io.path.Path
 import kotlin.io.path.absolute
+import kotlin.io.path.extension
 import kotlin.io.path.name
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
+import org.springframework.core.io.FileSystemResource
+import java.nio.file.Path
 
 @Service
 class ResourcesService {
@@ -49,13 +60,50 @@ class ResourcesService {
     @Autowired
     private lateinit var resourceLoader: ResourceLoader
 
-    suspend fun get(exchange: ServerWebExchange, baseDir: String, url: String): ResponseEntity<*> {
+    companion object {
+        private val WEBP_CACHE_DIR = File("work/cache/webp")
+        private val IMAGE_MIME_TYPES = setOf(
+            "image/png", "image/jpeg", "image/jpg", "image/gif",
+            "image/bmp", "image/tiff", "image/webp"
+        )
+    }
+
+    /** 按 MD5 粒度的 WebP 生成锁 */
+    private val webpLocks = ConcurrentHashMap<String, Mutex>()
+
+    /** 用于元数据写入的全局锁 */
+    private val metadataMutex = Mutex()
+
+    suspend fun get(
+        exchange: ServerWebExchange,
+        baseDir: String,
+        url: String,
+        webp: Boolean = false
+    ): ResponseEntity<*> {
 
         val location = Path("${baseDir}${url}").absolute()
         val res = resourceLoader.getResource("file:$location")
         if (!res.exists()) return ResponseEntity.notFound().build<Any>()
 
-        val mime = MediaTypeFactory.getMediaType(location.name).orElse(MediaType.APPLICATION_OCTET_STREAM)
+        val mime = MediaTypeFactory.getMediaType(location.name)
+            .orElse(MediaType.APPLICATION_OCTET_STREAM)!!
+
+        // WebP 模式：仅对图片类型生效
+        if (webp && mime.type == "image" && mime.subtype != "webp") {
+            try {
+                val md5 = resolveMd5(location)
+                if (md5 != null) {
+                    val webpFile = ensureWebp(location, md5)
+                    return ResponseEntity.ok()
+                        .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS))
+                        .contentType(MediaType.valueOf("image/webp"))
+                        .contentLength(webpFile.length())
+                        .body(FileSystemResource(webpFile))
+                }
+            } catch (e: Exception) {
+                logger.warn("WebP 转换失败 (${location.name})，回退原图: ${e.message}")
+            }
+        }
 
         return ResponseEntity.ok()
             .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS))
@@ -85,6 +133,112 @@ class ResourcesService {
         }
 
         return success(rs)
+    }
+
+    // ═══════════════════════════════════════
+    //  WebP 缓存支持
+    // ═══════════════════════════════════════
+
+    /**
+     * 解析文件 MD5，优先查 metadata 缓存，未命中则实时计算并回写。
+     */
+    private suspend fun resolveMd5(filePath: Path): String? {
+        return withContext(Dispatchers.IO) {
+            val file = filePath.toFile()
+            if (!file.isFile) return@withContext null
+
+            // 从 metadata 树查找
+            val relPath = filePath.toString().replace('\\', '/')
+            // 格式如 "work/resources/images/foo.png" → 切掉 "work" 前缀
+            val parts = relPath.split("/").drop(1) // 去掉 "work"
+            if (parts.isNotEmpty()) {
+                var node: TreeElementMap<String, FileData>? = resourcesMeta
+                for (part in parts) {
+                    node = node?.getOrNull(part)
+                    if (node == null) break
+                }
+                val cached = node?.get()
+                if (cached != null) return@withContext cached.md5
+            }
+
+            // 未命中 → 实时计算 MD5 并回写到 metadata
+            val md5 = file.inputStream().use { stream ->
+                val digest = MessageDigest.getInstance("MD5")
+                val buf = ByteArray(8192)
+                var read: Int
+                while (stream.read(buf).also { read = it } != -1) {
+                    digest.update(buf, 0, read)
+                }
+                HexFormat.of().formatHex(digest.digest())
+            }
+
+            // 回写 metadata（加锁防并发 refreshMetadata）
+            metadataMutex.withLock {
+                var node = resourcesMeta
+                for (part in parts) {
+                    node = node[part] // TreeElementMap.get 自动创建子节点
+                }
+                node.set(FileData(file.lastModified(), file.length(), md5))
+            }
+
+            return@withContext md5
+        }
+    }
+
+    /**
+     * 确保 WebP 缓存文件存在，不存在则生成（按 MD5 粒度加锁）。
+     */
+    private suspend fun ensureWebp(sourcePath: Path, md5: String): File {
+        WEBP_CACHE_DIR.mkdirs()
+        val cacheFile = File(WEBP_CACHE_DIR, "${md5}.webp")
+
+        if (cacheFile.exists() && cacheFile.length() > 0) return cacheFile
+
+        withContext(Dispatchers.IO) {
+            val lock = webpLocks.getOrPut(md5) { Mutex() }
+            lock.withLock {
+                // 双重检查：拿到锁后可能别的线程已经生成好了
+                if (cacheFile.exists() && cacheFile.length() > 0) {
+                    return@withLock
+                }
+
+                val src = sourcePath.toFile()
+                logger.info("生成 WebP 缓存: ${src.name} → ${cacheFile.name}")
+                val image = ImageIO.read(src)
+                    ?: throw IllegalStateException("无法读取图片: ${src.name}")
+                ImageIO.write(image, "webp", cacheFile)
+            }
+            // 清理不再使用的锁条目（惰性）
+            webpLocks.remove(md5, lock)
+
+        }
+        return cacheFile
+    }
+
+    // ═══════════════════════════════════════
+    //  定时清理过期 WebP 缓存
+    // ═══════════════════════════════════════
+
+    /** 启动时清理一次 */
+    @EventListener(ApplicationReadyEvent::class)
+    fun cleanWebpCacheOnStartup() {
+        cleanExpiredWebpCache()
+    }
+
+    /** 每天凌晨 4:00 清理超 7 天未访问的 WebP 缓存 */
+    @Scheduled(cron = "0 0 4 * * ?")
+    fun cleanExpiredWebpCache() {
+        if (!WEBP_CACHE_DIR.isDirectory) return
+        val cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+        var deleted = 0
+        WEBP_CACHE_DIR.listFiles()?.forEach { file ->
+            if (file.isFile && file.lastModified() < cutoff) {
+                if (file.delete()) deleted++
+            }
+        }
+        if (deleted > 0) {
+            logger.info("已清理 $deleted 个过期 WebP 缓存文件")
+        }
     }
 
     @PostConstruct
@@ -310,9 +464,9 @@ private class SyncJobImpl(val jobs: List<FileSyncJob>) : ResourcesService.SyncJo
         (jobs.toSet() - mSucceeded).map {
             kJob += (this as CoroutineScope).launch {
                 try {
-                    val listener = it.byteProcessed.addChangeListener{ o, n ->
+                    val listener = it.byteProcessed.addChangeListener { o, n ->
                         if (n <= o) return@addChangeListener
-                        synchronized(byteProcessed){
+                        synchronized(byteProcessed) {
                             byteProcessed.value += (n - o)
                         }
                     }
@@ -321,7 +475,7 @@ private class SyncJobImpl(val jobs: List<FileSyncJob>) : ResourcesService.SyncJo
                     mSucceeded += it
                     it.byteProcessed.removeListener(listener)
                 } catch (e: Throwable) {
-                    synchronized(byteProcessed){
+                    synchronized(byteProcessed) {
                         byteProcessed.value -= it.byteProcessed.value
                     }
                     mFailed += it
