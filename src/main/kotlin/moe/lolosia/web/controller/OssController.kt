@@ -4,23 +4,19 @@ import cn.ktorfitx.server.annotation.Attribute
 import cn.ktorfitx.server.annotation.Body
 import cn.ktorfitx.server.annotation.Controller
 import cn.ktorfitx.server.annotation.POST
-import io.ktor.http.ContentDisposition
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
-import io.ktor.server.response.header
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondFile
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
 import moe.lolosia.web.annotation.Route
+import moe.lolosia.web.dto.response.ApiResult
 import moe.lolosia.web.dto.response.toJsonObject
 import moe.lolosia.web.service.oss.UserFileService
 import moe.lolosia.web.util.ErrorResponseException
-import moe.lolosia.web.util.bundle.bundleScope
 import moe.lolosia.web.util.collectFileItems
+import moe.lolosia.web.util.respondFileCached
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.ContextKey
 import org.koin.core.component.KoinComponent
@@ -38,13 +34,11 @@ object OssController : KoinComponent {
     private val userFileService: UserFileService by inject()
 
     @Serializable
-    data class CheckFn(val md5s: List<String>)
+    data class CheckFn(val md5: List<String>)
 
-    @POST("/oss/check")
-    suspend fun check(@Attribute("ctx") ctx: Context, @Body param: CheckFn): JsonObject =
-        bundleScope {
-            "list" set userFileService.fileCheck(ctx, param.md5s)
-        }.toJsonObject()
+    @POST("/oss/fileCheck")
+    suspend fun check(@Attribute("ctx") ctx: Context, @Body param: CheckFn): ApiResult<List<Boolean>> =
+        ApiResult.ok(userFileService.fileCheck(ctx, param.md5))
 
     // ===== 手动路由（@Route 扫描注册） =====
 
@@ -61,33 +55,30 @@ object OssController : KoinComponent {
                 reference?.split(",")?.filter { it.isNotBlank() } ?: emptyList(),
                 service ?: "default"
             )
-            call.respond(HttpStatusCode.OK, result)
+            // 手动路由经信封中间件统一包裹，Bundle 需先转 JsonObject
+            call.respond(HttpStatusCode.OK, result.toJsonObject())
         }
     }
 
-    /** OSS 文件访问（inline 预览） */
+    /** OSS 文件访问（inline 预览，Last-Modified/ETag → 304 协商） */
     @Route
     fun show(routing: Routing) {
         routing.get("/api/oss/show/{md5}") {
             val ctx = call.attributes[ContextKey]
             val path = userFileService.getFilePath(ctx, call.parameters["md5"]!!)
                 ?: throw ErrorResponseException(HttpStatusCode.NotFound, "文件不存在")
-            call.respondFile(path.toFile())
+            call.respondFileCached(path.toFile())
         }
     }
 
-    /** OSS 文件下载（Content-Disposition: attachment） */
+    /** OSS 文件下载（Content-Disposition: attachment + 304 协商） */
     @Route
     fun download(routing: Routing) {
         routing.get("/api/oss/get/{md5}") {
             val ctx = call.attributes[ContextKey]
             val path = userFileService.getFilePath(ctx, call.parameters["md5"]!!)
                 ?: throw ErrorResponseException(HttpStatusCode.NotFound, "文件不存在")
-            call.response.header(
-                HttpHeaders.ContentDisposition,
-                ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, path.fileName.toString()).toString()
-            )
-            call.respondFile(path.toFile())
+            call.respondFileCached(path.toFile(), downloadName = path.fileName.toString())
         }
     }
 }

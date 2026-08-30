@@ -3,11 +3,13 @@ package moe.lolosia.web.config.web
 import io.ebean.Database
 import io.ebean.datasource.DataSourceBuilder
 import io.ktor.server.application.Application
-import moe.lolosia.web.logging.log
 import moe.lolosia.web.util.ebean.LazyDatabase
+import moe.lolosia.web.util.packageLogger
 import org.koin.core.module.Module
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
+
+private val logger = packageLogger()
 
 /** 数据库名：使用**命名数据库**而非默认库（规避 Ebean 默认库静态初始化中毒问题） */
 const val DEFAULT_DB_NAME = "db"
@@ -48,7 +50,7 @@ fun databaseModule(url: String, username: String, password: String, driver: Stri
 
 /** 程序化构建 Ebean Database（非默认库、关 L2 缓存以适配 RK3566 有限内存） */
 private fun buildDatabase(name: String, url: String, username: String, password: String, driver: String): Database {
-    log.info("初始化 Ebean 数据库 '{}'（非默认库，懒加载）", name)
+    logger.info("初始化 Ebean 数据库 '{}'（非默认库，懒加载）", name)
     val dataSource = DataSourceBuilder.create()
         .url(url)
         .username(username)

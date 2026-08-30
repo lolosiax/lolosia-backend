@@ -5,9 +5,10 @@ import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.uri
-import moe.lolosia.web.logging.log
+import moe.lolosia.web.util.packageLogger
 import kotlin.time.TimeSource
 
+private val logger = packageLogger()
 /**
  * 第1层中间件：流量统计（最外层）。
  *
@@ -24,7 +25,7 @@ fun Application.installTrafficInterceptor() {
             proceed() // 进入内层
         } finally {
             val cost = start.elapsedNow().inWholeMilliseconds
-            log.info("{} {} {}ms", call.request.httpMethod, call.request.uri, cost)
+            logger.info("{} {} {}ms", call.request.httpMethod, call.request.uri, cost)
         }
     }
 }

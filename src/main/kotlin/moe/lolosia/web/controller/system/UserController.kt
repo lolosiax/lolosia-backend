@@ -3,26 +3,25 @@ package moe.lolosia.web.controller.system
 import cn.ktorfitx.server.annotation.Attribute
 import cn.ktorfitx.server.annotation.Body
 import cn.ktorfitx.server.annotation.Controller
-import cn.ktorfitx.server.annotation.GET
 import cn.ktorfitx.server.annotation.POST
 import cn.ktorfitx.server.annotation.Path
-import cn.ktorfitx.server.annotation.Query
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondFile
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import moe.lolosia.web.annotation.Route
+import moe.lolosia.web.dto.response.ApiResult
 import moe.lolosia.web.dto.response.toJsonObject
 import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.ErrorResponseException
 import moe.lolosia.web.util.bundle.bundleScope
 import moe.lolosia.web.util.bundle.toBundle
 import moe.lolosia.web.util.collectFileItems
+import moe.lolosia.web.util.respondFileCached
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.ContextKey
 import org.koin.core.component.KoinComponent
@@ -40,27 +39,28 @@ object UserController : KoinComponent {
     private val userService: UserService by inject()
     private val mapper = JsonMapper()
 
-    @GET("/user/list")
-    suspend fun list(
-        @Attribute("ctx") ctx: Context,
-        @Query("pageNo") pageNo: String?,
-        @Query("pageSize") pageSize: String?,
-        @Query("keys") keys: String?,
-    ): JsonObject {
-        val (list, total) = userService.list(ctx, pageNo?.toIntOrNull() ?: 1, pageSize?.toIntOrNull() ?: 10, keys)
+    @Serializable
+    data class ListFn(val pageNo: Int? = null, val pageSize: Int? = null, val keys: String? = null)
+
+    @POST("/user/list")
+    suspend fun list(@Attribute("ctx") ctx: Context, @Body param: ListFn): JsonObject {
+        val (list, total) = userService.list(ctx, param.pageNo ?: 1, param.pageSize ?: 10, param.keys)
         return bundleScope {
             "list" set list
             "total" set total
         }.toJsonObject()
     }
 
-    @GET("/user/search")
-    suspend fun search(@Attribute("ctx") ctx: Context, @Query("keys") keys: String?): JsonObject =
+    @Serializable
+    data class SearchFn(val keys: String? = null)
+
+    @POST("/user/searching")
+    suspend fun search(@Attribute("ctx") ctx: Context, @Body param: SearchFn): JsonObject =
         bundleScope {
-            "list" set userService.userSearching(ctx, keys).map { mapper.toBundle(it) }
+            "list" set userService.userSearching(ctx, param.keys).map { mapper.toBundle(it) }
         }.toJsonObject()
 
-    @GET("/user/get/{id}")
+    @POST("/user/get/{id}")
     suspend fun get(@Attribute("ctx") ctx: Context, @Path("id") id: String): JsonObject =
         userService.getUserInfo(ctx, id).toJsonObject()
 
@@ -131,13 +131,13 @@ object UserController : KoinComponent {
     suspend fun updatePassword(@Attribute("ctx") ctx: Context, @Body param: UpdatePasswordFn): JsonObject =
         userService.updatePassword(ctx, param.id, param.origin, param.target).toJsonObject()
 
-    @GET("/user/myInfo")
-    suspend fun myInfo(@Attribute("ctx") ctx: Context): JsonObject =
-        userService.myUserInfo(ctx).toJsonObject()
+    @POST("/user/myInfo")
+    suspend fun myInfo(@Attribute("ctx") ctx: Context): ApiResult<JsonObject> =
+        ApiResult.ok(userService.myUserInfo(ctx).toJsonObject())
 
-    @GET("/user/myRole")
-    suspend fun myRole(@Attribute("ctx") ctx: Context): JsonObject =
-        userService.myUserRole(ctx).toJsonObject()
+    @POST("/user/myRole")
+    suspend fun myRole(@Attribute("ctx") ctx: Context): ApiResult<JsonObject> =
+        ApiResult.ok(userService.myUserRole(ctx).toJsonObject())
 
     // ===== 手动路由（@Route 扫描注册） =====
 
@@ -150,18 +150,19 @@ object UserController : KoinComponent {
             val file = collectFileItems().firstOrNull()
                 ?: throw ErrorResponseException(HttpStatusCode.BadRequest, "缺少文件")
             val result = userService.saveAvatar(ctx, id ?: ctx.userId, file)
-            call.respond(HttpStatusCode.OK, result)
+            // 手动路由经信封中间件统一包裹，Bundle 需先转 JsonObject
+            call.respond(HttpStatusCode.OK, result.toJsonObject())
         }
     }
 
-    /** 头像访问 */
+    /** 头像访问（Last-Modified/ETag → 304 协商，1 分钟缓存） */
     @Route
     fun avatar(routing: Routing) {
         routing.get("/api/user/avatar/get/{id}") {
             val ctx = call.attributes[ContextKey]
             val path = userService.avatarPathOf(ctx, call.parameters["id"]!!)
                 ?: throw ErrorResponseException(HttpStatusCode.NotFound, "头像不存在")
-            call.respondFile(path.toFile())
+            call.respondFileCached(path.toFile(), cacheControl = "max-age=60")
         }
     }
 }

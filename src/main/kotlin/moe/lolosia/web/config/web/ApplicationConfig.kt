@@ -16,11 +16,16 @@ fun Application.configureApplication() {
     // ===== 依赖注入（最先，供后续所有层使用）=====
     configureDi()
 
+    // ===== 外层：HTTP 基础设施（CORS 等）=====
+    // CORS 必须先于业务拦截器注册：Call 阶段按注册顺序执行，
+    // 否则 SSE 握手 respond+finish() 后 CORS 无法再补 Access-Control-Allow-Origin，
+    // 且预检 OPTIONS 会被 Auth 拦截器误判为 401/403
+    configureHttp()
+
     // ===== 最外层：中间件（流量统计 → 日志）=====
     configureInterceptors()
 
     // ===== 外层：HTTP 基础设施 =====
-    configureHttp()
     configureSecurity()
     configureSerialization()
     configureErrors()

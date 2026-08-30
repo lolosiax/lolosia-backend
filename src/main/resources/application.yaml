@@ -1,6 +1,9 @@
 ktor:
   deployment:
     port: 7129
+  # 显式关闭 dev 模式：避免 Ktor 热重载用 OverridingClassLoader 另加载一份应用类，
+  # 与 Ebean 缓存实体类身份的机制冲突（同一实体类双类加载器 → ClassCastException）
+  development: false
   application:
     modules:
       - moe.lolosia.web.config.web.ApplicationConfigKt.configureApplication

@@ -3,6 +3,7 @@ package moe.lolosia.web.controller
 import cn.ktorfitx.server.annotation.Attribute
 import cn.ktorfitx.server.annotation.Body
 import cn.ktorfitx.server.annotation.Controller
+import cn.ktorfitx.server.annotation.GET
 import cn.ktorfitx.server.annotation.POST
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +22,8 @@ import org.koin.core.component.inject
 
 /**
  * 事件总线 SSE 控制器。
- * - POST /api/sse（x-upgrade: event-source）→ 中间件返回会话ID，此路由在第二步 eventSourceId 连接时执行
+ * - POST /api/sse（x-upgrade: event-source）→ 由 SseInterceptor 直接应答会话ID，不进入路由
+ * - GET /api/sse?eventSourceId=<id> → SseInterceptor 建流后进入此路由，执行业务 connect（发首帧、注册连接）
  * - POST /api/sse/registry → 登录后将 SSE 连接绑定到用户
  *
  * @author 洛洛希雅Lolosia
@@ -32,7 +34,7 @@ object EventBusSSEController : KoinComponent {
 
     private val service: EventBusSSEService by inject()
 
-    @POST("/sse")
+    @GET("/sse")
     suspend fun connect(
         @Attribute("ctx") ctx: Context,
         @Attribute("sse") source: EventSource,

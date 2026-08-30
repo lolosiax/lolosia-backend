@@ -103,7 +103,7 @@ private val json = Json {
     }
 }
 
-private val logger = packageLogger("moe.lolosia.web.api.PackageKt")
+private val logger = packageLogger()
 
 // ============================================================
 // HttpClient 工厂

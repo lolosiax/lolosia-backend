@@ -27,6 +27,11 @@ fun Application.configureHttp() {
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Patch)
         allowHeader(HttpHeaders.Authorization)
+        // allowHeader(ContentType) 会同时打开 allowNonSimpleContentTypes，
+        // 否则 JSON 请求（application/json 非简单 Content-Type）的预检和实际请求都会被 CORS 拦成 403
+        allowHeader(HttpHeaders.ContentType)
+        // SSE 握手自定义头（见 SseInterceptor），不在白名单则预检 403、无 Access-Control-Allow-Origin
+        allowHeader("x-upgrade")
         allowHeader("MyCustomHeader")
         anyHost() // @TODO: 生产环境尽量收敛域名
     }

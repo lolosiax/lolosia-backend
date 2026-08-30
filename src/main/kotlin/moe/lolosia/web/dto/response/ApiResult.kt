@@ -21,7 +21,9 @@ data class ApiResult<T : Any>(
     val data: T? = null,
 ) {
     companion object {
-        fun <T : Any> ok(data: T? = null): ApiResult<T> = ApiResult(0, "success", data)
+        // 成功码用 200，与 Spring 侧 ReturnWebFilter 的信封（{code: 200, msg, data}）保持一致；
+        // 前端 successCode 校验范围 '0,200,20000' 亦接受
+        fun <T : Any> ok(data: T? = null): ApiResult<T> = ApiResult(200, "success", data)
         fun <T : Any> fail(code: Int, msg: String): ApiResult<T> = ApiResult(code, msg, null)
     }
 }

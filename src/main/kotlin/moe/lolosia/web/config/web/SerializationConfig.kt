@@ -25,6 +25,9 @@ fun Application.configureSerialization() {
             prettyPrint = true
             encodeDefaults = true
             explicitNulls = true
+            // 前端（lolosia-web 等）常携带多余字段（如登录时的 email/emailVerify/password_2），
+            // 反序列化忽略未知 key，避免 JsonConvertException
+            ignoreUnknownKeys = true
             serializersModule = SerializersModule {
                 contextual(Any::class, AnySerializer)
             }

@@ -13,4 +13,5 @@ fun Application.configureInterceptors() {
     installCtxInterceptor()     // 第2层：创建并绑定请求级 ctx（业务传 ctx 而非 call）
     installSseInterceptor()     // 第3层：SSE 特殊协议（x-upgrade 换 ID / eventSourceId 建流）
     installAuthInterceptor()    // 第4层：会话认证（/api/** 白名单除外）
+    installEnvelopeInterceptor() // 响应信封（send pipeline Transform；须先于 ContentNegotiation 注册）
 }
