@@ -1,0 +1,46 @@
+<configuration>
+    <!-- 复刻 Spring Boot 的 %clr / %wEx 转换器 -->
+    <conversionRule conversionWord="clr" class="moe.lolosia.web.logging.ClrConverter"/>
+    <conversionRule conversionWord="wEx" class="moe.lolosia.web.logging.WhitespaceThrowableProxyConverter"/>
+
+    <!--日志文件主目录：这里${user.home}为当前服务器用户主目录-->
+    <property name="LOG_HOME" value="work/log"/>
+
+    <!-- 与 Spring 相同的控制台日志格式；${VAR:-default} 是 logback 的默认值语法 -->
+    <property name="CONSOLE_LOG_PATTERN"
+              value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:-%-5p}) %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!--配置日志文件(File)：按天+按大小滚动（%i 为当天内的序号）-->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!--日志文件路径：这里%d{yyyy-MM-dd}表示按天分类日志-->
+            <FileNamePattern>${LOG_HOME}/core-%d{yyyy-MM-dd}.%i.log.gz</FileNamePattern>
+            <!--单个日志文件最大大小，超过则滚动（%i 递增）-->
+            <MaxFileSize>10MB</MaxFileSize>
+            <!--日志保留天数-->
+            <MaxHistory>15</MaxHistory>
+        </rollingPolicy>
+        <!--设置格式-->
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <!--文件里不用 ANSI 颜色，用纯文本格式-->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{50} - %msg%n</pattern>
+            <charset>utf8</charset>
+        </encoder>
+    </appender>
+
+    <logger name="io.netty" level="INFO"/>
+    <logger name="org.eclipse.jetty" level="INFO"/>
+
+    <!--root节点 全局日志级别，用来指定最基础的日志输出级别-->
+    <root level="INFO">
+        <appender-ref ref="FILE"/>
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

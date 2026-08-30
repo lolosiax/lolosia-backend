@@ -1,0 +1,14 @@
+ktor:
+  deployment:
+    port: 7129
+  application:
+    modules:
+      - moe.lolosia.web.config.web.ApplicationConfigKt.configureApplication
+
+# Ebean 数据源（非默认命名库 "db"，由 config/DatabaseConfig.kt 懒加载读取）
+datasource:
+  db:
+    username: "root"
+    password: "123456"
+    driver: "org.mariadb.jdbc.Driver"
+    url: 'jdbc:mariadb://localhost:3306/ktor-template?useUnicode=true&characterEncoding=utf8&serverTimezone=GMT%2B8'

@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# Kotlin
+.kotlin/
+
+# 日志与运行时数据
+work/
+log/
+*.log
+
+# 本地配置（运行时生成/机器相关，不入库）
+config.yml
+platforms.json
+/application*.yaml
