@@ -42,6 +42,12 @@ open class DeployTask : DefaultTask() {
     @Input
     var serverPassword: String = "123456"
 
+    /**
+     * 部署方式："docker"（默认）或 "systemd"
+     */
+    @Input
+    var serverMode: String = "docker"
+
     @Input
     @Optional
     var serverPwd: String? = null
@@ -58,7 +64,6 @@ open class DeployTask : DefaultTask() {
         var basePwd = serverPwd ?: "/srv/${project.rootProject.name}"
         if (basePwd.endsWith("/")) basePwd = basePwd.dropLast(1)
 
-        val pwd = "$basePwd/docker_build/"
         val jarFile = project.tasks.named("bootJar").get().outputs.files.singleFile
 
         val yamlContent = resolveApplicationYaml(sshService, remote, basePwd)
@@ -66,27 +71,143 @@ open class DeployTask : DefaultTask() {
         val tempDir = Files.createTempDirectory("deploy-extract").toFile()
         try {
             val slimResult = prepareSlimJar(jarFile, tempDir)
-            val dockerfile = project.rootDir.resolve("Dockerfile")
-            val dockerShell = project.rootDir.resolve("docker_shell.sh")
-
             sshService.run(delegateClosureOf<RunHandler> {
                 session(remote, delegateClosureOf<SessionHandler> {
-                    ensureDockerImages(dockerImages)
-                    ensureDirectories(pwd)
-                    if (yamlContent != null) {
-                        uploadContent(yamlContent, "${basePwd}/application.yaml")
+                    if (isSystemdMode()) {
+                        deploySystemd(basePwd, slimResult, jarFile.name, yamlContent)
+                    } else {
+                        deployDocker(basePwd, slimResult, jarFile.name, yamlContent)
                     }
-                    uploadFile(dockerfile, "${pwd}Dockerfile")
-                    uploadFile(slimResult.slimJarFile, "${pwd}slim.jar")
-                    uploadLibsWithCache(slimResult.libManifest, slimResult.libDir)
-                    repackageJar(pwd, slimResult.libManifest, jarFile.name)
-                    ensureDockerShell(pwd, dockerShell)
-                    execute("cd $pwd && bash docker_shell.sh")
                 } as Closure<Any>)
             })
         } finally {
             tempDir.deleteRecursively()
         }
+    }
+
+    private fun isSystemdMode(): Boolean = serverMode.equals("systemd", ignoreCase = true)
+
+    // ===== docker 模式：布到 <pwd>/docker_build，构建并启动容器 =====
+
+    private fun SessionHandler.deployDocker(
+        basePwd: String,
+        slimResult: SlimJarResult,
+        jarFileName: String,
+        yamlContent: String?
+    ) {
+        val pwd = "$basePwd/docker_build/"
+        val dockerfile = project.rootDir.resolve("Dockerfile")
+        val dockerShell = project.rootDir.resolve("docker_shell.sh")
+
+        ensureDockerImages(dockerImages)
+        ensureDirectories(pwd)
+        if (yamlContent != null) {
+            uploadContent(yamlContent, "$basePwd/application.yaml")
+        }
+        uploadFile(dockerfile, "${pwd}Dockerfile")
+        uploadFile(slimResult.slimJarFile, "${pwd}slim.jar")
+        uploadLibsWithCache(slimResult.libManifest, slimResult.libDir)
+        repackageJar(pwd, slimResult.libManifest, jarFileName)
+        ensureDockerShell(pwd, dockerShell)
+        execute("cd $pwd && bash docker_shell.sh")
+    }
+
+    // ===== systemd 模式（no-docker）：直接布到 <basePwd>（work 的父目录），由 systemd 托管 =====
+
+    private fun SessionHandler.deploySystemd(
+        basePwd: String,
+        slimResult: SlimJarResult,
+        jarFileName: String,
+        yamlContent: String?
+    ) {
+        val baseName = project.rootProject.name
+        val svcFile = "$baseName.service"
+        val localSvcFile = project.rootDir.resolve(svcFile)
+        check(localSvcFile.isFile) {
+            "systemd 模式部署需要项目根目录存在 $svcFile（其中 ExecStart= 需为 `-jar xxx.jar` 形式），请先创建该文件"
+        }
+
+        prepareSystemdDeployDir(basePwd)
+        rotateActiveJar(basePwd, baseName, svcFile)
+        if (yamlContent != null) {
+            uploadContent(yamlContent, "$basePwd/application.yaml")
+        }
+        uploadFile(slimResult.slimJarFile, "$basePwd/slim.jar")
+        uploadLibsWithCache(slimResult.libManifest, slimResult.libDir)
+        repackageJar(basePwd, slimResult.libManifest, jarFileName)
+        ensureSystemdServiceFile(basePwd, svcFile, localSvcFile)
+        patchServiceExecStart(basePwd, svcFile, jarFileName)
+        restartSystemdService(basePwd, svcFile)
+    }
+
+    private fun SessionHandler.prepareSystemdDeployDir(pwd: String) {
+        val homeDir = execute("echo \$HOME").trim()
+        val libCacheDir = "$homeDir/.cache/lolosia-gradle-cache/"
+        execute("mkdir -p $pwd")
+        execute("mkdir -p $libCacheDir")
+        execute("cd $pwd && rm -rf slim.jar extracted")
+        execute("(command -v unzip >/dev/null && command -v zip >/dev/null) || (echo '$serverPassword' | sudo -S bash -c 'apt-get update -qq && apt-get install -y -qq unzip zip')")
+    }
+
+    /**
+     * 保留最近一份旧 jar 便于回滚：把 ExecStart 当前指向的活动 jar 移为 `<baseName>.previous.jar`，
+     * 其余历史 *-fat.jar 全部清理（新 jar 稍后由 repackageJar 写出到同一目录）。
+     */
+    private fun SessionHandler.rotateActiveJar(pwd: String, baseName: String, svcFile: String) {
+        val prevJar = "$baseName.previous.jar"
+        execute(
+            "cd $pwd && rm -f $prevJar; " +
+                "oldJar=\$(grep '^ExecStart=' $svcFile 2>/dev/null | head -n1 | grep -o '[^ ]*\\.jar' | tail -n1 | tr -d '\\r'); " +
+                "oldJarBase=\$(basename \"\$oldJar\" 2>/dev/null); " +
+                "if [ -n \"\$oldJarBase\" ] && [ -f \"\$oldJarBase\" ]; then mv -f \"\$oldJarBase\" $prevJar; fi; " +
+                "rm -f ./*-fat.jar"
+        )
+    }
+
+    /**
+     * 与 docker_shell.sh 的"只首次拷贝"策略一致：远端已存在 .service 就不覆盖，
+     * 保留服务器上手工改过的内容（User=/Environment/资源限制等）。
+     */
+    private fun SessionHandler.ensureSystemdServiceFile(pwd: String, svcFile: String, localFile: File) {
+        val remotePath = "$pwd/$svcFile"
+        val exists = execute("test -f $remotePath && echo 'EXISTS' || echo 'NOT_FOUND'").contains("EXISTS")
+        if (!exists) {
+            put(
+                hashMapOf(
+                    "from" to localFile,
+                    "into" to remotePath
+                )
+            )
+            execute("sed -i 's/\\r//g' $remotePath")
+        }
+    }
+
+    /**
+     * 就地更新远端 .service 的 ExecStart：把其中 jar 指向替换为本次新 jar 的绝对路径，
+     * 文件名带版本号不断变化也无需固定成 app.jar。
+     * 注意 [^[:space:]]+\\.jar 前要有 [[:space:]] 边界，否则会命中 token 内部的 "t.jar" 之类片段。
+     */
+    private fun SessionHandler.patchServiceExecStart(pwd: String, svcFile: String, jarFileName: String) {
+        val jarAbsPath = "$pwd/$jarFileName"
+        val output = execute(
+            "cd $pwd && sed -i -E 's|^(ExecStart=.*[[:space:]])[^[:space:]]+\\.jar|\\1$jarAbsPath|' $svcFile && " +
+                "(grep -Fq '$jarAbsPath' $svcFile && echo PATCH_OK || echo PATCH_MISS)"
+        )
+        if (!output.contains("PATCH_OK")) {
+            throw RuntimeException("更新 $svcFile 的 ExecStart 失败：请确认其中 ExecStart= 行是 `-jar xxx.jar` 形式")
+        }
+    }
+
+    private fun SessionHandler.restartSystemdService(pwd: String, svcFile: String) {
+        val svcAbsPath = "$pwd/$svcFile"
+        // 部署用普通管理员账号，通过 sudo（沿用部署密码）软链到 /etc/systemd/system 并重启服务
+        val sudoPrefix = if (serverUser == "root") "" else "echo '$serverPassword' | sudo -S "
+        execute(
+            "${sudoPrefix}bash -c 'ln -sf $svcAbsPath /etc/systemd/system/$svcFile && " +
+                "systemctl daemon-reload && " +
+                "(systemctl enable $svcFile >/dev/null 2>&1 || true) && " +
+                "systemctl restart $svcFile'"
+        )
     }
 
     private fun createRemote(): Remote {
@@ -259,7 +380,9 @@ open class DeployTask : DefaultTask() {
         }
     }
 
-    private fun SessionHandler.repackageJar(pwd: String, libManifest: List<LibEntry>, jarFileName: String) {
+    private fun SessionHandler.repackageJar(dir: String, libManifest: List<LibEntry>, jarFileName: String) {
+        // 兼容带/不带尾部斜杠的目录（docker 传 docker_build/，systemd 传 work 的父目录）
+        val pwd = if (dir.endsWith("/")) dir else "$dir/"
         val homeDir = execute("echo \$HOME").trim()
         val libCacheDir = "$homeDir/.cache/lolosia-gradle-cache/"
 

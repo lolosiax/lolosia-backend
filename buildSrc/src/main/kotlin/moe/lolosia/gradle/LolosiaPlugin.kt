@@ -9,6 +9,7 @@ import moe.lolosia.gradle.task.GenerateDiModuleTask
 import moe.lolosia.gradle.task.GenerateRouteModuleTask
 import moe.lolosia.gradle.task.GitArchiveTask
 import moe.lolosia.gradle.task.ViteJarTask
+import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.SourceSetContainer
@@ -50,11 +51,19 @@ class LolosiaPlugin : Plugin<Project> {
 
         val bootJarTask = project.tasks.named("bootJar")
 
+        val deployModes = setOf("docker", "systemd")
+
         val dockerImageMap = lolosiaExt.docker.images.mapValues {
             DockerImageInfo(mirror = it.value.mirror ?: "", autoUntagMirror = it.value.autoUntagMirror)
         }
 
         deployExt.servers.forEach { (name, serverConfig) ->
+            if (serverConfig.mode !in deployModes) {
+                throw GradleException(
+                    "deploy server '$name' 的 mode '${serverConfig.mode}' 不合法，仅支持：${deployModes.joinToString(" / ")}"
+                )
+            }
+
             val taskName = "deploy${name.replaceFirstChar { it.uppercase() }}"
             project.tasks.register(taskName, DeployTask::class.java) {
                 group = "deploy"
@@ -65,6 +74,7 @@ class LolosiaPlugin : Plugin<Project> {
                 serverUser = serverConfig.user
                 serverPassword = serverConfig.password
                 serverPwd = serverConfig.pwd
+                serverMode = serverConfig.mode
                 dockerImages = dockerImageMap
             }
         }

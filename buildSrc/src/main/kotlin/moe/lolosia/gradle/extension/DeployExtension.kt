@@ -46,6 +46,15 @@ open class ServerConfig(val name: String) {
     @Input
     var password: String = "123456"
 
+    /**
+     * 部署方式：
+     * - "docker"（默认）：布到 [pwd]/docker_build，构建并启动容器（需要项目根目录有 Dockerfile、docker_shell.sh）
+     * - "systemd"：no-docker，直接布到 [pwd]（work 的父目录），并把项目根目录的 <rootProject.name>.service
+     *   就地更新 ExecStart 指向后，由 systemd 托管启动（保留一份 <name>.previous.jar 便于回滚）
+     */
+    @Input
+    var mode: String = "docker"
+
     @Input
     @Optional
     var pwd: String? = null

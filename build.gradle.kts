@@ -111,16 +111,35 @@ tasks.bootJar {
 }
 
 
-// ===== Lolosia 构建配置：vite 前端打包 / 常量生成 =====
+// ===== Lolosia 构建配置：vite 前端打包 / 常量生成 / 部署 =====
 lolosia {
     packageName = "moe.lolosia.web"
     projectName = "洛洛希雅的Ktor后端"
 
-    // 从根目录 platforms.json 读取 vite 前端工程路径（webPath）
+    // 从根目录 platforms.json 读取前端工程路径（webPath）与部署服务器列表（deploy）
     val platformsFile = rootDir.resolve("platforms.json")
     @Suppress("UNCHECKED_CAST")
     val platformConfig = if (!platformsFile.exists()) emptyMap<String, Any?>()
     else JsonMapper().readValue(platformsFile, Map::class.java) as Map<String, Any?>
+
+    @Suppress("UNCHECKED_CAST")
+    deploy {
+        val deployConfig = platformConfig["deploy"] as? Map<String, Any?>
+
+        activate = deployConfig?.get("active") as? String
+        val servers = deployConfig?.get("servers") as? List<Map<String, Any?>>
+
+        servers?.forEach { server ->
+            server(server["name"] as String) {
+                host = server["host"] as String
+                port = (server["port"] as? Number)?.toInt() ?: 22
+                user = server["user"] as String
+                password = server["password"] as String
+                // docker（默认）需要根目录有 Dockerfile/docker_shell.sh；systemd 需要 <项目名>.service
+                mode = server["mode"] as? String ?: "docker"
+            }
+        }
+    }
 
     viteJar {
         val webPath = platformConfig["webPath"] as? String
