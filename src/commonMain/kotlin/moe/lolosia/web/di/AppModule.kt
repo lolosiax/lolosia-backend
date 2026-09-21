@@ -1,6 +1,7 @@
 package moe.lolosia.web.di
 
 import moe.lolosia.web.config.AppConfig
+import moe.lolosia.web.db.Database
 import moe.lolosia.web.util.classpath.Classpath
 import moe.lolosia.web.util.router.RouterInjection
 import org.koin.core.Koin
@@ -24,6 +25,7 @@ import org.koin.dsl.module
 public fun appModule(config: AppConfig, cp: Classpath): Module = module {
     single<AppConfig> { config }
     single<Classpath> { cp }
+    single { Database(config.datasource) }
 }
 
 /** 启动容器。 */

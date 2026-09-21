@@ -3,8 +3,9 @@ kotlin = "2.4.0"
 ksp = "2.3.11"
 koin = "4.2.2"
 kotlinx-serialization = "1.11.0"
-kotlinx-datetime = "0.6.2"
+kotlinx-datetime = "0.8.0"
 okio = "3.9.1"
+sqlx4k = "1.13.1"
 ktor = "3.4.2"
 
 [libraries]
@@ -21,6 +22,10 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem", version.ref = "okio" }
+
+# 数据访问（KMP，native 侧走 Rust sqlx 的 FFI；自带预编译静态库，消费者不需要 Rust 工具链）
+sqlx4k-core = { module = "io.github.smyrgeorge:sqlx4k", version.ref = "sqlx4k" }
+sqlx4k-mysql = { module = "io.github.smyrgeorge:sqlx4k-mysql", version.ref = "sqlx4k" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

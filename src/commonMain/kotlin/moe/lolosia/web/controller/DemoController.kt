@@ -2,6 +2,7 @@ package moe.lolosia.web.controller
 
 import kotlinx.serialization.Serializable
 import moe.lolosia.web.config.AppConfig
+import moe.lolosia.web.db.Database
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller
 import moe.lolosia.web.util.router.FilePart
@@ -87,4 +88,8 @@ object DemoController {
         append(", db=").append(config.datasource.url)
         append(", dbUser=").append(config.datasource.username)
     }
+
+    /** 数据访问探针（P0-0.6 第一步）：验证 sqlx4k 的 FFI 驱动在 native 上确实能连库执行查询。 */
+    @GET("/db/ping")
+    suspend fun dbPing(db: Database): String = "db=${db.ping()}"
 }

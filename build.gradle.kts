@@ -39,6 +39,7 @@ kotlin {
             implementation(libs.koin.core)
             implementation(libs.kotlinx.datetime)
             implementation(libs.okio)
+            implementation(libs.sqlx4k.mysql)
 
             implementation(ktorLibs.server.core)
             implementation(ktorLibs.server.cio)

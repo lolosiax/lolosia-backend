@@ -677,8 +677,8 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.2 最小 CIO 服务 | ✅ | `embeddedServer(CIO, 7129)` + `ContentNegotiation(JSON)` + `StatusPages` + `{code,msg,data}` 信封 |
 | 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.web.util.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
 | 0.4 `classpath.zip` 中间层 | ✅ | 见 §13.5：Gradle 原生 `resources` 目录按源集合并打包 + 构建期嵌入；`Classpath` 统一访问接口 + `DiskClasspath` 回退 + `staticClasspath` 路由；Windows/Linux 双平台实测通过 |
-| 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime 0.6.2 已接依赖 |
-| 0.6 sqlx4k 数据层 | ⬜ | |
+| 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime（0.5 时为 0.6.2，0.6 起对齐 sqlx4k 到 0.8.0）已接依赖 |
+| 0.6 sqlx4k 数据层 | 🔄 | 依赖已接 + `db/Database.kt` + `/api/db/ping` 双端实测通过，见 §13.9；实体 / Repository / 各 Service 待迁 |
 | 0.7 bcrypt | ⬜ | |
 | 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
 | 0.9 部署 | ✅ | 插件侧支持原生产物（`deploy { binary { } }`）+ **真机跑通**，见 13.6 |
@@ -1040,4 +1040,39 @@ binary 分支的处理：
 | 未捕获异常计数 | 0 |
 
 **说明**：`koin-ktor`（Ktor 插件形态）本次**没有引入** —— 容器由我们自己持有并传递，`koin-core` 已足够；若 0.6 需要 request scope 再评估。
+
+### 13.9 P0-0.6 起步：sqlx4k 探针与数据层地基（2026-09-21）
+
+**两个前置探针都给绿灯**（原本是 §9 风险表里的不确定项）
+
+| 探针 | 结果 |
+| --- | --- |
+| sqlx4k 1.13.1 的 klib 由 Kotlin **2.4.10** 编译，本工程是 **2.4.0**，能否消费 | ✅ `mingwX64` 与 `linuxArm64` 均编译、链接通过 |
+| `mingwX64` 链接是否触发 lld-link `-exclude-symbols:___chkstk_ms`（官方 issue #18） | ✅ **未触发**，不需要 `-Xoverride-konan-properties=linker.mingw_x64=…` 那套 workaround |
+
+**落地内容**
+
+- 依赖：`io.github.smyrgeorge:sqlx4k` + `sqlx4k-mysql` 1.13.1（`libs.versions.toml`）。
+- [Database.kt](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/db/Database.kt)：`@Injectable` 的驱动入口，按配置建连接池（`ConnectionPool.Options(maxConnections)`），并提供 `ping()`。
+- 注入链：`appModule` 里 `single { Database(config.datasource) }` → `koin.registerInjectable<Database>()` → 控制器形参 `db: Database` 即得（**0.6 各 Service 沿用同一模式**）。
+- `/api/db/ping`（`suspend` 控制器方法）：证明「KSP 生成的路由 + suspend 方法 + Koin 注入 + FFI」这条链是通的 —— 自研路由的生成代码本来就落在 suspend 的 `get { }` 里，**无需为 suspend 改 KSP**。
+- 本机新建开发库 `ktor-template`（8 个表/视图，来自 `sql/`），默认配置指向它。
+
+**实测**
+
+| 环境 | 结果 |
+| --- | --- |
+| mingwX64（本机 + 本机 MariaDB 10.11.6） | ✅ `db=10.11.6-MariaDB / ktor-template` |
+| linuxArm64（真机 aarch64 / RK3566） | ✅ FFI 可用：返回 `SQLError [28000] Access denied for user 'root'@'localhost'` —— 说明静态库加载、连接池、MySQL 协议握手全部走通，只差凭据 |
+| 产物大小 | mingwX64 release **13.7MB**（+1MB，Rust 静态库） |
+
+**顺带发现/处理的问题**
+
+1. **阿里云镜像缺 sqlx4k 的根 jar** → `settings.gradle.kts` 里把 `io\.github\.smyrgeorge` 与 `io.ktor` 一起排除出镜像，强制 mavenCentral。
+2. **kotlinx-datetime 被顶版本**：sqlx4k 依赖 0.8.0，我们的 0.6.2 被冲突解析到 0.8.0 —— 而 0.8 把 `Clock` 迁到 stdlib `kotlin.time.Clock`、弃用 `monthNumber/dayOfMonth`，日志代码因此要改。已把 catalog 显式对齐 0.8.0。
+3. **Koin 的 `InstanceCreationException` 会吞掉根因**（Kotlin 的 `Throwable.toString()` 不带 cause）→ 日志渲染整条 cause 链，正是靠这个才看到上面的 `Access denied`。
+4. **qemu 不再能用于 aarch64 冒烟**：接入 sqlx4k 后新产物在 qemu 下**启动即 SIGSEGV**（`-strace` 显示崩在进程极早期、连一次 `open` 都没有），而**同一二进制在真机完全正常** → 判为 qemu-user 模拟限制。后续 aarch64 验证改为「传 /tmp + 备用端口跑临时副本，不碰 systemd」（见开发记忆 §5）。
+
+**给 0.6 后续留的坑**：板子上 `/srv/ktor-template/application.yaml` 的 `root/123456` 已失效（root 的密码登录被禁，`1698`），真机跑数据层前需确认现网账号或为应用建专用用户。
+
 

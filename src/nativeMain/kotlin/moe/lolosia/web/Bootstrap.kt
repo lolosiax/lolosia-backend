@@ -21,6 +21,7 @@ import moe.lolosia.web.config.AppConfig
 import moe.lolosia.web.config.CONFIG_FILE
 import moe.lolosia.web.config.ENV_CONFIG_FILE
 import moe.lolosia.web.config.loadAppConfig
+import moe.lolosia.web.db.Database
 import moe.lolosia.web.di.registerInjectable
 import moe.lolosia.web.di.startAppKoin
 import moe.lolosia.web.util.classpath.DiskClasspath
@@ -82,6 +83,7 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     // 注册「可按类型注入」的实例：控制器形参声明 ctx: Context / config: AppConfig 即自动注入
     RouterInjection.register(Context::class) { call -> call.attributes[ContextKey] }
     koin.registerInjectable<AppConfig>()
+    koin.registerInjectable<Database>()
 
     installCtxInterceptor()
 

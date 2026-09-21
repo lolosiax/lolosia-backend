@@ -16,8 +16,10 @@ dependencyResolutionManagement {
         maven("https://maven.aliyun.com/repository/public") {
             // 阿里云镜像对 io.ktor 的 native 产物（*-mingwx64.klib / *-linuxarm64.klib）同步不全，
             // 会导致 "Could not find ktor-server-xxx-mingwX64Main-*.klib"，强制走 mavenCentral
+            // （io.github.smyrgeorge 的 sqlx4k 同理：根模块 jar 在镜像上缺）
             mavenContent {
                 excludeGroupByRegex("io\\.ktor")
+                excludeGroupByRegex("io\\.github\\.smyrgeorge")
             }
         }
         mavenCentral()
