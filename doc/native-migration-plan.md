@@ -779,6 +779,31 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
     → 另外 Gradle 不允许 `@Optional` 标注**基本类型**属性（`Properties of primitive type cannot be optional`），
       所以 `var jvmTarget: Boolean` 只能带 `@Input`。
 
+17. **KGP 的 link 任务把「输出目录」声明成 output，不能直接喂给 SFTP `put`**
+    `linkReleaseExecutableLinuxArm64.outputs.files` 是 `build/bin/linuxArm64/releaseExecutable/`（**目录**），
+    而不是里面的 `ktor-template.kexe`。
+    hidetake-ssh 的 `put(from: File, into: String)` 遇到目录会走递归分支：把本地目录名压进
+    `directoryStack` 再逐个 mkdir、上传 —— 于是远端报
+    `Failed SFTP MKDIR: 1m:/srv/ktor-template/ktor-template.new/releaseExecutable`（SFTP 的 MKDIR 不建父目录）。
+    → 改用 KGP 的 `KotlinNativeLink.outputFile`（`RegularFileProperty`）定位真正的可执行文件。
+
+18. **Windows 宿主上「编译 + 链接」都能跑，唯独 objcopy 缺位 —— 借道 WSL 只做这一步**
+    实测（Kotlin 2.4 / Kotlin-Native）：`compileKotlinLinuxArm64` 与 `linkReleaseExecutableLinuxArm64`
+    在 Windows 上都能成功产出合法的 ELF64 AArch64 可执行文件，**不支持交叉编译的传言不适用于这一版**。
+    真正卡住的只有 `objcopy -I binary -O elf64-littleaarch64` 这一步：
+    - `~/.konan/dependencies/aarch64-unknown-linux-gnu-gcc-*/bin/aarch64-unknown-linux-gnu-objcopy`
+      是 **ELF 二进制**（Linux 用），Windows 执行不了（`A problem occurred starting process`）；
+    - `~/.konan/dependencies/msys2-mingw-w64-*/bin/objcopy.exe` 的 `--info` 只有 `pe-x86-64 / elf64-x86-64`，
+      不认 `elf64-littleaarch64`；
+    - konan 自带的 LLVM 是 `llvm-21-x86_64-windows-**essentials**`，**不含 `llvm-objcopy`**；
+    - 想从 Windows 反向够 WSL 也不行：NAT 模式下 WSL 访问宿主走 `172.x.x.1`，而入站被 Windows 防火墙拦
+      （连宿主已监听 `0.0.0.0` 的 `mysqld:3306` 都连不上）。
+    → 在 `objcopyClasspath<目标>` 里判断宿主为 Windows 时改为拉起 `wsl -- bash -c "cd <wsl路径> && aarch64-linux-gnu-objcopy …"`。
+      路径用 `toWslPath()` 显式转成 `/mnt/<盘符>/…` —— **不要依赖工作目录传递**：从 Windows 进程拉起的 wsl
+      未必能正确翻译 cwd（实测把 `F:\Develop\…` 传成了 `F:Develop…`）。
+      发行版 / 用户可用 `classpath { wslDistro / wslUser }` 指定，留空就用 WSL 默认值。
+    这样 **Windows 侧一条 `gradlew deploy1m` 就能跑完全流程**，WSL 只在 objcopy 这一步被拉起来一次。
+
 ### 13.5 classpath.zip 中间层（P0-0.4）落地说明
 
 **效果**：与 Java 打资源文件一致 —— `src/<sourceSet>/resources/**` 就是 classpath 根，
@@ -891,11 +916,14 @@ get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true
 {
   "servers": [
     { "name": "shiyan", "host": "203.0.113.10", "mode": "systemd" },
-    { "name": "1m", "host": "localhost", "port": 6023, "mode": "systemd",
+    { "name": "1m", "host": "127.0.0.1", "port": 6023, "mode": "systemd",
       "abi": "arm64", "args": ["7130"] }
   ]
 }
 ```
+
+> 隧道转发时 `host` 要写 `127.0.0.1` 而**不能写 `localhost`**：`localhost` 在 Windows 上会先解析到 `::1`，
+> 而隧道（以及多数转发工具）只绑 IPv4 的 `127.0.0.1`，握手会直接 `Connection refused`。
 
 ```kotlin
 lolosia {
@@ -943,11 +971,27 @@ binary 分支的处理：
 **与 JVM 版并行验证**：默认单元名 `<rootProject.name>-native.service`，与现网 `<rootProject.name>.service`
 互不干扰，`args` 里换个端口即可（本模板：JVM 7129 / 原生 7130）。验证通过后再统一端口、退役 JVM 服务。
 
+**首次真机部署实测（2026-09-21，开发板 lckfb / RK3566，aarch64）**：
+
+| 检查项 | 结果 |
+| --- | --- |
+| 构建宿主 | Windows 一条 `gradlew deploy1m` 跑完（objcopy 借道 WSL，见 13.3 坑 18） |
+| 部署耗时 | 单次 6s（直连板子公网 IPv6；走 QUIC 隧道传 9.4MB 明显更慢） |
+| 单元文件 | `/srv/ktor-template/ktor-template-native.service`，`enabled` + `active` |
+| `ExecStart` | `/srv/ktor-template/ktor-template 7130` —— systemd 视角 `argv[]=/srv/ktor-template/ktor-template 7130`，**无 `java -jar`** |
+| 端口 | `0.0.0.0:7130` ← 原生服务（pid 193017）；`*:7129` ← JVM 服务（pid 152437），两者并存 |
+| 自测 | `curl 127.0.0.1:7130/api/ping` → `pong`；`/home/` → `HTTP 200 395B`（vite 产物） |
+| 内存 | 原生 **≈34MB RSS** vs JVM `-Xmx512m` 实测 ≈238MB RSS |
+| 回滚 | `/srv/ktor-template/ktor-template.previous` 为上一个可执行文件 |
+
+> 注意：原生服务的 `host = "0.0.0.0"` 只绑 IPv4，外部用板子的 **IPv6** 探 `7130` 会失败
+> （JVM/Netty 默认双栈，所以 `7129` 的 IPv6 探得通）。需要 IPv6 直连就把监听地址改成 `::`。
+
 ### 13.7 建议的下一步
 
 1. **0.5 基础设施替换**：日志（现为 `println`）、`java.time`→`kotlinx-datetime`、UUID/Base64→标准库、文件 IO→okio。
 2. **0.6~0.8**：按 §5 清单把 `legacy/` 里可移植的部分逐个迁到 `commonMain`（`sqlx4k` 数据层、bcrypt 密码校验、鉴权拦截器链），JVM 专有部分按表删除/替换。
-3. **0.9 部署**：插件侧已就绪（见 13.6）；还差在开发板上实跑一次 —— 需先恢复 `localhost:6023` 的 SSH 隧道，
-   再 `./gradlew deploy1m`（会部署到 `/srv/ktor-template`，单元 `ktor-template-native.service`，端口 7130，
-   与现网 7129 的 JVM 服务并行），确认无问题后再统一端口、退役 JVM 服务。
+3. ~~**0.9 部署**~~ ✅ 已完成（见 13.6）：插件侧与真机部署均已跑通，
+   `/srv/ktor-template/ktor-template` 已由 `ktor-template-native.service` 拉起（7130），与现网 7129 的 JVM 服务并行。
+   验证无问题后再统一端口、退役 JVM 服务。
 4. 可选优化：`classpath.zip` 改 DEFLATED 压缩（需补 `platform.zlib` inflate），进一步缩小二进制与内存占用。

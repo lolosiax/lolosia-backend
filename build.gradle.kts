@@ -113,5 +113,6 @@ lolosia {
         // 留空 targets = 自动覆盖工程内全部 native 目标；
         // includeViteJar 默认 true：vite 产物以 static/<contextPath>/ 前缀并入
         // 额外资源可继续用 resources("build/xxx") 注入
+        // Windows 宿主构建 linux 目标时，objcopy 会自动借道 WSL（可用 wslDistro / wslUser 指定发行版与用户）
     }
 }

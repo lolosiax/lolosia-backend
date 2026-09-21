@@ -2,6 +2,7 @@ package moe.lolosia.gradle
 
 import moe.lolosia.gradle.extension.ClasspathExtension
 import moe.lolosia.gradle.extension.LolosiaExtension
+import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.Project
 import org.gradle.api.file.Directory
 import org.gradle.api.file.DuplicatesStrategy
@@ -71,7 +72,7 @@ private fun Project.configureTargetClasspath(target: KotlinNativeTarget, extensi
 
     when {
         target.name.startsWith("mingw") -> embedAsWindowsResource(target, suffix, zipTask, embedDir)
-        target.name.startsWith("linux") -> embedAsLinuxObject(target, suffix, zipTask, embedDir)
+        target.name.startsWith("linux") -> embedAsLinuxObject(target, suffix, zipTask, embedDir, extension)
         else -> logger.warn("classpath 资源嵌入暂不支持目标 ${target.name}：其 resources 不会进入可执行文件")
     }
 }
@@ -164,6 +165,7 @@ private fun Project.embedAsLinuxObject(
     suffix: String,
     zipTask: Provider<Zip>,
     embedDir: Provider<Directory>,
+    extension: ClasspathExtension,
 ) {
     val objcopy = objcopyConfigFor(target.name)
     if (objcopy == null) {
@@ -171,21 +173,36 @@ private fun Project.embedAsLinuxObject(
         return
     }
 
+    // Windows 宿主上没有任何 objcopy 能产出 aarch64 ELF（konan 自带的那个是 ELF 二进制、
+    // mingw 的只支持 x86-64），只把这一步借道 WSL；编译与链接仍然在 Windows 上跑。
+    val useWsl = Os.isFamily(Os.FAMILY_WINDOWS)
+
     val objcopyTask = tasks.register("objcopyClasspath$suffix", Exec::class.java) {
         group = "classpath"
         description = "把 classpath.zip 转成可链接的目标文件（需 ${objcopy.tool}）"
         dependsOn(zipTask)
 
         val dir = embedDir.get().asFile
-        workingDir = dir
         inputs.file(dir.resolve(CLASSPATH_ZIP_NAME))
         outputs.file(dir.resolve(CLASSPATH_OBJECT))
-        // 输入文件名决定符号名：_binary_classpath_zip_start / _end / _size
-        commandLine(
+
+        val objcopyArgs = listOf(
             objcopy.tool,
             "-I", "binary", "-O", objcopy.outputFormat, "-B", objcopy.architecture,
             CLASSPATH_ZIP_NAME, CLASSPATH_OBJECT,
         )
+        if (useWsl) {
+            // 不用工作目录传递路径：从 Windows 进程拉起的 wsl 未必能正确翻译 cwd，一律用绝对路径
+            commandLine(
+                listOf("wsl") +
+                    wslOptions(extension) +
+                    listOf("--", "bash", "-c", "cd ${toWslPath(dir)} && ${objcopyArgs.joinToString(" ")}")
+            )
+        } else {
+            // 输入文件名决定符号名：_binary_classpath_zip_start / _end / _size
+            workingDir = dir
+            commandLine(objcopyArgs)
+        }
     }
 
     target.binaries.withType<Executable>().configureEach {
@@ -196,6 +213,19 @@ private fun Project.embedAsLinuxObject(
             embedDir.get().asFile.resolve(CLASSPATH_OBJECT).absolutePath,
         )
     }
+}
+
+private fun wslOptions(extension: ClasspathExtension): List<String> = buildList {
+    extension.wslDistro?.takeIf { it.isNotBlank() }?.let { addAll(listOf("-d", it)) }
+    extension.wslUser?.takeIf { it.isNotBlank() }?.let { addAll(listOf("-u", it)) }
+}
+
+/** Windows 绝对路径（`F:\a\b`）→ WSL 下的 `/mnt/f/a/b`。 */
+private fun toWslPath(file: File): String {
+    val path = file.absolutePath
+    val drive = path.substring(0, 1).lowercase()
+    val rest = path.substring(2).replace('\\', '/')
+    return "/mnt/$drive$rest"
 }
 
 private data class ObjcopyConfig(val tool: String, val outputFormat: String, val architecture: String)

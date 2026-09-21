@@ -23,6 +23,7 @@ import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.*
 import org.gradle.plugins.ide.idea.model.IdeaModel
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
+import org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink
 
 /**
  * Lolosia Spring Boot 构建与部署插件
@@ -107,11 +108,17 @@ class LolosiaPlugin : Plugin<Project> {
             )
             return null
         }
+        if (linkTask !is KotlinNativeLink) {
+            project.logger.warn("lolosia deploy：$taskName 不是 KotlinNativeLink，无法定位可执行文件，本次跳过")
+            return null
+        }
 
         return DeployArtifact(
             kind = ARTIFACT_BINARY,
             task = linkTask,
-            files = project.files(linkTask),
+            // 必须用 outputFile：link 任务的 outputs 声明的是「输出目录」，
+            // 直接传目录会让 hidetake 的 SFTP put 走递归分支并 mkdir 到远端，报 Failed SFTP MKDIR
+            files = project.files(linkTask.outputFile),
             remoteName = binary?.name ?: project.rootProject.name,
             unitName = binary?.unitName,
             launchArgs = server.args.toList(),
