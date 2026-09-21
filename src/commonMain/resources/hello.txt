@@ -1,0 +1,1 @@
+来自 commonMain/resources —— 所有 target 都能读到。

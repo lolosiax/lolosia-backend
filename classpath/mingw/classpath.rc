@@ -1,0 +1,4 @@
+// Windows PE 资源声明：把构建产物 classpath.zip 作为自定义类型 CLASSPATH 嵌入可执行文件。
+// 由 Gradle 任务 windresClasspathMingwX64 用 Kotlin/Native 自带的 mingw windres 编译成 .res 后链接。
+// 资源名/类型必须与 src/mingwX64Main/kotlin/moe/lolosia/classpath/Classpath.mingw.kt 中一致。
+IDR_CLASSPATH  CLASSPATH  "classpath.zip"
