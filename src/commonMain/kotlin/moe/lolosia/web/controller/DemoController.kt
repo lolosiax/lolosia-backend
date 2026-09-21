@@ -1,6 +1,7 @@
 package moe.lolosia.web.controller
 
 import kotlinx.serialization.Serializable
+import moe.lolosia.web.config.AppConfig
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller
 import moe.lolosia.web.util.router.FilePart
@@ -73,4 +74,17 @@ object DemoController {
     /** 路径参数用显式名称（与形参名不同） */
     @GET("/explicit/{uid}")
     fun explicit(@Path("uid") userId: String): String = "userId=$userId"
+
+    /**
+     * 生效配置（口令不外泄）：验证「配置文件/环境变量生效」+「Koin → 路由按类型注入」整条链路。
+     * 服务实例从 0.6 起按同样方式注入。
+     */
+    @GET("/config")
+    fun config(config: AppConfig): String = buildString {
+        append("port=").append(config.server.port)
+        append(", host=").append(config.server.host)
+        append(", logLevel=").append(config.logLevel)
+        append(", db=").append(config.datasource.url)
+        append(", dbUser=").append(config.datasource.username)
+    }
 }

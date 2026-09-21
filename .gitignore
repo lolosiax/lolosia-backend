@@ -27,3 +27,4 @@ log/
 config.yml
 platforms.json
 /application*.yaml
+/application*.json

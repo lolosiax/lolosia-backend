@@ -17,15 +17,25 @@ import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
+import moe.lolosia.web.config.AppConfig
+import moe.lolosia.web.config.CONFIG_FILE
+import moe.lolosia.web.config.ENV_CONFIG_FILE
+import moe.lolosia.web.config.loadAppConfig
+import moe.lolosia.web.di.registerInjectable
+import moe.lolosia.web.di.startAppKoin
 import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.classpath.staticClasspath
+import moe.lolosia.web.util.log.Log
+import moe.lolosia.web.util.log.LogLevel
+import moe.lolosia.web.util.platform.envOrNull
 import moe.lolosia.web.util.router.RouterInjection
 import moe.lolosia.web.util.router.RouterParamException
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.ContextKey
 import moe.lolosia.web.util.session.installCtxInterceptor
+import org.koin.core.Koin
 
 /**
  * 服务启动（native 专用：需要装载嵌入式 classpath）。
@@ -36,21 +46,42 @@ import moe.lolosia.web.util.session.installCtxInterceptor
  * 对应旧 JVM 版的 `ApplicationConfigKt.configureApplication`，差异：
  * - 启动方式从 `EngineMain` + `application.yaml` 改为 `embeddedServer`（Native 无 config-yaml / 无 EngineMain）；
  * - 资源访问从 classloader 改为嵌入式 `classpath.zip`（[ClasspathHolder]）；
- * - 日志暂用 `println`（KMP 日志库见方案 §8 P0-0.5）。
+ * - 日志用自研 [Log]，配置用 [loadAppConfig]（多级覆盖）。
+ *
+ * @param portOverride 命令行参数传来的端口（最高优先级）；为 `null` 时取配置里的端口。
  */
-public fun startServer(port: Int, installRoutes: Routing.() -> Unit) {
+public fun startServer(portOverride: Int?, installRoutes: Routing.() -> Unit) {
+    val log = Log.of("Bootstrap")
+
     val cp = installPlatformClasspath()
+    val loaded = loadAppConfig(
+        classpath = cp,
+        diskPath = envOrNull(ENV_CONFIG_FILE) ?: CONFIG_FILE,
+        env = ::envOrNull,
+    )
+    // 命令行参数优先级最高：直接写回配置，保证「生效配置」与真实监听端口一致
+    val config = if (portOverride == null) loaded else loaded.copy(server = loaded.server.copy(port = portOverride))
+    Log.level = LogLevel.parse(config.logLevel)
+
+    // Koin 容器：0.6 起的 @Service 都挂这里，控制器通过 registerInjectable 取用
+    val koin = startAppKoin(config, cp)
+
     val source = if (cp is DiskClasspath) "磁盘回退目录" else "可执行文件内嵌 zip"
-    println("[ktor-template] classpath 已装载：${cp.entries.size} 个条目（来源：$source）")
-    println("[ktor-template] starting on 0.0.0.0:$port (Kotlin/Native + CIO)")
-    embeddedServer(CIO, port = port, host = "0.0.0.0") {
-        configureApplication(installRoutes)
+    log.info { "classpath 已装载：${cp.entries.size} 个条目（来源：$source）" }
+    log.info { "配置已加载：port=${config.server.port}, db=${config.datasource.url}, 日志级别=${Log.level}" }
+    log.info { "starting on ${config.server.host}:${config.server.port} (Kotlin/Native + CIO)" }
+
+    embeddedServer(CIO, port = config.server.port, host = config.server.host) {
+        configureApplication(koin, installRoutes)
     }.start(wait = true)
 }
 
-private fun Application.configureApplication(installRoutes: Routing.() -> Unit) {
-    // 注册「可按类型注入」的实例：控制器形参声明 ctx: Context 即自动注入
+private fun Application.configureApplication(koin: Koin, installRoutes: Routing.() -> Unit) {
+    val log = Log.of("Application")
+
+    // 注册「可按类型注入」的实例：控制器形参声明 ctx: Context / config: AppConfig 即自动注入
     RouterInjection.register(Context::class) { call -> call.attributes[ContextKey] }
+    koin.registerInjectable<AppConfig>()
 
     installCtxInterceptor()
 
@@ -72,7 +103,7 @@ private fun Application.configureApplication(installRoutes: Routing.() -> Unit) 
             call.respond(HttpStatusCode.BadRequest, ApiResult.err<Unit>(400, cause.message ?: "参数错误"))
         }
         exception<Throwable> { call, cause ->
-            println("[error] ${call.request.local.uri}: $cause")
+            log.error(cause) { "${call.request.local.uri} 处理失败" }
             call.respond(
                 HttpStatusCode.InternalServerError,
                 ApiResult.err<Unit>(500, cause.message ?: "服务器内部错误"),

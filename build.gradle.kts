@@ -35,6 +35,11 @@ kotlin {
         all { languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi") }
 
         commonMain.dependencies {
+            // DI：Koin（native 产物已核实齐全）；日志与配置为自研，无额外依赖
+            implementation(libs.koin.core)
+            implementation(libs.kotlinx.datetime)
+            implementation(libs.okio)
+
             implementation(ktorLibs.server.core)
             implementation(ktorLibs.server.cio)
             implementation(ktorLibs.server.contentNegotiation)

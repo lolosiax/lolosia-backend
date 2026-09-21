@@ -1,0 +1,13 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 7129
+  },
+  "datasource": {
+    "url": "mysql://127.0.0.1:3306/ktor-template",
+    "username": "root",
+    "password": "123456",
+    "maxConnections": 10
+  },
+  "logLevel": "INFO"
+}

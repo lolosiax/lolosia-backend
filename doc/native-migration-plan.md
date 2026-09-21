@@ -506,6 +506,13 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 
 **同时注意**：`spring-security-crypto` 需要删除，但**编码/校验的语义要保持一致**（cost=10），否则新注册/改密的用户与老用户会落在不同 cost 上（功能上没问题，只是不整齐）。
 
+> **更正（2026-09-21 实测核实）**：原计划写的"换一个 KMP bcrypt 实现"**在 Maven Central 上不存在** ——
+> 全量 46 个 bcrypt artifact 无一发布 `linuxarm64` / `mingwx64` 变体（`at.favre.lib:bcrypt`、`org.mindrot:jbcrypt`
+> 都是纯 JVM；`cryptography-kotlin` 有 native 产物但不含 bcrypt 算法；`com.ToxicBakery.library.bcrypt` 虽是多平台但**没有 native 目标**）。
+> 系统侧也不可靠：glibc 主线 `crypt(3)` 的 `$2a$` 依赖发行版的 libxcrypt，mingw-w64 则没有 `crypt(3)`。
+> → **0.7 改为自研移植 jBCrypt（Blowfish / EksBlowfish）到 `commonMain`**：纯 Kotlin、无平台依赖、双目标行为一致，
+> 天然接受 `$2a$` 与 cost=10，且能在 Windows 上秒级验证。算法语义与上面结论完全一致（换实现不换算法 → 老密码可继续登录）。
+
 ---
 
 ## 7. 目标平台与构建/部署
@@ -551,9 +558,9 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.2 | 启动骨架：`embeddedServer(CIO, port=7129)` + JSON 内容协商 + `{code,msg,data}` 信封 + StatusPages | `mingwX64` 本机启动，`GET /api/ping` 返回 JSON |
 | 0.3 | **自研路由插件**（决策 9，§5.4）：`router-annotations` + `router-ksp` + `router-runtime`；注解同名同义，控制器只改 import | 现有 7 个控制器**方法体零改动**编译通过；`/api/**` 全部可访问；含 `@Body`/`@Path`/`@Query`/`@Attribute`/表单/文件 |
 | 0.4 | **`classpath.zip` 中间层**（决策 8，§3.2）：`Classpath` 接口 + `platform.zlib` 版 zip 解析 + `DiskClasspath` 回退 + `staticClasspath` 路由；打包走 `zipClasspath` → 嵌入 | 前端页面从**二进制内**的 `classpath.zip` 提供；开发期可切磁盘目录 |
-| 0.5 | 基础设施替换：KMP 日志、`kotlin.uuid.Uuid`、`kotlin.io.encoding.Base64`、okio 文件与哈希、kotlinx-datetime；删 Jackson / snakeyaml / commons-collections4 / kotlin-reflect | 编译通过，无残留 `java.*` 引用 |
+| 0.5 | 基础设施替换：KMP 日志、`kotlin.uuid.Uuid`、`kotlin.io.encoding.Base64`、okio 文件与哈希、kotlinx-datetime；删 Jackson / snakeyaml / commons-collections4 / kotlin-reflect | 编译通过，无残留 `java.*` 引用 **（已完成，见 §13.8）** |
 | 0.6 | 数据库：sqlx4k 接 MariaDB（**库名 `lolosia-backend`**）、连接池、实体改 `@Table`/`@Id`，重写 `SessionManager` / `CacheManager` / `UserService` / `RoleService` | 会话落库、登录链路可用 |
-| 0.7 | 密码：换标准 bcrypt KMP 实现（**必须接受 `$2a$`、cost 10**，见 §6.1） | 用库里现存的 `$2a$10$...` 哈希能直接登录成功 |
+| 0.7 | 密码：**自研移植 jBCrypt 到 `commonMain`**（Maven 上无可用 native 实现，必须接受 `$2a$`、cost 10，见 §6.1） | 用库里现存的 `$2a$10$...` 哈希能直接登录成功 |
 | 0.8 | 鉴权拦截器链：Traffic → Ctx → SSE → Auth → Envelope | 白名单外的接口无 session 时返回 401 |
 | 0.9 | 部署：`systemd`（开发板无 Docker），产物替换 `/srv/ktor-template/` 下的 fat jar | `linuxArm64` 产物在开发板上启动，外网可访问 |
 
@@ -670,7 +677,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.2 最小 CIO 服务 | ✅ | `embeddedServer(CIO, 7129)` + `ContentNegotiation(JSON)` + `StatusPages` + `{code,msg,data}` 信封 |
 | 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.web.util.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
 | 0.4 `classpath.zip` 中间层 | ✅ | 见 §13.5：Gradle 原生 `resources` 目录按源集合并打包 + 构建期嵌入；`Classpath` 统一访问接口 + `DiskClasspath` 回退 + `staticClasspath` 路由；Windows/Linux 双平台实测通过 |
-| 0.5 基础设施替换 | ⬜ | |
+| 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime 0.6.2 已接依赖 |
 | 0.6 sqlx4k 数据层 | ⬜ | |
 | 0.7 bcrypt | ⬜ | |
 | 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
@@ -990,9 +997,47 @@ binary 分支的处理：
 
 ### 13.7 建议的下一步
 
-1. **0.5 基础设施替换**：日志（现为 `println`）、`java.time`→`kotlinx-datetime`、UUID/Base64→标准库、文件 IO→okio。
+1. ~~**0.5 基础设施替换**~~ ✅ 已完成（见 13.8）。
 2. **0.6~0.8**：按 §5 清单把 `legacy/` 里可移植的部分逐个迁到 `commonMain`（`sqlx4k` 数据层、bcrypt 密码校验、鉴权拦截器链），JVM 专有部分按表删除/替换。
 3. ~~**0.9 部署**~~ ✅ 已完成（见 13.6）：插件侧与真机部署均已跑通，
    `/srv/ktor-template/ktor-template` 已由 `ktor-template-native.service` 拉起（7130），与现网 7129 的 JVM 服务并行。
    验证无问题后再统一端口、退役 JVM 服务。
 4. 可选优化：`classpath.zip` 改 DEFLATED 压缩（需补 `platform.zlib` inflate），进一步缩小二进制与内存占用。
+
+### 13.8 P0-0.5 落地记录（基础设施 / 配置 / DI，2026-09-21）
+
+**先纠正一个前提**：native 侧本来就**没有任何 `java.*` 残留**（全仓只有 4 处 `println`），所以 0.5 的实质不是"替换"，而是**定案 + 建约定 + 接依赖**。真正的两个方案缺口是**配置系统**与**Service 层 DI**。
+
+**四项定案**（用户确认）
+
+| 项 | 选型 | 理由 |
+| --- | --- | --- |
+| 配置 | **`@Serializable` `AppConfig` + JSON 多级覆盖** | 保留"资源走 classpath"的既有约定；服务器上改磁盘文件即可，不必重编二进制 |
+| Service DI | **Koin 4.2.2** | 已核实 `koin-core-{linuxarm64,mingwx64}` 产物齐全 |
+| 日志 | **自研极简实现**（`util/log/Log.kt`） | 需求只有「级别 + 时间戳 + 异常栈」；Kermit 2.2.0 / log4k 2.5.0 虽有 native 产物，但时间戳能力官方都没写明，不值得为此引依赖 |
+| bcrypt（0.7） | **自研移植 jBCrypt 到 commonMain** | Maven Central 全量 46 个 bcrypt artifact **无一发布 native 变体**（`at.favre.lib`/`jbcrypt` 纯 JVM；`cryptography-kotlin` 有 native 但无 bcrypt 算法）；glibc 主线 `crypt(3)` 不保证支持 `$2a$`，mingw 侧更无等价物 |
+
+**实现要点**
+
+- 配置优先级（低→高）：数据类默认值 < classpath 内嵌 `application.json` < 磁盘 `application.json`（CWD / `KTOR_CONFIG` 指定）< 环境变量（`KTOR_HOST/PORT/LOG_LEVEL/DB_URL/DB_USERNAME/DB_PASSWORD`）；端口另可由命令行参数覆盖。各层按字段**深合并**。
+- 磁盘文件用 **okio** `FileSystem.SYSTEM` 读（顺带把 okio 在双 native 目标上验证掉了），并**剥 BOM**（PS 5.1 的 `Set-Content -Encoding UTF8`、记事本都会写 BOM，不剥直接解析失败）；某一层解析失败**记 WARN**，不再静默忽略。
+- 端口解析结果**写回配置对象**（`copy(server = …)`）后再注入 Koin，保证 `/api/config` 看到的端口就是真实监听端口。
+- Koin 容器由 `startAppKoin(config, cp)` 返回并**显式向下传**：Koin 4 里 `GlobalContext`、`koinApplication` 都不是公开 API（native 上直接 Unresolved），只有 `startKoin { }.koin` 可用。
+- 控制器是 `object`，拿不到构造注入 → 用 `Koin.registerInjectable<T>()` 把容器实例接进自研路由的「按类型注入」表，控制器形参写 `config: AppConfig` 即得。**0.6 的服务按同一方式注入**。
+- 日志格式 `[2026-09-21 14:03:22.123] [INFO ] [Bootstrap] 消息`；异常作为首个参数以支持尾随 lambda（`log.error(cause) { "…" }`）。
+
+**实测**（Windows 本机 mingwX64 release，12.6MB；`compileKotlinLinuxArm64` 同步通过）
+
+| 检查项 | 结果 |
+| --- | --- |
+| 基线冒烟（ping / whoami / path+query / JSON body / multipart 上传） | ✅ 全绿 |
+| `/home/` 200、`/` 301、未知路由 404 | ✅ |
+| `/api/config`（配置 + Koin→路由注入链路） | ✅ `port=7160, logLevel=INFO, db=…`（口令不外泄） |
+| 磁盘 `application.json` 覆盖（文件**带 BOM**） | ✅ `port=7161, logLevel=DEBUG, db=…override-db` |
+| 环境变量 `KTOR_PORT=7162` 覆盖磁盘 | ✅ |
+| 命令行参数 `7163` 覆盖环境变量 | ✅ |
+| 日志格式（级别 + 毫秒时间戳 + tag） | ✅ |
+| 未捕获异常计数 | 0 |
+
+**说明**：`koin-ktor`（Ktor 插件形态）本次**没有引入** —— 容器由我们自己持有并传递，`koin-core` 已足够；若 0.6 需要 request scope 再评估。
+
