@@ -71,7 +71,7 @@
 | **交叉编译** | ✅ **WSL(x86_64) 可直接交叉编译出 `linuxArm64` 产物**，无需 Docker、也无需在开发板上编译。实测产物：`ELF 64-bit LSB executable, ARM aarch64, for GNU/Linux 4.9.156` |
 | **资源嵌入** | ✅ **已端到端验证**：WSL 内 `objcopy` 把资源转 `.o` → cinterop + linker 链入 → 上传到开发板**真实运行并成功读回资源**（详见 §3.1） |
 | 开发板 | 主机名 `lckfb`，**aarch64**，Ubuntu 22.04.5 LTS，内核 6.1.141，**4 核 / 2GB RAM**，磁盘 12G（余 5.4G），glibc 2.35；有 `gcc`/`make`/`java`/`objcopy`/`zip`/`unzip`，**无 Docker** |
-| 访问方式 | 本机经 `quic-socket` QUIC 隧道：`localhost:6023 → 开发板:22`（SSH）、`localhost:3307 → 开发板:3306`（MariaDB）；服务端 `<board-host>`（Cloudflare，443）。实测握手成功、**RTT ≈ 29ms** |
+| 访问方式 | 本机经 `quic-socket` QUIC 隧道：`localhost:6023 → 开发板:22`（SSH）、`localhost:3307 → 开发板:3306`（MariaDB）；服务端为开发板的入口域名（Cloudflare，443；真实值不写进仓库）。实测握手成功、**RTT ≈ 29ms** |
 | 数据库 | 开发板上 **MariaDB 10.6.23**（`mariadb.service` active）；真实业务库是 **`lolosia-backend`**（`ktor-template` 库是空的），表含 `sys_user` / `sys_role` / `sys_user_roles` / `sys_sessions` / `sys_cache` / `sys_logs` / `oss_user_file` / `view_user_role` |
 | 现有部署 | `/srv/ktor-template/` 下是 **JVM fat jar（67.6MB）**，由 `ktor-template.service` 以 `-Xms128m -Xmx512m` 跑在 **7129** 端口；同机另有 nginx / cloudflared / quic-socket-server |
 | 密码哈希 | 库中实际值为标准 bcrypt **`$2a$10$...`**（结论见 §6.1） |
@@ -1074,7 +1074,7 @@ binary 分支的处理：
 4. **qemu 不再能用于 aarch64 冒烟**：接入 sqlx4k 后新产物在 qemu 下**启动即 SIGSEGV**（`-strace` 显示崩在进程极早期、连一次 `open` 都没有），而**同一二进制在真机完全正常** → 判为 qemu-user 模拟限制。后续 aarch64 验证改为「传 /tmp + 备用端口跑临时副本，不碰 systemd」（见开发记忆 §5）。
 
 **给 0.6 后续留的坑**：板子上 `/srv/ktor-template/application.yaml` 的 `root/123456` 已失效（root 的密码登录被禁，`1698`），真机跑数据层前需确认现网账号或为应用建专用用户。
-> 后续实测：可用账号是 `lolosia` / `<board-password>`（能看到 `ktor-template` 与 `lolosia-backend`）。
+> 后续实测：可用的是一个专用账号（**账号口令不入库**，真实值放本地未入库的配置里），能看到 `ktor-template` 与 `lolosia-backend` 两个库。
 
 ### 13.10 P0-0.6 续：仓库 codegen 落地 + Session / Cache 迁移（2026-09-21）
 
@@ -1202,7 +1202,7 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 | **jBCrypt 官方测试向量** `hashpw("", "$2a$06$DCq7YPn5Rq63x1Lad4cll.")` | ✅ 逐字等于 `$2a$06$DCq7YPn5Rq63x1Lad4cll.TV4S6ytwfsfvkgY8jIucDrjc8deX1s.`（在 mingwX64 release 二进制上实测；这是算法正确性的黄金标准 —— 常量表错一个字节都会崩） |
 | 与 OpenBSD 参考实现（Python `bcrypt` 5.0.0）对拍 | ✅ 48/48 一致（cost 4/5/6/8 × 多语言口令，含中文/unicode/长口令 0~72 字节） |
 | 常量表逐元素核对 | ✅ `P_orig` 18 / `S_orig` 1024 / `bf_crypt_ciphertext` 6，与 Java 原文差异 0 |
-| 库里真哈希（`lolosia` 的 `$2a$10$hpCjmzrK…`）+ 猜的口令 | ⚠️ `checkpw=false` —— 因为 `<board-password>` 是 **SSH/数据库口令**，不是站点登录口令；这**不构成算法问题**（同一次运行里用该哈希的真 salt 重算出了格式合法的 `$2a$10$hpCjmzrKxTbIxzOB4.V2De…` 新哈希） |
+| 库里真哈希（`lolosia` 的 `$2a$10$hpCjmzrK…`）+ 猜的口令 | ⚠️ `checkpw=false` —— 因为拿来猜的是 **SSH/数据库口令**，不是站点登录口令；这**不构成算法问题**（同一次运行里用该哈希的真 salt 重算出了格式合法的 `$2a$10$hpCjmzrKxTbIxzOB4.V2De…` 新哈希） |
 
 > 教训（已记入开发记忆 §7）：**不要拿 SSH 口令去 checkpw 库里的哈希**。算法正确性用官方向量锁死；端到端「真实账号登录」验收留到登录链路接通后做（或自建测试账号闭环）。
 
