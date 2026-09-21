@@ -11,13 +11,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 import moe.lolosia.web.db.Database
 import moe.lolosia.web.db.SessionRepository
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.time.nowEpochMs
-import moe.lolosia.web.util.time.nowUtc
 
 /**
  * 会话管理器：**内存缓存 + 定期落库**（与旧 JVM 版同构）。
@@ -96,7 +96,7 @@ public class SessionManager(private val db: Database, private val repo: SessionR
     /** 写回单个会话（不存在则插入）。 */
     public suspend fun save(session: SessionMap) {
         val json = session.toJson()
-        val now = nowUtc()
+        val now = Clock.System.now()
         val existing = repo.findOneById(ctx, session.id).getOrThrow()
         if (existing == null) {
             repo.executeInsert(ctx, session.id, json, now, now).getOrThrow()

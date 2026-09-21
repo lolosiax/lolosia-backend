@@ -1104,12 +1104,23 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 → **写入一律用仓库里的单语句 `@Query`**（`executeInsert` / `executeUpdate*`）；`delete` 生成的是单语句，可用。
 → 这条同时说明：MySQL 方言下的 `batchInsert` / `batchUpdate`（README 已声明不支持）与本问题同源。
 
-**⚠️ 时区：写库必须用 UTC**
+**⚠️ 时区：实体时间字段必须用 `kotlin.time.Instant`（不要 `LocalDateTime`）**
 
-`select @@session.time_zone` 实测为 **`+00:00`**（Rust sqlx 的连接会话），而列是 `TIMESTAMP`（库内按会话时区换算）：
-写本地时间会与库端 `now()` 差 8 小时（实测 `created_at=2026-09-22 02:56` vs `now()=2026-09-21 10:56`）。
-→ 约定：**写库用 `nowUtc()`**（`util/time/Time.kt`），`now()` 比较因此自洽；**只有日志用 `nowLocal()`**。
-只有 `LocalDateTime + Duration` 在 kotlinx-datetime 里没有，需要 `plusDuration()` 借 Instant 中转。
+现象：写库的 `created_at` 比本地时间早/晚一个时区（实测本机 `2026-09-22 02:56` vs 库端 `now()=2026-09-21 10:56`）。
+根因：`select @@session.time_zone` 实测为 **`+00:00`**（Rust sqlx 的连接会话），而列是 `TIMESTAMP`（库内按会话时区换算），
+裸 `LocalDateTime` 会被当成 UTC 存。
+
+**治本方式（不是靠人工约定）**：sqlx4k **原生支持 `kotlin.time.Instant`** —— 编码走
+`Instant.toTimestampString(timeZone = TimeZone.UTC)`，解码走 `Column.asInstant()`（其 KDoc 明确写着
+「when the offset is absent, we assume UTC. Ensure your data is stored in UTC」），
+且 `resolveNativeValue()` 对 `Instant` 是直通驱动的已知类型。所以：
+
+- 实体时间字段写 `Instant?`（`kotlin.time.Instant`），取值就是 `Clock.System.now()`，**不需要任何时区约定**；
+- 加时长直接 `Instant + Duration`（`LocalDateTime` 才需要借 Instant 中转）；
+- `expires_at > now()` 这类库端比较天然自洽（存储值是瞬时，会话 `now()` 也是瞬时）。
+
+实测（本机 CST +08:00）：`expiresAt=2026-09-22T11:02:03Z` 由应用读回打印，
+库端 UTC 会话下 `created_at = 2026-09-21 11:02:03` == `now()`、`expires_at = now()+1 天` ✓（见 §13.10 实测表）。
 
 **迁移结果（Session / Cache）**
 
@@ -1128,7 +1139,7 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 | `/api/db/ping` | `10.11.6-MariaDB / ktor-template / tz=+00:00 / now=…` |
 | `/api/cache/put` → `/api/cache/get` | ✅ `v1` → `v2`（同 tag 二次写走 upsert，库里仍 1 行） |
 | `/api/session/new` → `/api/session/get/{id}` | ✅ 返回含 `userId` 的会话 JSON，`sys_sessions` 有对应行 |
-| 时间列（以 UTC 会话查看） | ✅ `created_at ≈ now()`，`expires_at = now()+1 天` |
+| 时间列（以 UTC 会话查看） | ✅ `created_at ≈ now()`，`expires_at = now()+1 天`；应用读回打印 `expiresAt=2026-09-22T11:02:03Z`（Instant 的 UTC 语义） |
 | 回归 | `/api/ping`、`/api/whoami`、`/api/config`、`/api/user/get/42`、`/home/` 200，未知路由 404 |
 | `compileKotlinLinuxArm64` | ✅ 通过（真机数据层验证待部署时做） |
 

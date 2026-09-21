@@ -5,7 +5,7 @@ import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.annotation.Query
 import io.github.smyrgeorge.sqlx4k.annotation.Repository
 import moe.lolosia.web.db.model.SysCacheEntity
-import kotlinx.datetime.LocalDateTime
+import kotlin.time.Instant
 
 /**
  * `sys_cache` 的仓库：CRUD 由 sqlx4k 的 KSP 生成，自定义查询写 `@Query`。
@@ -36,9 +36,9 @@ public interface SysCacheRepository : CrudRepository<SysCacheEntity> {
         path: String,
         tag: String,
         value: String,
-        expiresAt: LocalDateTime,
-        createdAt: LocalDateTime,
-        updatedAt: LocalDateTime,
+        expiresAt: Instant,
+        createdAt: Instant,
+        updatedAt: Instant,
     ): Result<Long>
 
     @Query(
@@ -58,7 +58,7 @@ public interface SysCacheRepository : CrudRepository<SysCacheEntity> {
         context: QueryExecutor,
         id: Long,
         value: String,
-        expiresAt: LocalDateTime,
+        expiresAt: Instant,
     ): Result<Long>
 
     @Query("delete from sys_cache where path = :path and tag = :tag")

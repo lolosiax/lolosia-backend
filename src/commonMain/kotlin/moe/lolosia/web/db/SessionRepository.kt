@@ -5,7 +5,7 @@ import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.annotation.Query
 import io.github.smyrgeorge.sqlx4k.annotation.Repository
 import moe.lolosia.web.db.model.SessionEntity
-import kotlinx.datetime.LocalDateTime
+import kotlin.time.Instant
 
 /**
  * `sys_sessions` 的仓库。
@@ -25,8 +25,8 @@ public interface SessionRepository : CrudRepository<SessionEntity> {
         context: QueryExecutor,
         id: String,
         data: String,
-        createdAt: LocalDateTime,
-        updatedAt: LocalDateTime,
+        createdAt: Instant,
+        updatedAt: Instant,
     ): Result<Long>
 
     @Query("update sys_sessions set data = :data, updated_at = :updatedAt where id = :id")
@@ -34,7 +34,7 @@ public interface SessionRepository : CrudRepository<SessionEntity> {
         context: QueryExecutor,
         id: String,
         data: String,
-        updatedAt: LocalDateTime,
+        updatedAt: Instant,
     ): Result<Long>
 
     /** 取一条未删除的会话。 */

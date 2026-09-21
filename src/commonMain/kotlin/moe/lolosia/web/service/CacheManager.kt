@@ -1,15 +1,13 @@
 package moe.lolosia.web.service
 
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
-import kotlinx.datetime.LocalDateTime
+import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import moe.lolosia.web.db.Database
 import moe.lolosia.web.db.SysCacheRepository
 import moe.lolosia.web.db.model.SysCacheEntity
 import moe.lolosia.web.util.router.Injectable
-import moe.lolosia.web.util.time.nowUtc
-import moe.lolosia.web.util.time.plusDuration
 
 /**
  * 缓存管理器：以 `path` 分组、`tag` 定位，存在 `sys_cache`。
@@ -35,17 +33,20 @@ public class CacheManager(private val db: Database, private val repo: SysCacheRe
         /** 该 path 下全部未过期缓存（新的在前）。 */
         public suspend fun getAll(): List<SysCacheEntity> = repo.findAllByPath(ctx, path).getOrThrow()
 
-        public suspend fun get(tag: String): String? =
-            repo.findOneByPathAndTag(ctx, path, tag).getOrThrow()?.value
+        /** 取该 tag 的未过期缓存行（`null` = 不存在或已过期）。 */
+        public suspend fun find(tag: String): SysCacheEntity? =
+            repo.findOneByPathAndTag(ctx, path, tag).getOrThrow()
+
+        public suspend fun get(tag: String): String? = find(tag)?.value
 
         /** 写入缓存并返回写入值；[ttl] 默认 1 天。 */
         public suspend fun put(tag: String, value: String, ttl: Duration = DEFAULT_TTL): String {
-            val expiresAt: LocalDateTime = nowUtc().plusDuration(ttl)
+            val expiresAt = Clock.System.now() + ttl
             val existing = repo.findOneByPathAndTag(ctx, path, tag).getOrThrow()
             if (existing != null) {
                 repo.executeUpdateValueById(ctx, existing.id, value, expiresAt).getOrThrow()
             } else {
-                val now = nowUtc()
+                val now = Clock.System.now()
                 repo.executeInsert(ctx, path, tag, value, expiresAt, now, now).getOrThrow()
             }
             return value

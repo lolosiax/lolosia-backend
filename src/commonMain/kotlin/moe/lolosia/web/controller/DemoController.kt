@@ -101,10 +101,12 @@ object DemoController {
     suspend fun cachePut(cache: CacheManager, @Query path: String, @Query tag: String, @Query value: String): String =
         cache[path].put(tag, value)
 
-    /** 缓存读取（P0-0.6 验证）：取未过期的缓存值。 */
+    /** 缓存读取（P0-0.6 验证）：取未过期的缓存值，并附上过期时刻（`Instant` 按 UTC 打印，便于核对时区）。 */
     @GET("/cache/get")
-    suspend fun cacheGet(cache: CacheManager, @Query path: String, @Query tag: String): String =
-        cache[path].get(tag) ?: "<null>"
+    suspend fun cacheGet(cache: CacheManager, @Query path: String, @Query tag: String): String {
+        val row = cache[path].find(tag) ?: return "<null>"
+        return "${row.value} (expiresAt=${row.expiresAt})"
+    }
 
     /** 新建会话（P0-0.6 验证）：返回会话 id；带 `userId` 时一并写入会话。 */
     @GET("/session/new")
