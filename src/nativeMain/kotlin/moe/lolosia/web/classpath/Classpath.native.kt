@@ -2,6 +2,7 @@ package moe.lolosia.web.classpath
 
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.usePinned
@@ -93,7 +94,7 @@ public fun installPlatformClasspath(): Classpath {
  * 注意：mingw 上 C 的 `long` 是 32 位，`ftell`/`fseek` 的签名与 Linux 不同，
  * 这里统一转成 `Long` 以屏蔽差异。
  */
-@OptIn(ExperimentalForeignApi::class)
+@OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
 @Suppress("REDUNDANT_CALL_OF_CONVERSION_METHOD")
 private fun readFileBytes(absPath: String): ByteArray? {
     val file = fopen(absPath, "rb") ?: return null

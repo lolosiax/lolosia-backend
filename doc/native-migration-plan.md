@@ -695,6 +695,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 3 | `main()` 在 `commonMain` | 必须放**各目标源集**：KSP2 无 common/metadata 编译单元，生成代码落在目标源集，而 common 代码看不到 platform 声明 |
 | 4 | Ktor 自带 multipart | **Ktor 3.4 在 Native 上未实现 multipart**，被迫自研解析器（见 13.3-1） |
 | 5 | 包名规整 | 本 web 工程 `src/` 下的代码统一归入 **`moe.lolosia.web`**：`moe.lolosia.classpath` → `moe.lolosia.web.classpath`，`moe.lolosia.router` → `moe.lolosia.web.util.router`。仅**独立 Gradle 模块** `:router-ksp` 保持 `moe.lolosia.router.ksp`（其生成代码所用的注解全限定名常量已同步改为 `moe.lolosia.web.util.router`） |
+| 6 | classpath 流水线写在 `build.gradle.kts` | 迁入 **`buildSrc`**（`ClasspathExtension` + `NativeClasspath.kt`），`lolosia { }` 扩展重新启用并接管 vite 前端产物；根脚本从 187 行降到 106 行（见 13.5） |
 
 ### 13.3 实施中发现的坑（重要，后续必读）
 
@@ -741,6 +742,34 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 11. **在 x86_64 上跑 aarch64 产物验证**：`qemu-user-static` + `libc6-arm64-cross`，并需手动补
     `libcrypt.so.1`（从 `ports.ubuntu.com` 取**与发行版匹配**的版本，装太新会报 `GLIBC_2.43 not found`）。
     这条能省掉每次"打包→传板子"的往返。
+    **注意**：后台启动要用 `setsid ... < /dev/null &`；否则父脚本一退出就会连带把 qemu 干掉，
+    现象是日志里出现 `Uncaught Kotlin exception: JobCancellationException: LazyStandaloneCoroutine is cancelling`
+    —— 看着像协程 Bug，实际是测试脚本的进程管理问题。
+
+12. **Gradle `from(x) { ... }` 闭包形式会新建"子 spec"，遍历顺序永远排在根 `from()` 之后**
+    想用 `duplicatesStrategy = EXCLUDE`（先入者优先）来定资源优先级时，若把 vite 产物写成
+    `from(zipTree(jar)) { exclude(...) }`，即使写在最前面也**一定输给后面的 `from(sourceSet.resources)`**——
+    因为子 spec 的遍历顺序排在根 spec 的所有 source 之后。
+    → 过滤要用 `zipTree(f).matching { exclude(...) }` 返回 `FileTree`，再 `from(fileTree)` 才是根级 source。
+
+13. **buildSrc 里引入 KGP 后，主工程必须"无版本"应用 Kotlin 插件**
+    `implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:X")` 让 KGP 上了 buildSrc 的 classloader，
+    此时主工程再写 `alias(libs.plugins.kotlin.multiplatform)` 会直接失败：
+    `The request for this plugin could not be satisfied because the plugin is already on the classpath with an unknown version`。
+    → 主工程改为 `id("org.jetbrains.kotlin.multiplatform")`（不写版本），版本由 buildSrc 的依赖单点决定。
+    → buildSrc 的构建脚本默认**看不到主工程的版本目录**，需在 `buildSrc/settings.gradle.kts` 里
+    `create("libs").from(files("../gradle/libs.versions.toml"))` 挂载，避免 Kotlin 版本两处维护而漂移。
+
+14. **`ViteJarTask` 产出里会多出一个根目录 `MANIFEST.MF`**
+    Gradle 的 `Jar` 除了写 `META-INF/MANIFEST.MF`，还会把内容里的同名文件落到根目录。
+    并入 classpath 时必须一并排除，否则 `classpath.list("")` 里会混进一个垃圾条目。
+
+15. **Gradle 9 对缺失的 `inputs.dir()` / `inputs.file()` 直接判定校验失败**
+    `LolosiaPlugin` 原先用 `inputs.dir(baseDir.resolve("typings"))` 这类写法给 vite 源码打指纹，
+    但前端工程里 `typings`、`public` 未必存在；在 WSL 交叉编译时前端目录（`F:\...`）更是根本不存在，
+    于是 `:viteJar` 直接配置校验失败（`input file does not exist`），整个 link 起不来。
+    → 改为 `inputs.files(project.fileTree(path))`：目录不存在时只是空的 `FileTree`，不报错，
+      且文件级指纹比目录级更精确。
 
 ### 13.5 classpath.zip 中间层（P0-0.4）落地说明
 
@@ -756,34 +785,61 @@ val list  = classpath.list("static/")                     // 前缀列举
 val all   = classpath.entries                             // 全部条目
 ```
 
-**打包与嵌入**（`build.gradle.kts`）：
+**打包与嵌入**（实现位于 `buildSrc/src/main/kotlin/moe/lolosia/gradle/NativeClasspath.kt`）：
 
 | 环节 | mingwX64 | linuxArm64 |
 | --- | --- | --- |
 | 打包 | 标准 Gradle `Zip` 任务 `classpathZipMingwX64` | `classpathZipLinuxArm64` |
 | 合并来源 | 各源集的 `KotlinSourceSet.resources`，按「目标源集 > 中间源集 > commonMain」优先级，重名由更具体者胜 | 同左 |
-| 注入扩展 | `additionalClasspathResources`（其它 task 的资源目录在打包阶段一并合并） | 同左 |
+| 注入扩展 | `lolosia.classpath.resources(...)`（其它 task 的资源目录在打包阶段一并合并） | 同左 |
 | 嵌入 | `windresClasspathMingwX64`：用 Kotlin/Native 自带 mingw `windres` 把 `.rc` 编成 `.res` 后链接 | `objcopyClasspathLinuxArm64`：`aarch64-linux-gnu-objcopy -I binary` 转 `.o` 后链接，配 `-Wl,--export-dynamic` |
 | 运行时取像 | `FindResourceW` → `LoadResource` → `LockResource` | `dlsym("_binary_classpath_zip_start/_end")` |
+
+**构建配置（`lolosia { }` 扩展）**：把原先散在根脚本里的近百行流水线收进 `buildSrc` 的 `moe.lolosia` 插件后，
+根 `build.gradle.kts` 只剩声明式配置：
+
+```kotlin
+lolosia {
+    packageName = "moe.lolosia.web"
+    projectName = "洛洛希雅的Ktor后端"
+    deploy { /* 读 platforms.json */ }      // 需 bootJar，非 JVM 工程自动跳过并告警
+    viteJar { platform("default") { contextPath = "home"; dir = webPath } }
+    classpath {
+        // targets 留空 = 覆盖工程内全部 native 目标；includeViteJar 默认 true
+        // resources("build/xxx") 可再注入其它 task 的资源目录
+    }
+}
+```
+
+**vite 前端产物并入 classpath**：`viteJar` 任务原本只服务于 JVM 工程的 `bootJar`/`jar`；
+非 JVM 打包工程（本项目）没有 jar，于是 `LolosiaPlugin` 改为把 `viteJar` 的产物交给 classpath 流水线消费，
+zip 内前缀沿用 `static/<contextPath>`（即 `static/home/`），**与旧 JVM 版的资源路径完全一致**。
+
+合并优先级（先入者优先）：**vite 前端产物 > 目标源集 resources > 中间源集 > commonMain > 注入资源**。
+即构建出的前端会覆盖 `src/*/resources` 里的同名占位文件（例如占位 `index.html`），
+不会再出现"真实前端被仓库内占位页挡住"的情况。
 
 **实现要点**：
 - `ZipClasspath` 只解析**中央目录**建索引一次，读取时才拷贝单条目；打开时把映像拷入内存数组，
   换取解析逻辑与平台无关（几 MB 一次性开销）。
 - 目前只支持 **STORED**（不压缩）条目；要改 DEFLATED 需在 `read()` 里补 inflate
-  （可用 Kotlin/Native 自带的 `platform.zlib`）。
+  （可用 Kotlin/Native 自带的 `platform.zlib`），或把 `lolosia.classpath.compressed` 打开后补齐读取端。
 - `Route.staticClasspath(remotePath, zipPrefix)` 把 classpath 挂成静态资源路由，自动
   `Content-Type` / `Cache-Control` / `ETag`，含 `index` 与 SPA `fallback`，配合 `ConditionalHeaders` 支持 304。
 - 开发期可用环境变量 `KTOR_CLASSPATH_DIR` 指向磁盘目录，**改前端资源不必重编二进制**。
 
 **实测**（两平台各自的 `target.txt` 内容不同，用来验证按目标源集区分）：
 
-| 检查项 | mingwX64 | linuxArm64（qemu） |
+| 检查项 | mingwX64 | linuxArm64（WSL 交叉编译 + qemu） |
 | --- | --- | --- |
-| classpath 装载 | 3 条目（内嵌 zip） | 3 条目（内嵌 zip） |
+| 构建 | ✅ BUILD SUCCESSFUL | ✅ BUILD SUCCESSFUL（`_binary_classpath_zip_*` 3 个符号在 `.dynsym`） |
+| classpath 装载 | 99 条目（含 vite 产物；前端工程在本机可达） | 3 条目（WSL 里访问不到 `F:\...\lolosia-web`，vite 跳过，属预期） |
 | `hello.txt`（commonMain） | ✅ | ✅ |
 | `target.txt`（目标源集） | ✅ 返回 mingwX64 那份 | ✅ 返回 linuxArm64 那份 |
-| `/home/` 返回内嵌 index.html | ✅ 200 text/html | ✅ 200 text/html 745B |
+| `/home/` | ✅ 200 text/html **395B = vite 产物**（覆盖了仓库里 745B 的占位页） | ✅ 200 text/html 745B = 占位页（前端未参与构建） |
+| `/home/static/js/index.js`、`/home/favicon.ico` | ✅ 200，来自 vite 构建 | —（无前端产物） |
 | `/` 301 跳转 / SPA 回退 / 前缀过滤 / 缺失资源 | ✅ | ✅ |
+| 资源路由 / ctx 注入 / @Path / @Query / multipart / 参数错误→400 | ✅ | ✅（0 未捕获异常） |
 | Cache-Control + ETag + If-None-Match→304 | ✅ | — |
 | `KTOR_CLASSPATH_DIR` 磁盘覆盖 | ✅ | — |
 

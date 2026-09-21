@@ -32,7 +32,9 @@ class LolosiaPlugin : Plugin<Project> {
         project.afterEvaluate {
             configureGitArchive(project, lolosiaExtension)
             configureDeploy(project, lolosiaExtension)
+            // viteJar 必须先注册：classpath 流水线要消费它的产物
             configureViteJar(project, lolosiaExtension.viteJar)
+            configureNativeClasspath(lolosiaExtension)
             configureGenerateConstants(project, lolosiaExtension)
             configureGenerateDiModule(project)
             configureGenerateRouteModule(project)
@@ -49,7 +51,13 @@ class LolosiaPlugin : Plugin<Project> {
         val deployExt = lolosiaExt.deploy
         if (deployExt.servers.isEmpty()) return
 
-        val bootJarTask = project.tasks.named("bootJar")
+        val bootJarTask = project.tasks.findByName("bootJar")
+        if (bootJarTask == null) {
+            project.logger.warn(
+                "lolosia deploy：未找到 bootJar（当前不是 JVM 打包工程），本次跳过部署任务注册"
+            )
+            return
+        }
 
         val deployModes = setOf("docker", "systemd")
 
@@ -101,12 +109,13 @@ class LolosiaPlugin : Plugin<Project> {
                 config.dir?.let { dirPath ->
                     val baseDir = project.file(dirPath)
                     val cache = config.cache
-                    cache.dirs.forEach { inputs.dir(baseDir.resolve(it)) }
-                    cache.files.forEach { inputs.file(baseDir.resolve(it)) }
+                    // 用 fileTree 而不是 inputs.dir/inputs.file：
+                    // 这些路径可能不存在（typings/public 未必存在，交叉编译环境下整个前端目录都可能不在），
+                    // 而 Gradle 9 对缺失的 inputs.dir/inputs.file 会直接判定校验失败。
+                    cache.dirs.forEach { inputs.files(project.fileTree(baseDir.resolve(it))) }
+                    cache.files.forEach { inputs.files(project.fileTree(baseDir.resolve(it))) }
                     cache.filePatterns.forEach { pattern ->
-                        project.fileTree(baseDir) { include(pattern) }.forEach {
-                            inputs.file(it)
-                        }
+                        inputs.files(project.fileTree(baseDir) { include(pattern) })
                     }
                 }
             }
@@ -115,10 +124,13 @@ class LolosiaPlugin : Plugin<Project> {
         }
 
         // vite 静态资源并入主产物：Spring Boot 项目并入 bootJar（BOOT-INF/classes 布局）；
-        // 其他项目并入默认 jar（classpath 根，Ktor 的 staticResources 直接读取，
-        // 配合 application 插件的 installDist 部署，避免 fat jar 的 Java 9+ 模块问题）。
+        // 其他 JVM 项目并入默认 jar（classpath 根，Ktor 的 staticResources 直接读取，配合 application
+        // 插件的 installDist 部署，避免 fat jar 的 Java 9+ 模块问题）。
+        // 非 JVM 打包工程（Kotlin/Native）没有 jar，产物由 classpath 资源流水线消费，
+        // 见 [configureNativeClasspath] / [ClasspathExtension.includeViteJar]。
         val targetTask = project.tasks.findByName("bootJar") as? Jar
-            ?: project.tasks.named("jar", Jar::class.java).get()
+            ?: project.tasks.findByName("jar") as? Jar
+            ?: return
         project.tasks.named(targetTask.name, Jar::class.java) {
             dependsOn(viteJarTask)
             val viteJarFile = viteJarTask.get().archiveFile
@@ -135,6 +147,14 @@ class LolosiaPlugin : Plugin<Project> {
         val vitePlatforms = lolosiaExt.viteJar.platforms
         if (vitePlatforms.isEmpty()) return
 
+        // 常量目前用于 JVM 工程：生成文件带 @file:JvmName，且挂到 java 的 main sourceSet。
+        // Kotlin/Native 工程既没有 kaptKotlin 也不需要这些常量，直接跳过。
+        val kaptKotlin = project.tasks.findByName("kaptKotlin")
+        if (kaptKotlin == null) {
+            project.logger.info("lolosia generateConstants：当前不是 JVM 打包工程，跳过常量生成")
+            return
+        }
+
         val contextPaths = vitePlatforms.mapValues { it.value.contextPath }
 
         val generateTask = project.tasks.register("generateConstants", GenerateConstantsTask::class.java) {
@@ -143,9 +163,7 @@ class LolosiaPlugin : Plugin<Project> {
             this.platforms = contextPaths
         }
 
-        project.tasks.named("kaptKotlin").configure {
-            dependsOn(generateTask)
-        }
+        kaptKotlin.dependsOn(generateTask)
 
         project.extensions.getByType<SourceSetContainer>().named("main") {
             java.srcDir(generateTask.map { it.outputDir })
