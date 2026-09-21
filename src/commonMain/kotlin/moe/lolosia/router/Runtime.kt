@@ -1,13 +1,10 @@
 package moe.lolosia.router
 
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
-import io.ktor.http.content.PartData
-import io.ktor.http.content.forEachPart
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.request.receiveMultipart
+import io.ktor.server.request.receive
 import io.ktor.server.request.receiveParameters
-import io.ktor.utils.io.readRemaining
-import kotlinx.io.readByteArray
 import kotlin.reflect.KClass
 import kotlin.uuid.Uuid
 
@@ -126,41 +123,26 @@ public class FormData(
 /**
  * 读取表单（multipart 或 urlencoded）。
  *
- * 注意：Ktor 3.4 在取下一个 part 时会丢弃上一个 part 的 body，
- * 因此 FileItem 必须**当场**把字节读出来（与旧版 `collectFileItems` 的处理一致）。
+ * 注意：Ktor 3.4 在 Kotlin/Native 上未实现 multipart（平台侧直接 `error(...)`），
+ * 因此 multipart 分支改为读原始字节后用自研解析器处理，见 [parseMultipartBody]。
  */
 public suspend fun ApplicationCall.readForm(): FormData {
-    val contentType = request.headers[HttpHeaders.ContentType]
-    val isMultipart = contentType?.trim()?.startsWith("multipart/", ignoreCase = true) == true
-    if (!isMultipart) {
-        val fields = request.queryParameters.entries().associate { it.key to it.value.first() }
-        return FormData(fields, emptyList())
+    val contentType = request.headers[HttpHeaders.ContentType]?.trim().orEmpty()
+
+    if (contentType.startsWith("multipart/", ignoreCase = true)) {
+        val boundary = parseMultipartBoundary(contentType) ?: return FormData.Empty
+        val body: ByteArray = receive()
+        return parseMultipartBody(body, boundary)
     }
 
-    val fields = mutableMapOf<String, String>()
-    val files = mutableListOf<UploadedFile>()
-    receiveMultipart().forEachPart { part ->
-        when (part) {
-            is PartData.FormItem -> {
-                fields[part.name ?: ""] = part.value
-                part.dispose()
-            }
-
-            is PartData.FileItem -> {
-                val bytes = part.provider().readRemaining().readByteArray()
-                files += UploadedFile(
-                    fieldName = part.name ?: "",
-                    fileName = part.originalFileName,
-                    contentType = part.contentType?.toString(),
-                    bytes = bytes,
-                )
-                part.dispose()
-            }
-
-            else -> part.dispose()
-        }
+    val fields = if (contentType.startsWith(ContentType.Application.FormUrlEncoded.toString(), ignoreCase = true)) {
+        runCatching { receiveParameters() }.getOrNull()
+            ?.entries()?.associate { it.key to it.value.first() }
+            ?: emptyMap()
+    } else {
+        request.queryParameters.entries().associate { it.key to it.value.first() }
     }
-    return FormData(fields, files)
+    return FormData(fields, emptyList())
 }
 
 /** 读取 urlencoded 表单字段（不处理 multipart）。 */
