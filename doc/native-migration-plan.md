@@ -742,9 +742,10 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 11. **在 x86_64 上跑 aarch64 产物验证**：`qemu-user-static` + `libc6-arm64-cross`，并需手动补
     `libcrypt.so.1`（从 `ports.ubuntu.com` 取**与发行版匹配**的版本，装太新会报 `GLIBC_2.43 not found`）。
     这条能省掉每次"打包→传板子"的往返。
-    **注意**：后台启动要用 `setsid ... < /dev/null &`；否则父脚本一退出就会连带把 qemu 干掉，
-    现象是日志里出现 `Uncaught Kotlin exception: JobCancellationException: LazyStandaloneCoroutine is cancelling`
-    —— 看着像协程 Bug，实际是测试脚本的进程管理问题。
+    **注意**：后台启动 qemu 要用 `setsid ... < /dev/null &`，且**单独放一个脚本文件**跑；
+    放进 `{ ... } > log` 这类整体重定向的复合语句里也会被连带取消。现象是日志里出现
+    `Uncaught Kotlin exception: JobCancellationException: LazyStandaloneCoroutine is cancelling`
+    —— 看着像协程 Bug，实际是测试脚本的进程管理问题（同一二进制连跑 3 次均正常）。
 
 12. **Gradle `from(x) { ... }` 闭包形式会新建"子 spec"，遍历顺序永远排在根 `from()` 之后**
     想用 `duplicatesStrategy = EXCLUDE`（先入者优先）来定资源优先级时，若把 vite 产物写成
@@ -770,6 +771,13 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
     于是 `:viteJar` 直接配置校验失败（`input file does not exist`），整个 link 起不来。
     → 改为 `inputs.files(project.fileTree(path))`：目录不存在时只是空的 `FileTree`，不报错，
       且文件级指纹比目录级更精确。
+
+16. **`generateConstants` 要生成到 commonMain 必须去掉 `@file:JvmName`**
+    `@file:JvmName("Constants")` 在 JVM 目标上没问题，但放进 `commonMain` 会直接编译失败：
+    `Unresolved reference 'JvmName'`（它不是 `@OptionalExpectation`，普通 common 代码看不到）。
+    → `GenerateConstantsTask` 增加 `jvmTarget` 开关（JVM 工程仍生成），KMP 工程置 false。
+    → 另外 Gradle 不允许 `@Optional` 标注**基本类型**属性（`Properties of primitive type cannot be optional`），
+      所以 `var jvmTarget: Boolean` 只能带 `@Input`。
 
 ### 13.5 classpath.zip 中间层（P0-0.4）落地说明
 
@@ -819,6 +827,25 @@ zip 内前缀沿用 `static/<contextPath>`（即 `static/home/`），**与旧 JV
 即构建出的前端会覆盖 `src/*/resources` 里的同名占位文件（例如占位 `index.html`），
 不会再出现"真实前端被仓库内占位页挡住"的情况。
 
+**前端路径常量（`generateConstants`）**：每个 `viteJar.platform(<名>)` 生成一个
+`VITE_<平台名大写>` 常量（值即 `contextPath`），服务端挂载静态资源时引用常量而不是写死字符串。
+配多个前端就生成多个常量，KMP 工程把生成目录挂到 `commonMain`（去掉 `@file:JvmName`）。
+
+```kotlin
+// build/generated/source/vite/main/moe/lolosia/web/constants.kt
+package moe.lolosia.web
+const val PROJECT_NAME = "洛洛希雅的Ktor后端"
+const val VITE_DEFAULT = "home"
+```
+
+`Bootstrap.kt` 中（与旧 JVM 版 `HomeController` 的写法一致）：
+
+```kotlin
+staticClasspath("/$VITE_DEFAULT", "static/$VITE_DEFAULT") { index = "index.html"; /* … */ }
+get("/") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
+get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
+```
+
 **实现要点**：
 - `ZipClasspath` 只解析**中央目录**建索引一次，读取时才拷贝单条目；打开时把映像拷入内存数组，
   换取解析逻辑与平台无关（几 MB 一次性开销）。
@@ -833,6 +860,7 @@ zip 内前缀沿用 `static/<contextPath>`（即 `static/home/`），**与旧 JV
 | 检查项 | mingwX64 | linuxArm64（WSL 交叉编译 + qemu） |
 | --- | --- | --- |
 | 构建 | ✅ BUILD SUCCESSFUL | ✅ BUILD SUCCESSFUL（`_binary_classpath_zip_*` 3 个符号在 `.dynsym`） |
+| `generateConstants` | ✅ `VITE_DEFAULT = "home"` 生成到 commonMain | ✅ 同样生成（WSL 里也按 platforms.json 生成） |
 | classpath 装载 | 99 条目（含 vite 产物；前端工程在本机可达） | 3 条目（WSL 里访问不到 `F:\...\lolosia-web`，vite 跳过，属预期） |
 | `hello.txt`（commonMain） | ✅ | ✅ |
 | `target.txt`（目标源集） | ✅ 返回 mingwX64 那份 | ✅ 返回 linuxArm64 那份 |

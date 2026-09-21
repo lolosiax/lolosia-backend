@@ -27,6 +27,13 @@ open class GenerateConstantsTask : DefaultTask() {
     @Optional
     var platforms: Map<String, String?> = emptyMap()
 
+    /**
+     * 生成 JVM 专属的 `@file:JvmName`。
+     * Kotlin/Native（以及 common 源集）不认识该注解，KMP 工程需置 false。
+     */
+    @Input
+    var jvmTarget: Boolean = true
+
     @OutputDirectory
     val outputDir = project.layout.buildDirectory.dir("generated/source/vite/main")
 
@@ -52,8 +59,10 @@ open class GenerateConstantsTask : DefaultTask() {
 
     private fun buildConstantsContent(): String {
         val sb = StringBuilder()
-        sb.appendLine("@file:JvmName(\"Constants\")")
-        sb.appendLine()
+        if (jvmTarget) {
+            sb.appendLine("@file:JvmName(\"Constants\")")
+            sb.appendLine()
+        }
         sb.appendLine("package $packageName")
         sb.appendLine()
 

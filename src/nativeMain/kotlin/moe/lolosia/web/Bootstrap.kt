@@ -82,11 +82,12 @@ private fun Application.configureApplication(installRoutes: Routing.() -> Unit) 
 
     routing {
         // 手写路由：前端静态资源（来自嵌入式 classpath，SPA 未命中回退 index.html）
-        staticClasspath("/home", "static/home") {
+        // 路径取自 generateConstants 依 viteJar 平台生成的常量，不写死字符串
+        staticClasspath("/$VITE_DEFAULT", "static/$VITE_DEFAULT") {
             index = "index.html"
             cacheControl = "max-age=60"
             fallback = { _ ->
-                val index = classpath.read("static/home/index.html")
+                val index = classpath.read("static/$VITE_DEFAULT/index.html")
                 if (index != null) {
                     respondBytes(index, ContentType.Text.Html)
                 } else {
@@ -94,7 +95,8 @@ private fun Application.configureApplication(installRoutes: Routing.() -> Unit) 
                 }
             }
         }
-        get("/") { call.respondRedirect("/home/", permanent = true) }
+        get("/") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
+        get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
 
         // 自研路由插件生成：全部 @Controller
         installRoutes()

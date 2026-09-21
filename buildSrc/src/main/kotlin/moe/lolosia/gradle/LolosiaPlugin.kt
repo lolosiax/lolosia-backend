@@ -16,6 +16,7 @@ import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.*
 import org.gradle.plugins.ide.idea.model.IdeaModel
+import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 
 /**
  * Lolosia Spring Boot 构建与部署插件
@@ -147,13 +148,10 @@ class LolosiaPlugin : Plugin<Project> {
         val vitePlatforms = lolosiaExt.viteJar.platforms
         if (vitePlatforms.isEmpty()) return
 
-        // 常量目前用于 JVM 工程：生成文件带 @file:JvmName，且挂到 java 的 main sourceSet。
-        // Kotlin/Native 工程既没有 kaptKotlin 也不需要这些常量，直接跳过。
+        // 每个前端平台生成一个 VITE_<平台名> 常量（值即 contextPath），供服务端挂载静态资源时引用，
+        // 避免把 "/home" 之类的路径写死在代码里。
+        // JVM 工程挂到 java 的 main sourceSet（配合 kapt）；KMP 工程挂到 commonMain。
         val kaptKotlin = project.tasks.findByName("kaptKotlin")
-        if (kaptKotlin == null) {
-            project.logger.info("lolosia generateConstants：当前不是 JVM 打包工程，跳过常量生成")
-            return
-        }
 
         val contextPaths = vitePlatforms.mapValues { it.value.contextPath }
 
@@ -161,12 +159,24 @@ class LolosiaPlugin : Plugin<Project> {
             packageName = lolosiaExt.packageName ?: "moe.lolosia"
             projectName = lolosiaExt.projectName ?: "未命名的应用程序平台"
             this.platforms = contextPaths
+            // @file:JvmName 只有 JVM 目标认识，common/Native 源集里会 "Unresolved reference 'JvmName'"
+            jvmTarget = kaptKotlin != null
         }
 
-        kaptKotlin.dependsOn(generateTask)
+        val outputDir = generateTask.map { it.outputDir }
 
-        project.extensions.getByType<SourceSetContainer>().named("main") {
-            java.srcDir(generateTask.map { it.outputDir })
+        if (kaptKotlin != null) {
+            kaptKotlin.dependsOn(generateTask)
+            project.extensions.getByType<SourceSetContainer>().named("main") {
+                java.srcDir(outputDir)
+            }
+        } else {
+            val kotlinExt = project.extensions.findByType(KotlinMultiplatformExtension::class.java)
+            if (kotlinExt == null) {
+                project.logger.warn("lolosia generateConstants：既没有 kapt 也不是 KMP 工程，跳过常量生成")
+                return
+            }
+            kotlinExt.sourceSets.getByName("commonMain").kotlin.srcDir(outputDir)
         }
 
         project.plugins.withId("idea") {
