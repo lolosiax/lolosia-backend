@@ -654,3 +654,74 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 7 | 资源分发 | **嵌入到二进制，自己实现一套资源加载器** | 见 §3.1 实测配方 |
 | 8 | classpath 模型 | **自造 `classpath.zip` 打包进可执行文件**（classpath 本质就是 zip，参考 installer 模块与 zip 加载器），**所有 classpath 访问统一走这个中间层** | 见 §3.2；`Classpath` 接口 + `staticClasspath` 路由 + `DiskClasspath` 回退 |
 | 9 | 路由注解 | **自己造 Gradle 插件轮子**，只实现需要的部分（表单、文件、Body、Path、Query 等）；**目标：跨项目复制代码时改动尽可能小** | 见 §5.4；注解与 ktorfitx **同名同义**，控制器只改 import；`@Route` 保留作长尾兜底 |
+
+---
+
+## 13. P0 实施进度与实测记录（native 分支）
+
+> 本节记录**已落地代码**与实测结果，配套提交见 git 历史（`native` 分支）。
+
+### 13.1 已完成
+
+| P0 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 0.1 KMP 工程结构 | ✅ | 根工程改为 `kotlin("multiplatform")`，目标 `mingwX64` + `linuxArm64`；旧 JVM 代码整体移入 `legacy/`（仅作移植参考，不参与编译）；移除 `:orm` 与全部 JVM 插件/依赖 |
+| 0.2 最小 CIO 服务 | ✅ | `embeddedServer(CIO, 7129)` + `ContentNegotiation(JSON)` + `StatusPages` + `{code,msg,data}` 信封 |
+| 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
+| 0.4 `classpath.zip` 中间层 | ⬜ **未开始** | 设计见 §3.2；嵌入式资源读取与 zip 解析均已有可复用的已验证机制（§3.1） |
+| 0.5 基础设施替换 | ⬜ | |
+| 0.6 sqlx4k 数据层 | ⬜ | |
+| 0.7 bcrypt | ⬜ | |
+| 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
+| 0.9 部署 | 🟡 部分 | 已在开发板验证「二进制可运行」，systemd 接管与替换 fat jar 未做 |
+
+**实测数据**
+
+| 指标 | mingwX64（Windows 本机） | linuxArm64（开发板 lckfb） |
+| --- | --- | --- |
+| 产物大小 | 13.66 MB（debug） | 12.90 MB（debug） |
+| 构建方式 | Windows 直接构建 | **WSL(x86_64) 交叉编译**：首次 13m05s（含工具链下载，`~/.konan` 约 2.1GB），增量 40s |
+| 冒烟测试 | 10/10 通过 | 8/8 通过（经 QUIC 隧道部署到板子实跑） |
+| 运行内存 | — | **RSS ≈ 34 MB**（现网 JVM 版 `-Xmx512m`） |
+
+冒烟覆盖：`/`、`/api/ping`、**`ctx` 无注解按类型自动注入**、`@Path`/`@Query` 省略名、可空参数、`@Path` 显式名、`@Body` JSON、multipart 上传、参数转换失败→400、未知路由→404。
+
+### 13.2 与设计的偏差（实施后修正）
+
+| # | 原设计 | 实际做法与原因 |
+| --- | --- | --- |
+| 1 | 注解放 `moe.lolosia.web.annotation`（与 `@Route` 同包） | 改为 **`moe.lolosia.router`**：插件要作为可复用组件独立发布，需要稳定且与业务无关的包名 |
+| 2 | `@Attribute("ctx")` 注入上下文 | **去掉该注解**（用户指出字符串前缀属冗余），改为 **`@Injectable` 标注类型 + 按类型自动注入**，形参写 `ctx: Context` 即可。`@Path/@Query/@Header/@Form/@FilePart` 的名称也改为**可省略，默认取形参名** |
+| 3 | `main()` 在 `commonMain` | 必须放**各目标源集**：KSP2 无 common/metadata 编译单元，生成代码落在目标源集，而 common 代码看不到 platform 声明 |
+| 4 | Ktor 自带 multipart | **Ktor 3.4 在 Native 上未实现 multipart**，被迫自研解析器（见 13.3-1） |
+
+### 13.3 实施中发现的坑（重要，后续必读）
+
+1. **Ktor 3.4 在 Kotlin/Native 上没有 multipart**
+   平台侧实现为 `error("Multipart is not supported in native")`，`receiveMultipart()` 会直接抛 `ContentTransformationException`。
+   → 已自研纯字节扫描的 `multipart/form-data` 解析器（`moe.lolosia.router.Multipart`，零第三方依赖），`@Form`/`@FilePart` 因此可用；文件字节与本地真实文件逐字节一致。
+   → 启示：凡是"JVM 上理所当然"的 Ktor 功能，在 Native 上都要先查平台侧 actual 实现。
+
+2. **KSP2 + KMP 没有 common/metadata 编译单元**
+   `tasks` 里只有 `kspKotlinMingwX64` / `kspKotlinLinuxArm64`，没有 `kspCommonMainMetadata`；加 `kspCommonMainMetadata` 依赖也不会生成任务。
+   → 生成代码落在目标源集；而 **common 代码不能引用 platform 声明**（已用最小探针验证），所以入口 `main()` 必须在目标源集。
+   → 架构上的写法：`commonMain` 提供 `startServer(port, installRoutes)`，各目标 `main()` 传入 `{ generatedRoutes() }`。
+
+3. **KSP 聚合输出必须声明 `Dependencies(aggregating = true, *源文件)`**
+   只写 `aggregating = true` 而不传源文件时，KSP 增量处理只扫"脏文件"，会把未改动文件里的 `@Controller` 全部漏掉，**静默生成空路由表**（编译通过、接口全 404，极具迷惑性）。
+
+4. **阿里云镜像缺 Ktor 的 native 产物**
+   `ktor-server-core-mingwx64.klib` 等在阿里云 `public` 仓库同步不全 → 需在 `settings.gradle.kts` 里 `excludeGroupByRegex("io\\.ktor")` 强制走 mavenCentral。
+
+5. **WSL 交叉编译可行，且不需要 Docker**
+   `download.jetbrains.com` 与 Maven Central 在 WSL 中均可达；Gradle 9.5.1 + JDK 21 + Kotlin/Native 工具链全自动就绪。
+
+6. **`scp` 指定端口是大写 `-P`**（小写 `-p` 是保留时间戳），踩过一次。
+
+7. **Windows 上链接产物被运行中的进程占用会导致 link 失败** —— 改代码前先停掉正在跑的 exe。
+
+### 13.4 建议的下一步
+
+1. **0.4 `classpath.zip`**：按 §3.2 实现 `Classpath`（含 `platform.zlib` 解压）+ `staticClasspath` 路由 + `DiskClasspath` 回退；嵌入流水线复用 §3.1 已验证机制（Windows `windres`、Linux `objcopy`）。
+2. **0.5~0.8**：按 §5 清单把 `legacy/` 里的可移植部分逐个迁到 `commonMain`，JVM 专有部分按表删除/替换。
+3. **0.9**：开发板新增 systemd 单元指向原生二进制（保留现网 7129 的 JVM 服务作回滚），确认后替换。
