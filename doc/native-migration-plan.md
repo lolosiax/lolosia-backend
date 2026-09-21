@@ -882,20 +882,51 @@ get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true
 | `.service` 的 `ExecStart=/usr/bin/java -Xms… -Xmx… -jar …` | 需要整行换成可执行文件路径，且原生不需要 `unzip/zip`（`prepareSystemdDeployDir` 里的 apt 安装） |
 
 **做法**：给部署产物加一个「形态」维度，而不是往 `mode` 里塞值 —— `mode` 回答「怎么跑」（docker / systemd），
-形态回答「跑什么」，两者正交。
+形态回答「跑什么」，两者正交。**而「跑哪个架构」是每台机器自己的属性，写在服务器配置里**：
+同一个项目完全可能既部署到 arm64 开发板、又部署到 x64 云主机。
+
+`platforms.json`（不提交，本地配置）：
+
+```json
+{
+  "servers": [
+    { "name": "shiyan", "host": "203.0.113.10", "mode": "systemd" },
+    { "name": "1m", "host": "localhost", "port": 6023, "mode": "systemd",
+      "abi": "arm64", "args": ["7130"] }
+  ]
+}
+```
 
 ```kotlin
 lolosia {
     deploy {
-        servers { … }                 // mode 仍是 docker / systemd，语义不变
-        binary {                      // 写了这段 = 部署原生可执行文件；不写 = 部署 bootJar
-            target = "linuxArm64"     // 决定 link*Executable* 任务与产物路径
+        servers?.forEach { server ->
+            server(server["name"] as String) {
+                …
+                mode = server["mode"] as? String ?: "docker"
+                abi = server["abi"] as? String                                  // 配了就是原生，不配就是 jar
+                args = (server["args"] as? List<*>)?.map { it.toString() } ?: emptyList()
+            }
+        }
+        binary {                     // 只有跨服务器共享的构建/单元命名；全部有默认值
             buildType = "release"
-            args = mutableListOf("7130")   // main() 取 argv[0] 作端口，用于与原 JVM 服务并行
         }
     }
 }
 ```
+
+产物解析规则（逐服务器）：
+
+| server 配置 | 部署产物 | Kotlin/Native 目标 |
+| --- | --- | --- |
+| `abi = "arm64"` | 原生可执行文件 | `linuxArm64` |
+| `abi = "x64"` | 原生可执行文件 | `linuxX64` |
+| 无 `abi` | JVM `bootJar` | — |
+
+- ABI 别名：`arm64` / `aarch64` 等价，`x64` / `amd64` / `x86_64` 等价。
+- ABI 不认识、或工程没声明对应目标（如没写 `linuxX64 { }`）→ 告警并**跳过该服务器**，不影响其它服务器。
+- 服务器既没配 `abi`、工程又确实没有 `bootJar`（纯原生工程）→ 跳过（`info` 级，不吵）。
+- 被跳过的服务器**不会**注册 `deploy<名字>`，聚合 `deploy` 任务也不会指向它。
 
 `DeployTask` 新增 `artifactKind`（jar / binary）与 `artifact`（`@InputFiles`，由插件注入 link 任务输出），
 binary 分支的处理：

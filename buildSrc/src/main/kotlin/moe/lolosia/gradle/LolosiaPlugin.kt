@@ -2,6 +2,7 @@ package moe.lolosia.gradle
 
 import moe.lolosia.gradle.extension.BinaryConfig
 import moe.lolosia.gradle.extension.LolosiaExtension
+import moe.lolosia.gradle.extension.ServerConfig
 import moe.lolosia.gradle.extension.ViteJarExtension
 import moe.lolosia.gradle.task.ARTIFACT_BINARY
 import moe.lolosia.gradle.task.ARTIFACT_JAR
@@ -54,32 +55,55 @@ class LolosiaPlugin : Plugin<Project> {
     }
 
     /**
-     * 决定部署什么：配置了 `deploy { binary { } }` 就部署 Kotlin/Native 可执行文件，
-     * 否则回到 JVM 的 `bootJar`。
+     * 决定这台服务器部署什么：
+     * - server 配了 `abi` → Kotlin/Native 可执行文件（ABI 映射到 `linuxArm64` / `linuxX64`）；
+     * - 否则 → JVM 的 `bootJar`。
+     *
+     * ABI 放在 server 上而不是项目上：同一个项目完全可能既部署到 arm64 开发板、又部署到 x64 云主机。
      */
-    private fun resolveDeployArtifact(project: Project, lolosiaExt: LolosiaExtension): DeployArtifact? {
-        val binary = lolosiaExt.deploy.binaryConfig
-        if (binary != null) return resolveNativeArtifact(project, binary)
+    private fun resolveDeployArtifact(
+        project: Project,
+        lolosiaExt: LolosiaExtension,
+        serverName: String,
+        server: ServerConfig,
+    ): DeployArtifact? {
+        val abi = server.abi
+        if (!abi.isNullOrBlank()) {
+            return resolveNativeArtifact(project, lolosiaExt.deploy.binaryConfig, serverName, abi, server)
+        }
 
         val bootJar = project.tasks.findByName("bootJar")
         if (bootJar == null) {
-            project.logger.warn(
-                "lolosia deploy：既没有 bootJar 也没有配置 deploy.binary，本次跳过部署任务注册"
+            project.logger.info(
+                "lolosia deploy：server '$serverName' 未配置 abi，工程里也没有 bootJar，本次跳过"
             )
             return null
         }
         return DeployArtifact(kind = ARTIFACT_JAR, task = bootJar, files = project.files(bootJar))
     }
 
-    private fun resolveNativeArtifact(project: Project, binary: BinaryConfig): DeployArtifact? {
-        val buildType = binary.buildType.lowercase().replaceFirstChar { it.uppercaseChar() }
-        val target = binary.target.replaceFirstChar { it.uppercaseChar() }
-        val taskName = "link${buildType}Executable$target"
+    private fun resolveNativeArtifact(
+        project: Project,
+        binary: BinaryConfig?,
+        serverName: String,
+        abi: String,
+        server: ServerConfig,
+    ): DeployArtifact? {
+        val target = kotlinNativeTargetOf(abi)
+        if (target == null) {
+            project.logger.warn(
+                "lolosia deploy：server '$serverName' 的 abi='$abi' 无法识别（支持 arm64 / x64），本次跳过"
+            )
+            return null
+        }
+
+        val buildType = (binary?.buildType ?: "release").lowercase().replaceFirstChar { it.uppercaseChar() }
+        val taskName = "link${buildType}Executable${target.replaceFirstChar { it.uppercaseChar() }}"
         val linkTask = project.tasks.findByName(taskName)
         if (linkTask == null) {
             project.logger.warn(
-                "lolosia deploy：未找到 $taskName" +
-                    "（请确认 kotlin { } 中已声明目标 ${binary.target}），本次跳过部署任务注册"
+                "lolosia deploy：server '$serverName' 需要 $taskName，但工程里没有这个任务" +
+                    "（请在 kotlin { } 中声明目标 $target），本次跳过"
             )
             return null
         }
@@ -88,17 +112,22 @@ class LolosiaPlugin : Plugin<Project> {
             kind = ARTIFACT_BINARY,
             task = linkTask,
             files = project.files(linkTask),
-            remoteName = binary.name ?: project.rootProject.name,
-            unitName = binary.unitName,
-            launchArgs = binary.args.toList(),
+            remoteName = binary?.name ?: project.rootProject.name,
+            unitName = binary?.unitName,
+            launchArgs = server.args.toList(),
         )
+    }
+
+    /** ABI（platforms.json 里写的）→ Kotlin/Native 目标名。 */
+    private fun kotlinNativeTargetOf(abi: String): String? = when (abi.lowercase()) {
+        "arm64", "aarch64" -> "linuxArm64"
+        "x64", "amd64", "x86_64" -> "linuxX64"
+        else -> null
     }
 
     private fun configureDeploy(project: Project, lolosiaExt: LolosiaExtension) {
         val deployExt = lolosiaExt.deploy
         if (deployExt.servers.isEmpty()) return
-
-        val artifact = resolveDeployArtifact(project, lolosiaExt) ?: return
 
         val deployModes = setOf("docker", "systemd")
 
@@ -106,12 +135,18 @@ class LolosiaPlugin : Plugin<Project> {
             DockerImageInfo(mirror = it.value.mirror ?: "", autoUntagMirror = it.value.autoUntagMirror)
         }
 
+        // 记录真正注册了部署任务的服务器：产物解析失败的会被跳过，聚合任务不能指向它们
+        val registered = mutableSetOf<String>()
+
         deployExt.servers.forEach { (name, serverConfig) ->
             if (serverConfig.mode !in deployModes) {
                 throw GradleException(
                     "deploy server '$name' 的 mode '${serverConfig.mode}' 不合法，仅支持：${deployModes.joinToString(" / ")}"
                 )
             }
+
+            // 产物按服务器逐个解析：各机器的 ABI 可以不同
+            val artifact = resolveDeployArtifact(project, lolosiaExt, name, serverConfig) ?: return@forEach
 
             val taskName = "deploy${name.replaceFirstChar { it.uppercase() }}"
             project.tasks.register(taskName, DeployTask::class.java) {
@@ -131,16 +166,16 @@ class LolosiaPlugin : Plugin<Project> {
                 serverMode = serverConfig.mode
                 dockerImages = dockerImageMap
             }
+            registered += name
         }
 
         deployExt.activate?.let { activeName ->
+            if (activeName !in registered) return@let
             val activeTaskName = "deploy${activeName.replaceFirstChar { it.uppercase() }}"
-            if (deployExt.servers.containsKey(activeName)) {
-                project.tasks.register("deploy") {
-                    group = "deploy"
-                    description = "Deploys to the active server '$activeName'"
-                    dependsOn(activeTaskName)
-                }
+            project.tasks.register("deploy") {
+                group = "deploy"
+                description = "Deploys to the active server '$activeName'"
+                dependsOn(activeTaskName)
             }
         }
     }

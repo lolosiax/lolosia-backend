@@ -85,16 +85,17 @@ lolosia {
                 password = server["password"] as String
                 // docker（默认）需要根目录有 Dockerfile/docker_shell.sh；systemd 需要 <项目名>.service
                 mode = server["mode"] as? String ?: "docker"
+                // 目标机架构：配了 arm64 / x64 就部署原生可执行文件，不配则部署 JVM 的 bootJar
+                abi = server["abi"] as? String
+                // 可执行文件的启动参数（main() 取 argv[0] 作端口）
+                args = (server["args"] as? List<*>)?.map { it.toString() }?.toMutableList() ?: mutableListOf()
             }
         }
 
-        // 部署原生可执行文件（不写这段就按 JVM 的 bootJar 部署）。
-        // 单元名默认 <rootProject.name>-native.service，与现网 JVM 版（7129）并行验证；
-        // 验证通过后把 args 改成 7129、退役 JVM 服务即可。
+        // 原生部署的共享设置（可选，不写即为默认值）。
+        // 具体哪台机器部署原生、部署哪个架构，由各 server 的 abi 决定。
         binary {
-            target = "linuxArm64"
             buildType = "release"
-            args = mutableListOf("7130")
         }
     }
 

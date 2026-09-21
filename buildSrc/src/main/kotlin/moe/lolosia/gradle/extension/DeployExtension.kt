@@ -46,18 +46,14 @@ open class DeployExtension {
 }
 
 /**
- * 原生（Kotlin/Native）部署产物配置。
+ * 原生（Kotlin/Native）部署的共享设置。
  *
- * 可执行文件是自包含单文件，没有 fat jar 的拆包/增量补库流程，
- * 推送时整包替换、随后由 systemd 直接拉起（不是 `java -jar`）。
+ * 注意：**哪台机器部署原生、部署哪个架构，由 [ServerConfig.abi] 决定**，不在这里写。
+ * 这里只放跨服务器共享的构建与单元命名。
  *
  * @author 洛洛希雅Lolosia
  */
 open class BinaryConfig {
-
-    /** Kotlin/Native 目标名，决定 link 任务与产物路径，如 `linuxArm64`。 */
-    @Input
-    var target: String = "linuxArm64"
 
     /** 链接类型：`release`（默认）或 `debug`。 */
     @Input
@@ -75,14 +71,6 @@ open class BinaryConfig {
     @Input
     @Optional
     var unitName: String? = null
-
-    /**
-     * 传给可执行文件的启动参数。本模板的 `main()` 取第一个参数作为监听端口，
-     * 所以并行验证时在这里写新端口（如 `listOf("7130")`）。
-     */
-    @Input
-    @Optional
-    var args: MutableList<String> = mutableListOf()
 }
 
 open class ServerConfig(val name: String) {
@@ -98,6 +86,24 @@ open class ServerConfig(val name: String) {
 
     @Input
     var password: String = "123456"
+
+    /**
+     * 目标机 ABI：`arm64` 或 `x64`（也接受 `aarch64` / `amd64` / `x86_64`）。
+     *
+     * 配置了就表示**这台机器部署 Kotlin/Native 可执行文件**（对应 `linuxArm64` / `linuxX64` 目标）；
+     * 不配则部署 JVM 的 `bootJar`。同一项目可以给不同服务器配不同 ABI。
+     */
+    @Input
+    @Optional
+    var abi: String? = null
+
+    /**
+     * 传给可执行文件的启动参数。本模板的 `main()` 取第一个参数作为监听端口，
+     * 所以并行验证时在这里写新端口（如 `["7130"]`）。
+     */
+    @Input
+    @Optional
+    var args: MutableList<String> = mutableListOf()
 
     /**
      * 部署方式：
