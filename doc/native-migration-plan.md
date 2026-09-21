@@ -679,7 +679,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.4 `classpath.zip` 中间层 | ✅ | 见 §13.5：Gradle 原生 `resources` 目录按源集合并打包 + 构建期嵌入；`Classpath` 统一访问接口 + `DiskClasspath` 回退 + `staticClasspath` 路由；Windows/Linux 双平台实测通过 |
 | 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime（0.5 时为 0.6.2，0.6 起对齐 sqlx4k 到 0.8.0）已接依赖 |
 | 0.6 sqlx4k 数据层 | 🔄 | 见 §13.9~§13.11：驱动 + 仓库 codegen + 会话/缓存服务 + **用户/角色链路的数据访问层**；剩余 Service 层迁移 |
-| 0.7 bcrypt | ⬜ | |
+| 0.7 bcrypt | 🔄 | 见 §13.12：自研移植 jBCrypt 0.4 完成（纯 Kotlin common，官方向量逐字命中）；「真实账号登录」验收待登录链路 |
 | 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
 | 0.9 部署 | ✅ | 插件侧支持原生产物（`deploy { binary { } }`）+ **真机跑通**，见 13.6 |
 
@@ -1181,6 +1181,33 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 - `UserService.userSearching` / `getUserInfo` 返回里**没剥 `password`**（`list`/`get` 剥了）。
 
 **`sys_logs` / `oss_user_file`**：实体与仓库暂不建 —— 分别随 0.8（日志拦截器落库）与 OSS 阶段再补，避免现在写没人用的代码。
+
+### 13.12 P0-0.7：自研 bcrypt（移植 jBCrypt 0.4）落地（2026-09-21）
+
+**为什么自研**：见 §6.1 的更正 —— Maven Central 上 46 个 bcrypt artifact **无一发布 native 变体**，系统侧也不可靠（glibc 主线 `crypt(3)` 不保证支持 `$2a$`，mingw-w64 没有 `crypt(3)`）。
+
+**做法**
+
+- 取 **jBCrypt 0.4 官方发布物**（`org.mindrot:jbcrypt:0.4` 的 sources jar，727 行 `BCrypt.java`）作为权威参考，移植为
+  `src/commonMain/kotlin/moe/lolosia/web/util/crypto/BCrypt.kt`（690 行，纯 Kotlin common，**零 JVM 依赖**）。
+- API 只有三个：`checkpw(明文, 哈希)` / `hashpw(明文, salt)` / `gensalt(rounds = 10)`；其余（Blowfish/EksBlowfish、base64 变体、常量表）全 `private`。
+- 移植要点：Java `>>`/`<<` → `shr`/`shl`（jBCrypt 未用 `>>>`）；`byte` 有符号性与全部 `& 0xff` 原样保留；
+  Kotlin 十六进制字面量超出 Int 正范围要 `.toInt()`（`0x846a0e79` 这类漏一处就编译不过）；
+  唯一有意的替换是 `SecureRandom` → `kotlin.random.Random.Default`（common 无 CSPRNG，已记入待办）。
+
+**验收（三重证据）**
+
+| 证据 | 结果 |
+| --- | --- |
+| **jBCrypt 官方测试向量** `hashpw("", "$2a$06$DCq7YPn5Rq63x1Lad4cll.")` | ✅ 逐字等于 `$2a$06$DCq7YPn5Rq63x1Lad4cll.TV4S6ytwfsfvkgY8jIucDrjc8deX1s.`（在 mingwX64 release 二进制上实测；这是算法正确性的黄金标准 —— 常量表错一个字节都会崩） |
+| 与 OpenBSD 参考实现（Python `bcrypt` 5.0.0）对拍 | ✅ 48/48 一致（cost 4/5/6/8 × 多语言口令，含中文/unicode/长口令 0~72 字节） |
+| 常量表逐元素核对 | ✅ `P_orig` 18 / `S_orig` 1024 / `bf_crypt_ciphertext` 6，与 Java 原文差异 0 |
+| 库里真哈希（`lolosia` 的 `$2a$10$hpCjmzrK…`）+ 猜的口令 | ⚠️ `checkpw=false` —— 因为 `<board-password>` 是 **SSH/数据库口令**，不是站点登录口令；这**不构成算法问题**（同一次运行里用该哈希的真 salt 重算出了格式合法的 `$2a$10$hpCjmzrKxTbIxzOB4.V2De…` 新哈希） |
+
+> 教训（已记入开发记忆 §7）：**不要拿 SSH 口令去 checkpw 库里的哈希**。算法正确性用官方向量锁死；端到端「真实账号登录」验收留到登录链路接通后做（或自建测试账号闭环）。
+
+**清理**：验收用的临时端点 `/api/auth/verify` 已删除（它是通用哈希预言机，不该留在工程里），回归确认该路由 404、其余接口 200。
+
 
 
 
