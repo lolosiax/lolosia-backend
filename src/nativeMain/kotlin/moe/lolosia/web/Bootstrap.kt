@@ -21,8 +21,8 @@ import moe.lolosia.web.classpath.DiskClasspath
 import moe.lolosia.web.classpath.classpath
 import moe.lolosia.web.classpath.installPlatformClasspath
 import moe.lolosia.web.classpath.staticClasspath
-import moe.lolosia.web.router.RouterInjection
-import moe.lolosia.web.router.RouterParamException
+import moe.lolosia.web.util.router.RouterInjection
+import moe.lolosia.web.util.router.RouterParamException
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.ContextKey
 import moe.lolosia.web.util.session.installCtxInterceptor

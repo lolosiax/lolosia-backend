@@ -1,4 +1,4 @@
-package moe.lolosia.web.router
+package moe.lolosia.web.util.router
 
 /**
  * 自研 `multipart/form-data` 解析器。

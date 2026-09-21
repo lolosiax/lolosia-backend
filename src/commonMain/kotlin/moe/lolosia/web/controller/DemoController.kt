@@ -1,15 +1,15 @@
 package moe.lolosia.web.controller
 
 import kotlinx.serialization.Serializable
-import moe.lolosia.web.router.Body
-import moe.lolosia.web.router.Controller
-import moe.lolosia.web.router.FilePart
-import moe.lolosia.web.router.Form
-import moe.lolosia.web.router.GET
-import moe.lolosia.web.router.POST
-import moe.lolosia.web.router.Path
-import moe.lolosia.web.router.Query
-import moe.lolosia.web.router.UploadedFile
+import moe.lolosia.web.util.router.Body
+import moe.lolosia.web.util.router.Controller
+import moe.lolosia.web.util.router.FilePart
+import moe.lolosia.web.util.router.Form
+import moe.lolosia.web.util.router.GET
+import moe.lolosia.web.util.router.POST
+import moe.lolosia.web.util.router.Path
+import moe.lolosia.web.util.router.Query
+import moe.lolosia.web.util.router.UploadedFile
 import moe.lolosia.web.util.session.Context
 
 /**

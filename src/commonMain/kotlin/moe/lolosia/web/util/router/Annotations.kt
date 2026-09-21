@@ -1,4 +1,4 @@
-package moe.lolosia.web.router
+package moe.lolosia.web.util.router
 
 /**
  * 自研注解式路由：注解定义。
