@@ -37,7 +37,7 @@ class RouterProcessorProvider : SymbolProcessorProvider {
         RouterProcessor(environment.codeGenerator, environment.logger)
 }
 
-private const val FQ = "moe.lolosia.router"
+private const val FQ = "moe.lolosia.web.router"
 
 private val HTTP_METHODS = linkedMapOf(
     "GET" to "get",

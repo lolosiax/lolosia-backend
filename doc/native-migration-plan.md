@@ -367,7 +367,7 @@ lolosia-ktor-router/
 
 **1) 注解：同名同义，只是换包**
 
-新注解放在 `moe.lolosia.web.annotation`（与现有 `@Route` 同包），**类名与 ktorfitx 完全一致**。于是跨项目/跨版本迁移的改动量 = 把
+新注解放在 `moe.lolosia.web.router`（本 web 工程根包 `moe.lolosia.web` 之下，见 §13.2-5），**类名与 ktorfitx 完全一致**。于是跨项目/跨版本迁移的改动量 = 把
 
 ```kotlin
 import cn.ktorfitx.server.annotation.Controller
@@ -376,7 +376,7 @@ import cn.ktorfitx.server.annotation.Controller
 换成
 
 ```kotlin
-import moe.lolosia.web.annotation.Controller
+import moe.lolosia.web.router.Controller
 ```
 
 本仓库共 30 行 import（前面已统计），**方法体一行不动**。这正是"跨项目复制代码时改动尽可能小"的落点。
@@ -667,7 +667,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | --- | --- | --- |
 | 0.1 KMP 工程结构 | ✅ | 根工程改为 `kotlin("multiplatform")`，目标 `mingwX64` + `linuxArm64`；旧 JVM 代码整体移入 `legacy/`（仅作移植参考，不参与编译）；移除 `:orm` 与全部 JVM 插件/依赖 |
 | 0.2 最小 CIO 服务 | ✅ | `embeddedServer(CIO, 7129)` + `ContentNegotiation(JSON)` + `StatusPages` + `{code,msg,data}` 信封 |
-| 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
+| 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.web.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
 | 0.4 `classpath.zip` 中间层 | ✅ | 见 §13.5：Gradle 原生 `resources` 目录按源集合并打包 + 构建期嵌入；`Classpath` 统一访问接口 + `DiskClasspath` 回退 + `staticClasspath` 路由；Windows/Linux 双平台实测通过 |
 | 0.5 基础设施替换 | ⬜ | |
 | 0.6 sqlx4k 数据层 | ⬜ | |
@@ -690,16 +690,17 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 
 | # | 原设计 | 实际做法与原因 |
 | --- | --- | --- |
-| 1 | 注解放 `moe.lolosia.web.annotation`（与 `@Route` 同包） | 改为 **`moe.lolosia.router`**：插件要作为可复用组件独立发布，需要稳定且与业务无关的包名 |
+| 1 | 注解放 `moe.lolosia.web.annotation`（与 `@Route` 同包） | 改为 **`moe.lolosia.web.router`**（包名规整见 13.2-5）；注解与运行时同包，`@Route` 仍留在 `moe.lolosia.web` 层 |
 | 2 | `@Attribute("ctx")` 注入上下文 | **去掉该注解**（用户指出字符串前缀属冗余），改为 **`@Injectable` 标注类型 + 按类型自动注入**，形参写 `ctx: Context` 即可。`@Path/@Query/@Header/@Form/@FilePart` 的名称也改为**可省略，默认取形参名** |
 | 3 | `main()` 在 `commonMain` | 必须放**各目标源集**：KSP2 无 common/metadata 编译单元，生成代码落在目标源集，而 common 代码看不到 platform 声明 |
 | 4 | Ktor 自带 multipart | **Ktor 3.4 在 Native 上未实现 multipart**，被迫自研解析器（见 13.3-1） |
+| 5 | 包名规整 | 本 web 工程 `src/` 下的代码统一归入 **`moe.lolosia.web`**：`moe.lolosia.classpath` → `moe.lolosia.web.classpath`，`moe.lolosia.router` → `moe.lolosia.web.router`。仅**独立 Gradle 模块** `:router-ksp` 保持 `moe.lolosia.router.ksp`（其生成代码所用的注解全限定名常量已同步改为 `moe.lolosia.web.router`） |
 
 ### 13.3 实施中发现的坑（重要，后续必读）
 
 1. **Ktor 3.4 在 Kotlin/Native 上没有 multipart**
    平台侧实现为 `error("Multipart is not supported in native")`，`receiveMultipart()` 会直接抛 `ContentTransformationException`。
-   → 已自研纯字节扫描的 `multipart/form-data` 解析器（`moe.lolosia.router.Multipart`，零第三方依赖），`@Form`/`@FilePart` 因此可用；文件字节与本地真实文件逐字节一致。
+   → 已自研纯字节扫描的 `multipart/form-data` 解析器（`moe.lolosia.web.router.Multipart`，零第三方依赖），`@Form`/`@FilePart` 因此可用；文件字节与本地真实文件逐字节一致。
    → 启示：凡是"JVM 上理所当然"的 Ktor 功能，在 Native 上都要先查平台侧 actual 实现。
 
 2. **KSP2 + KMP 没有 common/metadata 编译单元**
@@ -746,7 +747,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 **效果**：与 Java 打资源文件一致 —— `src/<sourceSet>/resources/**` 就是 classpath 根，
 运行时 `classpath.read("static/home/index.html")` 即可读到，**路径不需要改**。
 
-**访问接口**（`moe.lolosia.classpath`）：
+**访问接口**（`moe.lolosia.web.classpath`）：
 
 ```kotlin
 val bytes = classpath.require("static/home/index.html")   // 必须有

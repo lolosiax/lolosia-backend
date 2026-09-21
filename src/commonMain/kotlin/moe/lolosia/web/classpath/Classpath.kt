@@ -1,4 +1,4 @@
-package moe.lolosia.classpath
+package moe.lolosia.web.classpath
 
 /**
  * 可执行文件内的 classpath（资源访问统一入口）。

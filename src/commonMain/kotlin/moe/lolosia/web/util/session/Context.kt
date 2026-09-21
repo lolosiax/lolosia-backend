@@ -5,7 +5,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.util.AttributeKey
-import moe.lolosia.router.Injectable
+import moe.lolosia.web.router.Injectable
 
 /**
  * 请求上下文：控制器通过形参声明 `ctx: Context` 即可**按类型自动注入**（无需注解）。

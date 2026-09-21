@@ -1,4 +1,4 @@
-package moe.lolosia.router
+package moe.lolosia.web.router
 
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders

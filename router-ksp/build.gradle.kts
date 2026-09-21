@@ -8,9 +8,6 @@ version = "1.0.0-SNAPSHOT"
 
 kotlin {
     jvmToolchain(21)
-    compilerOptions {
-        freeCompilerArgs.add("-Xjvm-default=all")
-    }
 }
 
 dependencies {

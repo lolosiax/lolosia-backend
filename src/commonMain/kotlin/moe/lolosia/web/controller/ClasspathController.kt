@@ -1,10 +1,10 @@
 package moe.lolosia.web.controller
 
 import kotlinx.serialization.Serializable
-import moe.lolosia.classpath.classpath
-import moe.lolosia.router.Controller
-import moe.lolosia.router.GET
-import moe.lolosia.router.Query
+import moe.lolosia.web.classpath.classpath
+import moe.lolosia.web.router.Controller
+import moe.lolosia.web.router.GET
+import moe.lolosia.web.router.Query
 
 /**
  * classpath 访问演示：验证「像 Java 打资源文件那样」读嵌入式资源。

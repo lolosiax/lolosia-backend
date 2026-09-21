@@ -1,4 +1,4 @@
-package moe.lolosia.classpath
+package moe.lolosia.web.classpath
 
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
