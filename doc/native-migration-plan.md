@@ -673,16 +673,16 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.6 sqlx4k 数据层 | ⬜ | |
 | 0.7 bcrypt | ⬜ | |
 | 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
-| 0.9 部署 | 🟡 部分 | 插件侧已支持原生产物（`deploy { binary { } }`，见 13.6）；开发板实跑待 SSH 隧道恢复 |
+| 0.9 部署 | ✅ | 插件侧支持原生产物（`deploy { binary { } }`）+ **真机跑通**，见 13.6 |
 
 **实测数据**
 
-| 指标 | mingwX64（Windows 本机） | linuxArm64（开发板 lckfb） |
+| 指标 | mingwX64（Windows 本机） | linuxArm64（开发板 lckfb / RK3566） |
 | --- | --- | --- |
-| 产物大小 | 13.66 MB → **14.48 MB**（含 classpath 中间层） | 12.90 MB → **13.40 MB** |
-| 构建方式 | Windows 直接构建 | **WSL(x86_64) 交叉编译**：首次 13m05s（含工具链下载，`~/.konan` 约 2.1GB），增量 40s |
-| 冒烟测试 | 10/10 通过 | 8/8 通过（经 QUIC 隧道部署到板子实跑） |
-| 运行内存 | — | **RSS ≈ 34 MB**（现网 JVM 版 `-Xmx512m`） |
+| 产物大小 | release **10.7 MB** / debug 19.4 MB | release **9.4 MB** / debug 12.8 MB（含 vite 前端） |
+| 构建方式 | Windows 直接构建 | **Windows 直接构建**（`objcopy` 一步借道 WSL，见 13.3-18）；增量 ≈35s |
+| 冒烟测试 | 10/10 通过 | qemu 全绿 + **开发板真机 `deploy1m` 6s 部署成功** |
+| 运行内存 | — | **RSS ≈ 34 MB**（现网 JVM 版实测 ≈238 MB，`-Xmx512m`） |
 
 冒烟覆盖：`/`、`/api/ping`、**`ctx` 无注解按类型自动注入**、`@Path`/`@Query` 省略名、可空参数、`@Path` 显式名、`@Body` JSON、multipart 上传、参数转换失败→400、未知路由→404。
 
