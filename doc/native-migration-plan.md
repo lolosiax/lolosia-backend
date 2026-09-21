@@ -673,7 +673,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.6 sqlx4k 数据层 | ⬜ | |
 | 0.7 bcrypt | ⬜ | |
 | 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
-| 0.9 部署 | 🟡 部分 | 已在开发板验证「二进制可运行」，systemd 接管与替换 fat jar 未做 |
+| 0.9 部署 | 🟡 部分 | 插件侧已支持原生产物（`deploy { binary { } }`，见 13.6）；开发板实跑待 SSH 隧道恢复 |
 
 **实测数据**
 
@@ -871,9 +871,52 @@ get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true
 | Cache-Control + ETag + If-None-Match→304 | ✅ | — |
 | `KTOR_CLASSPATH_DIR` 磁盘覆盖 | ✅ | — |
 
-### 13.6 建议的下一步
+### 13.6 原生形态部署（systemd）
+
+旧 `DeployTask` 从里到外都是「JVM fat jar」假设，原生二进制会踩三处：
+
+| 位置 | 问题 |
+| --- | --- |
+| `prepareSlimJar` / `repackageJar` / `uploadLibsWithCache` | 把 fat jar 拆成 `slim.jar` + 按 sha256 增量补 `BOOT-INF/lib`；原生是自包含单文件，整套无意义 |
+| `patchServiceExecStart` | sed 规则是替换 `ExecStart=` 里最后一个 `.jar` token；换成 `ktor-template.kexe` 匹配不上，直接 `PATCH_MISS` 抛错 |
+| `.service` 的 `ExecStart=/usr/bin/java -Xms… -Xmx… -jar …` | 需要整行换成可执行文件路径，且原生不需要 `unzip/zip`（`prepareSystemdDeployDir` 里的 apt 安装） |
+
+**做法**：给部署产物加一个「形态」维度，而不是往 `mode` 里塞值 —— `mode` 回答「怎么跑」（docker / systemd），
+形态回答「跑什么」，两者正交。
+
+```kotlin
+lolosia {
+    deploy {
+        servers { … }                 // mode 仍是 docker / systemd，语义不变
+        binary {                      // 写了这段 = 部署原生可执行文件；不写 = 部署 bootJar
+            target = "linuxArm64"     // 决定 link*Executable* 任务与产物路径
+            buildType = "release"
+            args = mutableListOf("7130")   // main() 取 argv[0] 作端口，用于与原 JVM 服务并行
+        }
+    }
+}
+```
+
+`DeployTask` 新增 `artifactKind`（jar / binary）与 `artifact`（`@InputFiles`，由插件注入 link 任务输出），
+binary 分支的处理：
+
+1. 传到 `<pwd>/<name>.new` → `chmod +x` → `mv -f <name> <name>.previous` → `mv -f <name>.new <name>`；
+   **必须先改名挪走旧 inode**，直接覆盖正在运行的可执行文件会 `ETXTBSY`。
+2. 单元文件：远端没有就创建。优先用项目根目录同名的 `<unitName>`（可自定义 `User=`、资源限制），
+   否则按二进制形态生成模板 —— `ExecStart` 指向可执行文件，**没有 `java -jar` 前缀**。
+3. `ExecStart` **整行替换**：`sed -i -E 's|^ExecStart=.*|ExecStart=<绝对路径> [启动参数…]|'`。
+   jar 形态仍旧只替换 `.jar` token，以保留 `-Xms/-Xmx` 之类的 JVM 参数。
+4. 跳过 `application.yaml` 交互与 apt 装 `unzip/zip`（原生不用 config-yaml，也不用拆包）。
+5. docker 模式 + binary 形态直接报错提示：需要另外写以该二进制为入口的 Dockerfile。
+
+**与 JVM 版并行验证**：默认单元名 `<rootProject.name>-native.service`，与现网 `<rootProject.name>.service`
+互不干扰，`args` 里换个端口即可（本模板：JVM 7129 / 原生 7130）。验证通过后再统一端口、退役 JVM 服务。
+
+### 13.7 建议的下一步
 
 1. **0.5 基础设施替换**：日志（现为 `println`）、`java.time`→`kotlinx-datetime`、UUID/Base64→标准库、文件 IO→okio。
 2. **0.6~0.8**：按 §5 清单把 `legacy/` 里可移植的部分逐个迁到 `commonMain`（`sqlx4k` 数据层、bcrypt 密码校验、鉴权拦截器链），JVM 专有部分按表删除/替换。
-3. **0.9 部署**：开发板新增 systemd 单元指向原生二进制（保留现网 7129 的 JVM 服务作回滚），确认后替换。
+3. **0.9 部署**：插件侧已就绪（见 13.6）；还差在开发板上实跑一次 —— 需先恢复 `localhost:6023` 的 SSH 隧道，
+   再 `./gradlew deploy1m`（会部署到 `/srv/ktor-template`，单元 `ktor-template-native.service`，端口 7130，
+   与现网 7129 的 JVM 服务并行），确认无问题后再统一端口、退役 JVM 服务。
 4. 可选优化：`classpath.zip` 改 DEFLATED 压缩（需补 `platform.zlib` inflate），进一步缩小二进制与内存占用。

@@ -87,6 +87,15 @@ lolosia {
                 mode = server["mode"] as? String ?: "docker"
             }
         }
+
+        // 部署原生可执行文件（不写这段就按 JVM 的 bootJar 部署）。
+        // 单元名默认 <rootProject.name>-native.service，与现网 JVM 版（7129）并行验证；
+        // 验证通过后把 args 改成 7129、退役 JVM 服务即可。
+        binary {
+            target = "linuxArm64"
+            buildType = "release"
+            args = mutableListOf("7130")
+        }
     }
 
     viteJar {

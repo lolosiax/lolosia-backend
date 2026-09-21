@@ -4,8 +4,12 @@ import groovy.lang.Closure
 import moe.lolosia.gradle.ui.ApplicationYamlDialog
 import moe.lolosia.gradle.ui.YamlDialogResult
 import org.gradle.api.DefaultTask
+import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.kotlin.dsl.*
 import org.hidetake.groovy.ssh.connection.AllowAnyHosts
@@ -22,10 +26,39 @@ import java.util.zip.ZipFile
 
 /**
  * 部署任务
+ *
+ * 支持两种产物形态（由 [artifactKind] 区分）：
+ * - `jar`：JVM fat jar，拆包成 slim.jar + 按 sha256 增量补 `BOOT-INF/lib`，systemd 以 `java -jar` 拉起；
+ * - `binary`：Kotlin/Native 自包含可执行文件，整包替换，systemd 直接拉起可执行文件本身。
+ *
  * @author 洛洛希雅Lolosia
  * @since 2026-05-14 11:37:42
  */
 open class DeployTask : DefaultTask() {
+
+    /** 产物形态：`jar`（默认）或 `binary`。 */
+    @Input
+    var artifactKind: String = ARTIFACT_JAR
+
+    /** 待部署产物；jar 形态是 bootJar，binary 形态是 link*Executable* 的输出。 */
+    @InputFiles
+    @PathSensitive(PathSensitivity.NONE)
+    var artifact: FileCollection = project.files()
+
+    /** binary 形态：远端可执行文件名（部署目录下）。 */
+    @Input
+    @Optional
+    var remoteArtifactName: String? = null
+
+    /** binary 形态：systemd 单元名。 */
+    @Input
+    @Optional
+    var unitFileName: String? = null
+
+    /** binary 形态：传给可执行文件的启动参数。 */
+    @Input
+    @Optional
+    var launchArgs: List<String> = emptyList()
 
     @Input
     var serverName: String = ""
@@ -64,19 +97,32 @@ open class DeployTask : DefaultTask() {
         var basePwd = serverPwd ?: "/srv/${project.rootProject.name}"
         if (basePwd.endsWith("/")) basePwd = basePwd.dropLast(1)
 
-        val jarFile = project.tasks.named("bootJar").get().outputs.files.singleFile
+        val artifactFile = artifact.singleFile
+
+        if (isBinary()) {
+            check(isSystemdMode()) {
+                "原生可执行文件目前只支持 systemd 部署（当前 mode=$serverMode）：" +
+                    "docker 方式需要另外编写以该二进制为入口的 Dockerfile"
+            }
+            sshService.run(delegateClosureOf<RunHandler> {
+                session(remote, delegateClosureOf<SessionHandler> {
+                    deployBinary(basePwd, artifactFile)
+                } as Closure<Any>)
+            })
+            return
+        }
 
         val yamlContent = resolveApplicationYaml(sshService, remote, basePwd)
 
         val tempDir = Files.createTempDirectory("deploy-extract").toFile()
         try {
-            val slimResult = prepareSlimJar(jarFile, tempDir)
+            val slimResult = prepareSlimJar(artifactFile, tempDir)
             sshService.run(delegateClosureOf<RunHandler> {
                 session(remote, delegateClosureOf<SessionHandler> {
                     if (isSystemdMode()) {
-                        deploySystemd(basePwd, slimResult, jarFile.name, yamlContent)
+                        deploySystemd(basePwd, slimResult, artifactFile.name, yamlContent)
                     } else {
-                        deployDocker(basePwd, slimResult, jarFile.name, yamlContent)
+                        deployDocker(basePwd, slimResult, artifactFile.name, yamlContent)
                     }
                 } as Closure<Any>)
             })
@@ -85,7 +131,87 @@ open class DeployTask : DefaultTask() {
         }
     }
 
+    private fun isBinary(): Boolean = artifactKind == ARTIFACT_BINARY
+
     private fun isSystemdMode(): Boolean = serverMode.equals("systemd", ignoreCase = true)
+
+    // ===== 原生形态（systemd）：整包替换 + 整行改写 ExecStart，由 systemd 直接拉起可执行文件 =====
+
+    private fun SessionHandler.deployBinary(basePwd: String, exeFile: File) {
+        val exeName = remoteArtifactName ?: project.rootProject.name
+        val unit = unitFileName ?: "$exeName-native.service"
+        val staging = "$exeName.new"
+
+        execute("mkdir -p $basePwd")
+        execute("cd $basePwd && rm -f $staging")
+        uploadFile(exeFile, "$basePwd/$staging")
+
+        // 覆盖正在运行的可执行文件会 ETXTBSY，所以先改名挪走旧的 inode，再把新文件搬进来
+        execute(
+            "cd $basePwd && chmod +x $staging && " +
+                "(mv -f $exeName $exeName.previous 2>/dev/null || true) && " +
+                "mv -f $staging $exeName"
+        )
+
+        ensureBinaryServiceFile(basePwd, unit)
+        patchBinaryServiceExecStart(basePwd, unit, "$basePwd/$exeName")
+        restartSystemdService(basePwd, unit)
+        logger.lifecycle("已部署原生可执行文件：$basePwd/$exeName（unit=$unit，回滚文件=$exeName.previous）")
+    }
+
+    /**
+     * 远端没有单元文件时创建一份：优先用项目根目录同名的 `<unitName>`（便于自定义 User=、资源限制等），
+     * 否则按二进制形态生成模板（`ExecStart` 指向可执行文件，**没有** `java -jar` 前缀）。
+     */
+    private fun SessionHandler.ensureBinaryServiceFile(pwd: String, unit: String) {
+        val remotePath = "$pwd/$unit"
+        val exists = execute("test -f $remotePath && echo 'EXISTS' || echo 'NOT_FOUND'").contains("EXISTS")
+        if (exists) return
+
+        val localFile = project.rootDir.resolve(unit).takeIf { it.isFile }
+        if (localFile != null) {
+            put(hashMapOf("from" to localFile, "into" to remotePath))
+        } else {
+            uploadContent(buildBinaryServiceContent(pwd), remotePath)
+        }
+        execute("sed -i 's/\\r//g' $remotePath")
+    }
+
+    private fun buildBinaryServiceContent(pwd: String): String {
+        val exeName = remoteArtifactName ?: project.rootProject.name
+        return buildString {
+            appendLine("[Unit]")
+            appendLine("Description=${project.rootProject.name} (Kotlin/Native)")
+            appendLine("After=network-online.target")
+            appendLine("Wants=network-online.target")
+            appendLine()
+            appendLine("[Service]")
+            appendLine("Type=simple")
+            appendLine("WorkingDirectory=$pwd")
+            appendLine("# 由 Lolosia 部署插件在推送时整行替换为当前版本的可执行文件路径")
+            appendLine("ExecStart=$pwd/$exeName")
+            appendLine("Restart=on-failure")
+            appendLine("RestartSec=5")
+            appendLine()
+            appendLine("[Install]")
+            appendLine("WantedBy=multi-user.target")
+        }
+    }
+
+    /**
+     * 整行替换 `ExecStart=`：原生不需要 `-jar`（也就没有 `.jar` token 可供 sed 定位），
+     * 直接把整行换成 `<可执行文件绝对路径> [启动参数…]`。
+     */
+    private fun SessionHandler.patchBinaryServiceExecStart(pwd: String, unit: String, exeAbsPath: String) {
+        val execLine = (listOf(exeAbsPath) + launchArgs).joinToString(" ")
+        val output = execute(
+            "cd $pwd && sed -i -E 's|^ExecStart=.*|ExecStart=$execLine|' $unit && " +
+                "(grep -Fq 'ExecStart=$execLine' $unit && echo PATCH_OK || echo PATCH_MISS)"
+        )
+        if (!output.contains("PATCH_OK")) {
+            throw RuntimeException("更新 $unit 的 ExecStart 失败：请确认其中存在 ExecStart= 行")
+        }
+    }
 
     // ===== docker 模式：布到 <pwd>/docker_build，构建并启动容器 =====
 
@@ -454,3 +580,9 @@ data class DockerImageInfo(
     val mirror: String,
     val autoUntagMirror: Boolean = false
 )
+
+/** 产物形态：JVM fat jar。 */
+const val ARTIFACT_JAR: String = "jar"
+
+/** 产物形态：Kotlin/Native 自包含可执行文件。 */
+const val ARTIFACT_BINARY: String = "binary"

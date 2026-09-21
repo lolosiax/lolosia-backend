@@ -1,7 +1,10 @@
 package moe.lolosia.gradle
 
+import moe.lolosia.gradle.extension.BinaryConfig
 import moe.lolosia.gradle.extension.LolosiaExtension
 import moe.lolosia.gradle.extension.ViteJarExtension
+import moe.lolosia.gradle.task.ARTIFACT_BINARY
+import moe.lolosia.gradle.task.ARTIFACT_JAR
 import moe.lolosia.gradle.task.DeployTask
 import moe.lolosia.gradle.task.DockerImageInfo
 import moe.lolosia.gradle.task.GenerateConstantsTask
@@ -12,6 +15,8 @@ import moe.lolosia.gradle.task.ViteJarTask
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.Task
+import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.*
@@ -48,17 +53,52 @@ class LolosiaPlugin : Plugin<Project> {
         }
     }
 
+    /**
+     * 决定部署什么：配置了 `deploy { binary { } }` 就部署 Kotlin/Native 可执行文件，
+     * 否则回到 JVM 的 `bootJar`。
+     */
+    private fun resolveDeployArtifact(project: Project, lolosiaExt: LolosiaExtension): DeployArtifact? {
+        val binary = lolosiaExt.deploy.binaryConfig
+        if (binary != null) return resolveNativeArtifact(project, binary)
+
+        val bootJar = project.tasks.findByName("bootJar")
+        if (bootJar == null) {
+            project.logger.warn(
+                "lolosia deploy：既没有 bootJar 也没有配置 deploy.binary，本次跳过部署任务注册"
+            )
+            return null
+        }
+        return DeployArtifact(kind = ARTIFACT_JAR, task = bootJar, files = project.files(bootJar))
+    }
+
+    private fun resolveNativeArtifact(project: Project, binary: BinaryConfig): DeployArtifact? {
+        val buildType = binary.buildType.lowercase().replaceFirstChar { it.uppercaseChar() }
+        val target = binary.target.replaceFirstChar { it.uppercaseChar() }
+        val taskName = "link${buildType}Executable$target"
+        val linkTask = project.tasks.findByName(taskName)
+        if (linkTask == null) {
+            project.logger.warn(
+                "lolosia deploy：未找到 $taskName" +
+                    "（请确认 kotlin { } 中已声明目标 ${binary.target}），本次跳过部署任务注册"
+            )
+            return null
+        }
+
+        return DeployArtifact(
+            kind = ARTIFACT_BINARY,
+            task = linkTask,
+            files = project.files(linkTask),
+            remoteName = binary.name ?: project.rootProject.name,
+            unitName = binary.unitName,
+            launchArgs = binary.args.toList(),
+        )
+    }
+
     private fun configureDeploy(project: Project, lolosiaExt: LolosiaExtension) {
         val deployExt = lolosiaExt.deploy
         if (deployExt.servers.isEmpty()) return
 
-        val bootJarTask = project.tasks.findByName("bootJar")
-        if (bootJarTask == null) {
-            project.logger.warn(
-                "lolosia deploy：未找到 bootJar（当前不是 JVM 打包工程），本次跳过部署任务注册"
-            )
-            return
-        }
+        val artifact = resolveDeployArtifact(project, lolosiaExt) ?: return
 
         val deployModes = setOf("docker", "systemd")
 
@@ -76,7 +116,12 @@ class LolosiaPlugin : Plugin<Project> {
             val taskName = "deploy${name.replaceFirstChar { it.uppercase() }}"
             project.tasks.register(taskName, DeployTask::class.java) {
                 group = "deploy"
-                dependsOn(bootJarTask)
+                dependsOn(artifact.task)
+                artifactKind = artifact.kind
+                this.artifact = artifact.files
+                remoteArtifactName = artifact.remoteName
+                unitFileName = artifact.unitName
+                launchArgs = artifact.launchArgs
                 serverName = serverConfig.name
                 serverHost = serverConfig.host
                 serverPort = serverConfig.port
@@ -240,3 +285,16 @@ class LolosiaPlugin : Plugin<Project> {
         }
     }
 }
+
+/**
+ * 一次部署的产物：形态 + 产出它的任务 + 文件集合。
+ * [remoteName] / [unitName] / [launchArgs] 仅原生形态使用。
+ */
+private class DeployArtifact(
+    val kind: String,
+    val task: Task,
+    val files: FileCollection,
+    val remoteName: String? = null,
+    val unitName: String? = null,
+    val launchArgs: List<String> = emptyList(),
+)

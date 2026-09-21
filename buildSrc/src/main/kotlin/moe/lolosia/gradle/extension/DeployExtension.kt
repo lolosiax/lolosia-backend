@@ -15,11 +15,24 @@ open class DeployExtension {
     @Optional
     var activate: String? = null
 
+    /**
+     * 原生部署产物配置。写了 `binary { }` 就部署 Kotlin/Native 可执行文件，
+     * 否则部署 JVM 的 `bootJar`。
+     */
+    internal var binaryConfig: BinaryConfig? = null
+
     internal val servers = linkedMapOf<String, ServerConfig>()
 
     @JvmOverloads
     fun server(name: String, action: Action<ServerConfig>? = null): ServerConfig {
         val config = servers.getOrPut(name) { ServerConfig(name) }
+        action?.execute(config)
+        return config
+    }
+
+    @JvmOverloads
+    fun binary(action: Action<BinaryConfig>? = null): BinaryConfig {
+        val config = binaryConfig ?: BinaryConfig().also { binaryConfig = it }
         action?.execute(config)
         return config
     }
@@ -30,6 +43,46 @@ open class DeployExtension {
         return servers[name]
             ?: throw IllegalStateException("Active server '$name' not found in deploy configuration")
     }
+}
+
+/**
+ * 原生（Kotlin/Native）部署产物配置。
+ *
+ * 可执行文件是自包含单文件，没有 fat jar 的拆包/增量补库流程，
+ * 推送时整包替换、随后由 systemd 直接拉起（不是 `java -jar`）。
+ *
+ * @author 洛洛希雅Lolosia
+ */
+open class BinaryConfig {
+
+    /** Kotlin/Native 目标名，决定 link 任务与产物路径，如 `linuxArm64`。 */
+    @Input
+    var target: String = "linuxArm64"
+
+    /** 链接类型：`release`（默认）或 `debug`。 */
+    @Input
+    var buildType: String = "release"
+
+    /** 远端可执行文件名（放在部署目录下）；默认取 `rootProject.name`。 */
+    @Input
+    @Optional
+    var name: String? = null
+
+    /**
+     * systemd 单元名；默认 `<rootProject.name>-native.service`。
+     * 与 JVM 版用不同的单元名，便于并行验证、随时回滚。
+     */
+    @Input
+    @Optional
+    var unitName: String? = null
+
+    /**
+     * 传给可执行文件的启动参数。本模板的 `main()` 取第一个参数作为监听端口，
+     * 所以并行验证时在这里写新端口（如 `listOf("7130")`）。
+     */
+    @Input
+    @Optional
+    var args: MutableList<String> = mutableListOf()
 }
 
 open class ServerConfig(val name: String) {
