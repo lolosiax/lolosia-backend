@@ -3,6 +3,9 @@ package moe.lolosia.web.controller
 import kotlinx.serialization.Serializable
 import moe.lolosia.web.config.AppConfig
 import moe.lolosia.web.db.Database
+import moe.lolosia.web.db.SysRoleRepository
+import moe.lolosia.web.db.SysUserRepository
+import moe.lolosia.web.db.ViewUserRoleRepository
 import moe.lolosia.web.service.CacheManager
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.SessionMap
@@ -121,4 +124,36 @@ object DemoController {
     @GET("/session/get/{id}")
     suspend fun sessionGet(sessions: SessionManager, @Path id: String): String =
         sessions.find(id)?.toJson() ?: "<null>"
+
+    /** 角色列表（P0-0.6 验证）：`sys_role` 全量（走生成的 RowMapper，含 Instant 解码）。 */
+    @GET("/db/roles")
+    suspend fun dbRoles(db: Database, roles: SysRoleRepository): String =
+        roles.findAllByDeletedFalse(db.driver).getOrThrow().joinToString("\n") { "${it.id} ${it.type} ${it.roleName}" }
+
+    /**
+     * 用户列表（P0-0.6 验证）：
+     * - 带 `ids`（逗号分隔）→ 逐个 `findOneById`（`@Query` 不支持 `IN (列表)`，见 §2-13）；
+     * - 否则走 `view_user_role` 的分页查询（默认每页 5 条）。
+     */
+    @GET("/db/users")
+    suspend fun dbUsers(
+        db: Database,
+        users: SysUserRepository,
+        view: ViewUserRoleRepository,
+        @Query ids: String?,
+        @Query keys: String?,
+        @Query pageNo: Int?,
+        @Query pageSize: Int?,
+    ): String {
+        if (!ids.isNullOrBlank()) {
+            val found = ids.split(',').mapNotNull { users.findOneById(db.driver, it.trim()).getOrThrow() }
+            return "by-id hit ${found.size}: " + found.joinToString(", ") { "${it.userName}/${it.realName}" }
+        }
+        val page = pageNo ?: 1
+        val size = pageSize ?: 5
+        val pattern = "%${keys.orEmpty()}%"
+        val total = view.countByKeys(db.driver, pattern).getOrThrow()
+        val rows = view.findAllByKeys(db.driver, pattern, size, (page - 1) * size).getOrThrow()
+        return "total=$total\n" + rows.joinToString("\n") { "${it.userName} / ${it.realName} / ${it.roleName}(${it.type})" }
+    }
 }

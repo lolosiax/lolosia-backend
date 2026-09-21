@@ -678,7 +678,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.web.util.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
 | 0.4 `classpath.zip` 中间层 | ✅ | 见 §13.5：Gradle 原生 `resources` 目录按源集合并打包 + 构建期嵌入；`Classpath` 统一访问接口 + `DiskClasspath` 回退 + `staticClasspath` 路由；Windows/Linux 双平台实测通过 |
 | 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime（0.5 时为 0.6.2，0.6 起对齐 sqlx4k 到 0.8.0）已接依赖 |
-| 0.6 sqlx4k 数据层 | 🔄 | 见 §13.9 / §13.10：驱动 + 仓库 codegen + **Session / Cache 两个服务已迁完并实测落库**；用户/角色/日志/OSS 待迁 |
+| 0.6 sqlx4k 数据层 | 🔄 | 见 §13.9~§13.11：驱动 + 仓库 codegen + 会话/缓存服务 + **用户/角色链路的数据访问层**；剩余 Service 层迁移 |
 | 0.7 bcrypt | ⬜ | |
 | 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
 | 0.9 部署 | ✅ | 插件侧支持原生产物（`deploy { binary { } }`）+ **真机跑通**，见 13.6 |
@@ -1142,6 +1142,46 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 | 时间列（以 UTC 会话查看） | ✅ `created_at ≈ now()`，`expires_at = now()+1 天`；应用读回打印 `expiresAt=2026-09-22T11:02:03Z`（Instant 的 UTC 语义） |
 | 回归 | `/api/ping`、`/api/whoami`、`/api/config`、`/api/user/get/42`、`/home/` 200，未知路由 404 |
 | `compileKotlinLinuxArm64` | ✅ 通过（真机数据层验证待部署时做） |
+
+### 13.11 P0-0.6 续：用户 / 角色链路的数据访问层（2026-09-21）
+
+**范围决策**：只迁**数据访问层**（实体 + 仓库），Service 层单独一轮 —— 因为 legacy 的三个服务（`UserService` 308 行 / `RoleService` 96 行 / `UserRoleService` 75 行）都建立在两套 native 侧不存在的东西上：`Bundle`（`MutableMap<String, Any?>`）JSON 映射、Ebean `@SoftDelete` 自动过滤，且密码方法要等 0.7 的 bcrypt。
+
+**新增**
+
+| 文件 | 说明 |
+| --- | --- |
+| `db/model/{SysUser,SysRole,SysUserRoles,ViewUserRole}Entity.kt` | 对应 `sys_user` / `sys_role` / `sys_user_roles` / 视图 `view_user_role`；时间列全用 `Instant` |
+| `db/{SysUser,SysRole,SysUserRole,ViewUserRole}Repository.kt` | 读查询 + 单语句 `@Query` 写入（`executeInsert` / `executeUpdate*` / `executeSoftDelete*`） |
+| `Main.kt`（两目标）`platformModules()` | 6 个仓库实现注册进 Koin |
+| `Bootstrap.configureApplication` | 4 个仓库 `registerInjectable`（控制器形参可直接注入） |
+| `DemoController` | `/api/db/roles`、`/api/db/users`（视图分页 + 按 id 取），作为读路径验证 |
+
+**又踩到三条 codegen 规则（都是 KSP 直接报错，已回写开发记忆 §2-13 / §7）**
+
+1. 仓库接口必须同时标 `@Repository` **和 `@Injectable`** —— 否则控制器形参报「无法绑定」。
+2. 方法名白名单是**精确**的：`findAll`/`deleteAll`/`countAll` 要精确匹配，`...By` 只认 `findAllBy`/`findOneBy`/`deleteBy`/`countBy`/`existsBy`。`findAllActive`、`countAllByKeys` 都不合法（**没有 `countAllBy`**）。
+3. **不支持 `IN (列表)`**：`@Query` 的 `:ids` 在编译期就固定成一个 `?`（生成器只实现带 `@Query` 的方法，没有派生查询，运行期没有展开机会），传 `List` 会被当单值绑定，服务端报
+   `Illegal parameter data types varchar and row for operation '='`。→ 批量场景**在服务层循环单条方法**（仓库里不提供 `...In` 方法）。
+
+**实测**（mingwX64 + 本机 MariaDB，先给 `sys_user_roles` 补 3 行数据）
+
+| 检查项 | 结果 |
+| --- | --- |
+| `/api/db/roles` | ✅ `1 super_admin 超级管理员` … `5 guest 访客`（生成的 RowMapper，`Instant` 解码正常） |
+| `/api/db/users`（视图分页） | ✅ `total=3`，行内容正确（含中文真名、角色名/类型映射） |
+| `/api/db/users?keys=lolosia` / `keys=学生` | ✅ 用户名与角色名模糊匹配都命中 |
+| `/api/db/users?ids=<uuid1>,<uuid2>,no-such-id` | ✅ `by-id hit 2`（循环单条，不存在的 id 跳过） |
+| 会话/缓存回归 | ✅ 缓存 upsert 与 `expiresAt` UTC 打印正常 |
+
+**Service 层迁移前需要拍板的 legacy 存疑行为**（已记入开发记忆 §8）
+
+- `UserService.delete` 只软删 `sys_user_roles`、**不删 `sys_user`**（方法名与行为不一致）；
+- `UserRoleService.getByUserId` **忽略形参 `userId`、硬用 `ctx.user.id`**（疑似历史 bug）；
+- `UserService.userSearching` / `getUserInfo` 返回里**没剥 `password`**（`list`/`get` 剥了）。
+
+**`sys_logs` / `oss_user_file`**：实体与仓库暂不建 —— 分别随 0.8（日志拦截器落库）与 OSS 阶段再补，避免现在写没人用的代码。
+
 
 
 

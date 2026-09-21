@@ -22,6 +22,10 @@ import moe.lolosia.web.config.CONFIG_FILE
 import moe.lolosia.web.config.ENV_CONFIG_FILE
 import moe.lolosia.web.config.loadAppConfig
 import moe.lolosia.web.db.Database
+import moe.lolosia.web.db.SysRoleRepository
+import moe.lolosia.web.db.SysUserRepository
+import moe.lolosia.web.db.SysUserRoleRepository
+import moe.lolosia.web.db.ViewUserRoleRepository
 import moe.lolosia.web.di.registerInjectable
 import moe.lolosia.web.di.startAppKoin
 import moe.lolosia.web.service.CacheManager
@@ -94,6 +98,10 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     koin.registerInjectable<Database>()
     koin.registerInjectable<CacheManager>()
     koin.registerInjectable<SessionManager>()
+    koin.registerInjectable<SysUserRepository>()
+    koin.registerInjectable<SysRoleRepository>()
+    koin.registerInjectable<SysUserRoleRepository>()
+    koin.registerInjectable<ViewUserRoleRepository>()
 
     installCtxInterceptor()
 

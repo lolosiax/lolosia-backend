@@ -2,8 +2,16 @@ package moe.lolosia.web
 
 import moe.lolosia.web.db.SessionRepository
 import moe.lolosia.web.db.SysCacheRepository
+import moe.lolosia.web.db.SysRoleRepository
+import moe.lolosia.web.db.SysUserRepository
+import moe.lolosia.web.db.SysUserRoleRepository
+import moe.lolosia.web.db.ViewUserRoleRepository
 import moe.lolosia.web.db.generated.SessionRepositoryImpl
 import moe.lolosia.web.db.generated.SysCacheRepositoryImpl
+import moe.lolosia.web.db.generated.SysRoleRepositoryImpl
+import moe.lolosia.web.db.generated.SysUserRepositoryImpl
+import moe.lolosia.web.db.generated.SysUserRoleRepositoryImpl
+import moe.lolosia.web.db.generated.ViewUserRoleRepositoryImpl
 import moe.lolosia.web.generated.generatedRoutes
 import org.koin.core.module.Module
 import org.koin.dsl.module
@@ -26,5 +34,9 @@ private fun platformModules(): List<Module> = listOf(
     module {
         single<SysCacheRepository> { SysCacheRepositoryImpl }
         single<SessionRepository> { SessionRepositoryImpl }
+        single<SysUserRepository> { SysUserRepositoryImpl }
+        single<SysRoleRepository> { SysRoleRepositoryImpl }
+        single<SysUserRoleRepository> { SysUserRoleRepositoryImpl }
+        single<ViewUserRoleRepository> { ViewUserRoleRepositoryImpl }
     }
 )
