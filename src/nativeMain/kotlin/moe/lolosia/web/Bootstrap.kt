@@ -17,10 +17,10 @@ import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
-import moe.lolosia.web.classpath.DiskClasspath
-import moe.lolosia.web.classpath.classpath
-import moe.lolosia.web.classpath.installPlatformClasspath
-import moe.lolosia.web.classpath.staticClasspath
+import moe.lolosia.web.util.classpath.DiskClasspath
+import moe.lolosia.web.util.classpath.classpath
+import moe.lolosia.web.util.classpath.installPlatformClasspath
+import moe.lolosia.web.util.classpath.staticClasspath
 import moe.lolosia.web.util.router.RouterInjection
 import moe.lolosia.web.util.router.RouterParamException
 import moe.lolosia.web.util.session.Context

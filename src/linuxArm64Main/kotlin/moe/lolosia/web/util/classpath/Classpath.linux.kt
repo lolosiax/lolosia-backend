@@ -1,4 +1,4 @@
-package moe.lolosia.web.classpath
+package moe.lolosia.web.util.classpath
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.posix.dlsym

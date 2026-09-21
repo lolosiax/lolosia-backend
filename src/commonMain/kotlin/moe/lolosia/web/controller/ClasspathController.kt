@@ -1,7 +1,7 @@
 package moe.lolosia.web.controller
 
 import kotlinx.serialization.Serializable
-import moe.lolosia.web.classpath.classpath
+import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.router.Controller
 import moe.lolosia.web.util.router.GET
 import moe.lolosia.web.util.router.Query

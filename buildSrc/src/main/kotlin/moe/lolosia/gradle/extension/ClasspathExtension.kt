@@ -8,7 +8,7 @@ import org.gradle.api.tasks.Optional
  * classpath 资源嵌入扩展（Kotlin/Native）。
  *
  * 把各源集的 `resources` 目录合并成一个 classpath.zip，并在链接阶段嵌入可执行文件，
- * 运行时由 `moe.lolosia.web.classpath` 统一读取，效果与 Java 打资源文件一致。
+ * 运行时由 `moe.lolosia.web.util.classpath` 统一读取，效果与 Java 打资源文件一致。
  *
  * @author 洛洛希雅Lolosia
  */

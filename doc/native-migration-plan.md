@@ -694,7 +694,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 2 | `@Attribute("ctx")` 注入上下文 | **去掉该注解**（用户指出字符串前缀属冗余），改为 **`@Injectable` 标注类型 + 按类型自动注入**，形参写 `ctx: Context` 即可。`@Path/@Query/@Header/@Form/@FilePart` 的名称也改为**可省略，默认取形参名** |
 | 3 | `main()` 在 `commonMain` | 必须放**各目标源集**：KSP2 无 common/metadata 编译单元，生成代码落在目标源集，而 common 代码看不到 platform 声明 |
 | 4 | Ktor 自带 multipart | **Ktor 3.4 在 Native 上未实现 multipart**，被迫自研解析器（见 13.3-1） |
-| 5 | 包名规整 | 本 web 工程 `src/` 下的代码统一归入 **`moe.lolosia.web`**：`moe.lolosia.classpath` → `moe.lolosia.web.classpath`，`moe.lolosia.router` → `moe.lolosia.web.util.router`。仅**独立 Gradle 模块** `:router-ksp` 保持 `moe.lolosia.router.ksp`（其生成代码所用的注解全限定名常量已同步改为 `moe.lolosia.web.util.router`） |
+| 5 | 包名规整 | 本 web 工程 `src/` 下的代码统一归入 **`moe.lolosia.web`**：`moe.lolosia.classpath` → `moe.lolosia.web.util.classpath`，`moe.lolosia.router` → `moe.lolosia.web.util.router`。仅**独立 Gradle 模块** `:router-ksp` 保持 `moe.lolosia.router.ksp`（其生成代码所用的注解全限定名常量已同步改为 `moe.lolosia.web.util.router`） |
 | 6 | classpath 流水线写在 `build.gradle.kts` | 迁入 **`buildSrc`**（`ClasspathExtension` + `NativeClasspath.kt`），`lolosia { }` 扩展重新启用并接管 vite 前端产物；根脚本从 187 行降到 106 行（见 13.5） |
 
 ### 13.3 实施中发现的坑（重要，后续必读）
@@ -809,7 +809,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 **效果**：与 Java 打资源文件一致 —— `src/<sourceSet>/resources/**` 就是 classpath 根，
 运行时 `classpath.read("static/home/index.html")` 即可读到，**路径不需要改**。
 
-**访问接口**（`moe.lolosia.web.classpath`）：
+**访问接口**（`moe.lolosia.web.util.classpath`）：
 
 ```kotlin
 val bytes = classpath.require("static/home/index.html")   // 必须有
