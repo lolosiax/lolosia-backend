@@ -94,6 +94,7 @@ public fun installPlatformClasspath(): Classpath {
  * 这里统一转成 `Long` 以屏蔽差异。
  */
 @OptIn(ExperimentalForeignApi::class)
+@Suppress("REDUNDANT_CALL_OF_CONVERSION_METHOD")
 private fun readFileBytes(absPath: String): ByteArray? {
     val file = fopen(absPath, "rb") ?: return null
     try {

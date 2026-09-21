@@ -668,7 +668,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.1 KMP 工程结构 | ✅ | 根工程改为 `kotlin("multiplatform")`，目标 `mingwX64` + `linuxArm64`；旧 JVM 代码整体移入 `legacy/`（仅作移植参考，不参与编译）；移除 `:orm` 与全部 JVM 插件/依赖 |
 | 0.2 最小 CIO 服务 | ✅ | `embeddedServer(CIO, 7129)` + `ContentNegotiation(JSON)` + `StatusPages` + `{code,msg,data}` 信封 |
 | 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
-| 0.4 `classpath.zip` 中间层 | ⬜ **未开始** | 设计见 §3.2；嵌入式资源读取与 zip 解析均已有可复用的已验证机制（§3.1） |
+| 0.4 `classpath.zip` 中间层 | ✅ | 见 §13.5：Gradle 原生 `resources` 目录按源集合并打包 + 构建期嵌入；`Classpath` 统一访问接口 + `DiskClasspath` 回退 + `staticClasspath` 路由；Windows/Linux 双平台实测通过 |
 | 0.5 基础设施替换 | ⬜ | |
 | 0.6 sqlx4k 数据层 | ⬜ | |
 | 0.7 bcrypt | ⬜ | |
@@ -679,7 +679,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 
 | 指标 | mingwX64（Windows 本机） | linuxArm64（开发板 lckfb） |
 | --- | --- | --- |
-| 产物大小 | 13.66 MB（debug） | 12.90 MB（debug） |
+| 产物大小 | 13.66 MB → **14.48 MB**（含 classpath 中间层） | 12.90 MB → **13.40 MB** |
 | 构建方式 | Windows 直接构建 | **WSL(x86_64) 交叉编译**：首次 13m05s（含工具链下载，`~/.konan` 约 2.1GB），增量 40s |
 | 冒烟测试 | 10/10 通过 | 8/8 通过（经 QUIC 隧道部署到板子实跑） |
 | 运行内存 | — | **RSS ≈ 34 MB**（现网 JVM 版 `-Xmx512m`） |
@@ -720,8 +720,75 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 
 7. **Windows 上链接产物被运行中的进程占用会导致 link 失败** —— 改代码前先停掉正在跑的 exe。
 
-### 13.4 建议的下一步
+8. **`CPointer.rawValue` 的类型随 Kotlin 版本变化**
+   Linux 侧要靠 `_binary_..._end - _binary_..._start` 算映像大小，但 `rawValue` 返回的 `NativePtr`
+   在本版本里不是普通 `Long`，直接 `size <= 0` 会报
+   `'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'`。
+   统一走 `rawValue.toLong()`（封装成 `rawAddress()`）。
+   **验证技巧**：把这段平台无关的算术放进 `nativeMain`，就能在 Windows 上几秒内验证，不必等 30 分钟的 Linux 全量构建。
 
-1. **0.4 `classpath.zip`**：按 §3.2 实现 `Classpath`（含 `platform.zlib` 解压）+ `staticClasspath` 路由 + `DiskClasspath` 回退；嵌入流水线复用 §3.1 已验证机制（Windows `windres`、Linux `objcopy`）。
-2. **0.5~0.8**：按 §5 清单把 `legacy/` 里的可移植部分逐个迁到 `commonMain`，JVM 专有部分按表删除/替换。
-3. **0.9**：开发板新增 systemd 单元指向原生二进制（保留现网 7129 的 JVM 服务作回滚），确认后替换。
+9. **Linux 上 objcopy 的符号默认进不了动态符号表**
+   需要 `-Wl,--export-dynamic`（已加），之后 `_binary_classpath_zip_start/_end` 才会出现在 `.dynsym`，
+   `dlsym` 才能查到。
+   **注意**：`readelf --dyn-syms` 不加 `-W` 会**截断长符号名**，导致 `grep classpath_zip` 误判为"没有"——
+   排查时务必用 `readelf --dyn-syms -W`。
+
+10. **WSL 构建目录用覆盖式同步会残留已删除的文件**
+    用 `tar` 覆盖同步不会删除源端已删的文件，结果 `PORT` 出现两份定义报重载歧义。
+    → 同步前先 `rm -rf` 目标源码目录（或改用 `rsync --delete`）。
+
+11. **在 x86_64 上跑 aarch64 产物验证**：`qemu-user-static` + `libc6-arm64-cross`，并需手动补
+    `libcrypt.so.1`（从 `ports.ubuntu.com` 取**与发行版匹配**的版本，装太新会报 `GLIBC_2.43 not found`）。
+    这条能省掉每次"打包→传板子"的往返。
+
+### 13.5 classpath.zip 中间层（P0-0.4）落地说明
+
+**效果**：与 Java 打资源文件一致 —— `src/<sourceSet>/resources/**` 就是 classpath 根，
+运行时 `classpath.read("static/home/index.html")` 即可读到，**路径不需要改**。
+
+**访问接口**（`moe.lolosia.classpath`）：
+
+```kotlin
+val bytes = classpath.require("static/home/index.html")   // 必须有
+val text  = classpath.readText("hello.txt")               // 可空
+val list  = classpath.list("static/")                     // 前缀列举
+val all   = classpath.entries                             // 全部条目
+```
+
+**打包与嵌入**（`build.gradle.kts`）：
+
+| 环节 | mingwX64 | linuxArm64 |
+| --- | --- | --- |
+| 打包 | 标准 Gradle `Zip` 任务 `classpathZipMingwX64` | `classpathZipLinuxArm64` |
+| 合并来源 | 各源集的 `KotlinSourceSet.resources`，按「目标源集 > 中间源集 > commonMain」优先级，重名由更具体者胜 | 同左 |
+| 注入扩展 | `additionalClasspathResources`（其它 task 的资源目录在打包阶段一并合并） | 同左 |
+| 嵌入 | `windresClasspathMingwX64`：用 Kotlin/Native 自带 mingw `windres` 把 `.rc` 编成 `.res` 后链接 | `objcopyClasspathLinuxArm64`：`aarch64-linux-gnu-objcopy -I binary` 转 `.o` 后链接，配 `-Wl,--export-dynamic` |
+| 运行时取像 | `FindResourceW` → `LoadResource` → `LockResource` | `dlsym("_binary_classpath_zip_start/_end")` |
+
+**实现要点**：
+- `ZipClasspath` 只解析**中央目录**建索引一次，读取时才拷贝单条目；打开时把映像拷入内存数组，
+  换取解析逻辑与平台无关（几 MB 一次性开销）。
+- 目前只支持 **STORED**（不压缩）条目；要改 DEFLATED 需在 `read()` 里补 inflate
+  （可用 Kotlin/Native 自带的 `platform.zlib`）。
+- `Route.staticClasspath(remotePath, zipPrefix)` 把 classpath 挂成静态资源路由，自动
+  `Content-Type` / `Cache-Control` / `ETag`，含 `index` 与 SPA `fallback`，配合 `ConditionalHeaders` 支持 304。
+- 开发期可用环境变量 `KTOR_CLASSPATH_DIR` 指向磁盘目录，**改前端资源不必重编二进制**。
+
+**实测**（两平台各自的 `target.txt` 内容不同，用来验证按目标源集区分）：
+
+| 检查项 | mingwX64 | linuxArm64（qemu） |
+| --- | --- | --- |
+| classpath 装载 | 3 条目（内嵌 zip） | 3 条目（内嵌 zip） |
+| `hello.txt`（commonMain） | ✅ | ✅ |
+| `target.txt`（目标源集） | ✅ 返回 mingwX64 那份 | ✅ 返回 linuxArm64 那份 |
+| `/home/` 返回内嵌 index.html | ✅ 200 text/html | ✅ 200 text/html 745B |
+| `/` 301 跳转 / SPA 回退 / 前缀过滤 / 缺失资源 | ✅ | ✅ |
+| Cache-Control + ETag + If-None-Match→304 | ✅ | — |
+| `KTOR_CLASSPATH_DIR` 磁盘覆盖 | ✅ | — |
+
+### 13.6 建议的下一步
+
+1. **0.5 基础设施替换**：日志（现为 `println`）、`java.time`→`kotlinx-datetime`、UUID/Base64→标准库、文件 IO→okio。
+2. **0.6~0.8**：按 §5 清单把 `legacy/` 里可移植的部分逐个迁到 `commonMain`（`sqlx4k` 数据层、bcrypt 密码校验、鉴权拦截器链），JVM 专有部分按表删除/替换。
+3. **0.9 部署**：开发板新增 systemd 单元指向原生二进制（保留现网 7129 的 JVM 服务作回滚），确认后替换。
+4. 可选优化：`classpath.zip` 改 DEFLATED 压缩（需补 `platform.zlib` inflate），进一步缩小二进制与内存占用。
