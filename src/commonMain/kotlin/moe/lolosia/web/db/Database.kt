@@ -27,10 +27,15 @@ public class Database(config: AppConfig.DatasourceConfig) {
         options = ConnectionPool.Options(maxConnections = config.maxConnections),
     )
 
-    /** 连通性探测（运维 / 冒烟用）：返回「服务端版本 / 当前库名」。 */
+    /** 连通性探测（运维 / 冒烟用）：返回「服务端版本 / 当前库名 / 会话时区 / 库端 now()」。 */
     public suspend fun ping(): String {
-        val rs = driver.fetchAll("select version() as version, database() as db").getOrThrow()
+        val rs = driver
+            .fetchAll(
+                "select version() as version, database() as db, @@session.time_zone as tz, now() as db_now"
+            )
+            .getOrThrow()
         val row = rs.rows.firstOrNull() ?: error("数据库没有返回结果")
-        return "${row.get("version").asString()} / ${row.get("db").asString()}"
+        return "${row.get("version").asString()} / ${row.get("db").asString()} / " +
+            "tz=${row.get("tz").asString()} / now=${row.get("db_now").asString()}"
     }
 }

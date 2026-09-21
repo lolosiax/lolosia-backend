@@ -678,7 +678,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.3 自研路由插件 | ✅ | `:router-ksp`（KSP 处理器）+ `moe.lolosia.web.util.router`（注解 + 运行时）；`GeneratedRoutes.kt` 由 KSP 生成 |
 | 0.4 `classpath.zip` 中间层 | ✅ | 见 §13.5：Gradle 原生 `resources` 目录按源集合并打包 + 构建期嵌入；`Classpath` 统一访问接口 + `DiskClasspath` 回退 + `staticClasspath` 路由；Windows/Linux 双平台实测通过 |
 | 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime（0.5 时为 0.6.2，0.6 起对齐 sqlx4k 到 0.8.0）已接依赖 |
-| 0.6 sqlx4k 数据层 | 🔄 | 依赖已接 + `db/Database.kt` + `/api/db/ping` 双端实测通过，见 §13.9；实体 / Repository / 各 Service 待迁 |
+| 0.6 sqlx4k 数据层 | 🔄 | 见 §13.9 / §13.10：驱动 + 仓库 codegen + **Session / Cache 两个服务已迁完并实测落库**；用户/角色/日志/OSS 待迁 |
 | 0.7 bcrypt | ⬜ | |
 | 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
 | 0.9 部署 | ✅ | 插件侧支持原生产物（`deploy { binary { } }`）+ **真机跑通**，见 13.6 |
@@ -1074,5 +1074,63 @@ binary 分支的处理：
 4. **qemu 不再能用于 aarch64 冒烟**：接入 sqlx4k 后新产物在 qemu 下**启动即 SIGSEGV**（`-strace` 显示崩在进程极早期、连一次 `open` 都没有），而**同一二进制在真机完全正常** → 判为 qemu-user 模拟限制。后续 aarch64 验证改为「传 /tmp + 备用端口跑临时副本，不碰 systemd」（见开发记忆 §5）。
 
 **给 0.6 后续留的坑**：板子上 `/srv/ktor-template/application.yaml` 的 `root/123456` 已失效（root 的密码登录被禁，`1698`），真机跑数据层前需确认现网账号或为应用建专用用户。
+> 后续实测：可用账号是 `lolosia` / `<board-password>`（能看到 `ktor-template` 与 `lolosia-backend`）。
+
+### 13.10 P0-0.6 续：仓库 codegen 落地 + Session / Cache 迁移（2026-09-21）
+
+**转向 codegen**（用户决策：codegen 为主 + 复杂查询手写）
+
+- 实体：`@Table("表名")` data class，列名自动 snake_case ↔ camelCase；`@Id`（DB 自增，INSERT 不带、回填）与 `@Id(insert = true)`（应用给主键，如会话 UUID）。
+- 仓库：`@Repository` + `CrudRepository<T>`，自定义查询写 `@Query`，KSP（`sqlx4k-codegen`）生成 `object XxxRepositoryImpl` 与 `XxxAutoRowMapper`，SQL 会被 JSqlParser 规范化并回显在生成代码的注释里（可读、可断点）。
+- 生成物落在**目标源集**（KSP2 在 KMP 下没有 common 编译单元）→ 注册走 `startServer(..., platformModules)`，由各目标 `main()` 传 `module { single<SysCacheRepository> { SysCacheRepositoryImpl } }`。
+
+**三条硬规则（KSP 直接报错，试出来的）**
+
+| 规则 | 报错原文 |
+| --- | --- |
+| 方法名必须用受支持前缀（`findAll` / `findAllBy*` / `findOneBy*` / `deleteBy*` / `countBy*` / `existsBy*` / `execute*`） | `Invalid repository method name 'findAllValidByPath'. Must start with one of: …` |
+| 除 context-parameters 模式外，**首个参数必须是 `context: QueryExecutor`** | `Repository method 'findAllByPath' first parameter must be named 'context'` |
+| 方法必须是 `suspend`（生成的实现是 suspend） | `Suspend function … cannot override non-suspend function …` |
+
+**⚠️ MySQL 方言的 insert / update 不可用（本轮踩到最硬的坑）**
+
+生成器为了拿 `RETURNING` 的等价物，把 MySQL 的 insert/update 拼成**多条语句一条脚本**：
+
+```sql
+insert into sys_cache(...) values (...); select id from sys_cache where id = coalesce(nullif(last_insert_id(), 0), ?);
+```
+
+MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL syntax … near '; select id …'`（连接未开 multi-statements）。
+→ **写入一律用仓库里的单语句 `@Query`**（`executeInsert` / `executeUpdate*`）；`delete` 生成的是单语句，可用。
+→ 这条同时说明：MySQL 方言下的 `batchInsert` / `batchUpdate`（README 已声明不支持）与本问题同源。
+
+**⚠️ 时区：写库必须用 UTC**
+
+`select @@session.time_zone` 实测为 **`+00:00`**（Rust sqlx 的连接会话），而列是 `TIMESTAMP`（库内按会话时区换算）：
+写本地时间会与库端 `now()` 差 8 小时（实测 `created_at=2026-09-22 02:56` vs `now()=2026-09-21 10:56`）。
+→ 约定：**写库用 `nowUtc()`**（`util/time/Time.kt`），`now()` 比较因此自洽；**只有日志用 `nowLocal()`**。
+只有 `LocalDateTime + Duration` 在 kotlinx-datetime 里没有，需要 `plusDuration()` 借 Instant 中转。
+
+**迁移结果（Session / Cache）**
+
+| 交付 | 说明 |
+| --- | --- |
+| `db/model/{Session,SysCache}Entity.kt` | 对应 `sys_sessions` / `sys_cache` |
+| `db/{Session,SysCache}Repository.kt` | 读 + 写入单语句 `@Query` |
+| `service/SessionMap.kt` | 会话数据（JSON ↔ `Map<String, JsonElement>`），键沿用旧版 `sessionId` / `userId` / `session:lastAccess` |
+| `service/SessionManager.kt` | 内存缓存 + 每 10s 自动落库 + 闲置 5 分钟释放内存（旧版的 `synchronized` → `Mutex`，Native 的 common 代码没有 `synchronized`） |
+| `service/CacheManager.kt` | `path` 分组 / `tag` 定位，`put` 按 tag upsert，默认 TTL 1 天，语义与旧版一致 |
+
+**实测**（mingwX64 + 本机 MariaDB 10.11.6）
+
+| 检查项 | 结果 |
+| --- | --- |
+| `/api/db/ping` | `10.11.6-MariaDB / ktor-template / tz=+00:00 / now=…` |
+| `/api/cache/put` → `/api/cache/get` | ✅ `v1` → `v2`（同 tag 二次写走 upsert，库里仍 1 行） |
+| `/api/session/new` → `/api/session/get/{id}` | ✅ 返回含 `userId` 的会话 JSON，`sys_sessions` 有对应行 |
+| 时间列（以 UTC 会话查看） | ✅ `created_at ≈ now()`，`expires_at = now()+1 天` |
+| 回归 | `/api/ping`、`/api/whoami`、`/api/config`、`/api/user/get/42`、`/home/` 200，未知路由 404 |
+| `compileKotlinLinuxArm64` | ✅ 通过（真机数据层验证待部署时做） |
+
 
 

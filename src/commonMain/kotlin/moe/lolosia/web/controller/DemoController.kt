@@ -3,6 +3,9 @@ package moe.lolosia.web.controller
 import kotlinx.serialization.Serializable
 import moe.lolosia.web.config.AppConfig
 import moe.lolosia.web.db.Database
+import moe.lolosia.web.service.CacheManager
+import moe.lolosia.web.service.SessionManager
+import moe.lolosia.web.service.SessionMap
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller
 import moe.lolosia.web.util.router.FilePart
@@ -92,4 +95,28 @@ object DemoController {
     /** 数据访问探针（P0-0.6 第一步）：验证 sqlx4k 的 FFI 驱动在 native 上确实能连库执行查询。 */
     @GET("/db/ping")
     suspend fun dbPing(db: Database): String = "db=${db.ping()}"
+
+    /** 缓存读写（P0-0.6 验证）：写一条带过期时间的缓存。 */
+    @GET("/cache/put")
+    suspend fun cachePut(cache: CacheManager, @Query path: String, @Query tag: String, @Query value: String): String =
+        cache[path].put(tag, value)
+
+    /** 缓存读取（P0-0.6 验证）：取未过期的缓存值。 */
+    @GET("/cache/get")
+    suspend fun cacheGet(cache: CacheManager, @Query path: String, @Query tag: String): String =
+        cache[path].get(tag) ?: "<null>"
+
+    /** 新建会话（P0-0.6 验证）：返回会话 id；带 `userId` 时一并写入会话。 */
+    @GET("/session/new")
+    suspend fun sessionNew(sessions: SessionManager, @Query userId: String?): String {
+        val session = sessions.create()
+        userId?.let { session.set(SessionMap.KEY_USER_ID, it) }
+        sessions.save(session)
+        return session.id
+    }
+
+    /** 取会话（P0-0.6 验证）：按 id 读回会话内容（内存或库）。 */
+    @GET("/session/get/{id}")
+    suspend fun sessionGet(sessions: SessionManager, @Path id: String): String =
+        sessions.find(id)?.toJson() ?: "<null>"
 }

@@ -59,9 +59,18 @@ kotlin {
 // ===== 自研路由插件：KSP 需按目标声明处理器 =====
 // 注意：KSP2 没有 common/metadata 编译单元，生成代码落在各目标源集；
 // 而 Kotlin 编译模型下 common 代码看不到 platform 声明，故入口 main() 必须放各目标源集。
+// sqlx4k 的 @Repository/@Query 代码生成也走 KSP（处理器是 JVM 件，产出 klib 侧的 native 代码）。
 dependencies {
     add("kspMingwX64", project(":router-ksp"))
     add("kspLinuxArm64", project(":router-ksp"))
+    add("kspMingwX64", libs.sqlx4k.codegen)
+    add("kspLinuxArm64", libs.sqlx4k.codegen)
+}
+
+ksp {
+    // sqlx4k codegen：生成物包名与方言
+    arg("output-package", "moe.lolosia.web.db.generated")
+    arg("dialect", "mysql")
 }
 
 // ===== Lolosia 构建配置 =====

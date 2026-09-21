@@ -24,6 +24,8 @@ import moe.lolosia.web.config.loadAppConfig
 import moe.lolosia.web.db.Database
 import moe.lolosia.web.di.registerInjectable
 import moe.lolosia.web.di.startAppKoin
+import moe.lolosia.web.service.CacheManager
+import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
@@ -37,6 +39,7 @@ import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.ContextKey
 import moe.lolosia.web.util.session.installCtxInterceptor
 import org.koin.core.Koin
+import org.koin.core.module.Module
 
 /**
  * 服务启动（native 专用：需要装载嵌入式 classpath）。
@@ -50,8 +53,13 @@ import org.koin.core.Koin
  * - 日志用自研 [Log]，配置用 [loadAppConfig]（多级覆盖）。
  *
  * @param portOverride 命令行参数传来的端口（最高优先级）；为 `null` 时取配置里的端口。
+ * @param platformModules 目标源集特有的绑定（sqlx4k 生成的仓库实现只在该目标源集可见）。
  */
-public fun startServer(portOverride: Int?, installRoutes: Routing.() -> Unit) {
+public fun startServer(
+    portOverride: Int?,
+    platformModules: List<Module>,
+    installRoutes: Routing.() -> Unit,
+) {
     val log = Log.of("Bootstrap")
 
     val cp = installPlatformClasspath()
@@ -64,8 +72,8 @@ public fun startServer(portOverride: Int?, installRoutes: Routing.() -> Unit) {
     val config = if (portOverride == null) loaded else loaded.copy(server = loaded.server.copy(port = portOverride))
     Log.level = LogLevel.parse(config.logLevel)
 
-    // Koin 容器：0.6 起的 @Service 都挂这里，控制器通过 registerInjectable 取用
-    val koin = startAppKoin(config, cp)
+    // Koin 容器：业务服务挂在 serviceModule，仓库实现由目标源集传入
+    val koin = startAppKoin(config, cp, platformModules)
 
     val source = if (cp is DiskClasspath) "磁盘回退目录" else "可执行文件内嵌 zip"
     log.info { "classpath 已装载：${cp.entries.size} 个条目（来源：$source）" }
@@ -84,6 +92,8 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     RouterInjection.register(Context::class) { call -> call.attributes[ContextKey] }
     koin.registerInjectable<AppConfig>()
     koin.registerInjectable<Database>()
+    koin.registerInjectable<CacheManager>()
+    koin.registerInjectable<SessionManager>()
 
     installCtxInterceptor()
 
