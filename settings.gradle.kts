@@ -1,11 +1,7 @@
 pluginManagement {
     repositories {
         maven("https://maven.aliyun.com/repository/public/")
-        maven("https://maven.aliyun.com/repository/gradle-plugin"){
-            mavenContent {
-                excludeGroup("io.ebean")
-            }
-        }
+        maven("https://maven.aliyun.com/repository/gradle-plugin")
         gradlePluginPortal()
         mavenCentral()
     }
@@ -17,13 +13,11 @@ plugins {
 
 dependencyResolutionManagement {
     repositories {
-        maven("https://maven.aliyun.com/repository/public"){
+        maven("https://maven.aliyun.com/repository/public") {
+            // 阿里云镜像对 io.ktor 的 native 产物（*-mingwx64.klib / *-linuxarm64.klib）同步不全，
+            // 会导致 "Could not find ktor-server-xxx-mingwX64Main-*.klib"，强制走 mavenCentral
             mavenContent {
-                excludeModuleByRegex("io\\.ktor", "ktor-server-webjars.*")
-                // aliyun 镜像对 cn.ktorfitx 的 jar 同步不完整（Gradle 解析不到），强制走 mavenCentral
-                excludeGroupByRegex("cn\\.ktorfitx")
-                // aliyun 镜像对 io.ebean 部分 artifact 的 jar 同步不完整（如 kotlin-querybean-generator），强制走 mavenCentral
-                excludeGroupByRegex("io\\.ebean")
+                excludeGroupByRegex("io\\.ktor")
             }
         }
         mavenCentral()
@@ -35,5 +29,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "ktor-template"
 
-// Ebean querybean 模块（自定义的 io.ebean:ebean-querybean 替代实现，从 spring-project 移植）
-include(":orm")
+// 自研路由插件的 KSP 处理器（必须跑在 JVM 上，独立模块）
+include(":router-ksp")
