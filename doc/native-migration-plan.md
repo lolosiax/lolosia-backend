@@ -680,7 +680,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime（0.5 时为 0.6.2，0.6 起对齐 sqlx4k 到 0.8.0）已接依赖 |
 | 0.6 sqlx4k 数据层 | 🔄 | 见 §13.9~§13.11：驱动 + 仓库 codegen + 会话/缓存服务 + **用户/角色链路的数据访问层**；剩余 Service 层迁移 |
 | 0.7 bcrypt | 🔄 | 见 §13.12：自研移植 jBCrypt 0.4 完成（纯 Kotlin common，官方向量逐字命中）；「真实账号登录」验收待登录链路 |
-| 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
+| 0.8 鉴权拦截器链 | 🔄 | `interceptor/` 顶级包 + Traffic / Ctx / Envelope 三层；顺序由 `@Interceptor(order)` 经 KSP 生成（`GeneratedInterceptors.kt`），拦截器形参由 Koin 注入；Auth 与 SSE 待登录链路 / `EventSource` |
 | 0.9 部署 | ✅ | 插件侧支持原生产物（`deploy { binary { } }`）+ **真机跑通**，见 13.6 |
 
 **实测数据**

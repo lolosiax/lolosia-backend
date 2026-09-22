@@ -68,9 +68,11 @@
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```
 
-> 代码组织（Java 风格分包）：一个 `.kt` 只放一个顶层类型（嵌套类随宿主保留）；与类型无关的散装函数放同包的 `package.kt`；
-> **扩展外部库类型**的函数按库分域（`util/ktor`、`util/koin`、`util/json`，域内再按 `<类型名>Ext.kt` 分文件），
-> 扩展自研类型的函数与类型同域（`util/classpath/ClasspathExt.kt`）；控制器专属的 DTO 作为该 `object` 的内部类。
+> 代码组织（Java 风格分包）：一个 `.kt` 只放一个顶层 **public** 类型（嵌套类随宿主保留），`private` 顶层声明（如日志器）就近放置；
+> 与类型无关的散装 public 函数/常量放同包的 `package.kt`；**扩展外部库类型**的函数按库分域
+> （`util/ktor`、`util/koin`、`util/json`，域内再按 `<类型名>Ext.kt` 分文件），扩展自研类型的函数与类型同域
+> （`util/classpath/ClasspathExt.kt`）；控制器专属的 DTO 作为该 `object` 的内部类；
+> **中间件独占顶级包 `interceptor/`**，顺序由 `@Interceptor(order)` 声明、注册表由 KSP 生成。
 
 ## 🚀 快速开始
 

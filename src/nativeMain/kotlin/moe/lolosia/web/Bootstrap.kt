@@ -34,7 +34,6 @@ import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.koin.registerInjectable
-import moe.lolosia.web.util.ktor.installCtxInterceptor
 import moe.lolosia.web.util.ktor.staticClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.LogLevel
@@ -49,16 +48,18 @@ import org.koin.core.module.Module
 /**
  * 服务启动（native 专用：需要装载嵌入式 classpath）。
  *
- * [installRoutes] 由各目标源集传入：KSP 生成的路由注册代码位于目标源集，
- * 而 common 代码看不到 platform 声明，故入口下沉到本层。
+ * [installInterceptors] 与 [installRoutes] 由各目标源集传入：KSP 生成的中间件注册表与路由注册代码
+ * 都位于目标源集，而 common 代码看不到 platform 声明，故入口下沉到本层。
  *
  * @param portOverride 命令行参数传来的端口（最高优先级）；为 `null` 时取配置里的端口
  * @param platformModules 目标源集特有的绑定（sqlx4k 生成的仓库实现只在该目标源集可见）
+ * @param installInterceptors 中间件注册（由目标源集传入 `configureInterceptors(koin)`）
  * @param installRoutes 路由注册（由目标源集传入 `generatedRoutes()`）
  */
 public fun startServer(
     portOverride: Int?,
     platformModules: List<Module>,
+    installInterceptors: Application.(Koin) -> Unit,
     installRoutes: Routing.() -> Unit,
 ) {
     val log = Log.of("Bootstrap")
@@ -82,11 +83,15 @@ public fun startServer(
     log.info { "starting on ${config.server.host}:${config.server.port} (Kotlin/Native + CIO)" }
 
     embeddedServer(CIO, port = config.server.port, host = config.server.host) {
-        configureApplication(koin, installRoutes)
+        configureApplication(koin, installInterceptors, installRoutes)
     }.start(wait = true)
 }
 
-private fun Application.configureApplication(koin: Koin, installRoutes: Routing.() -> Unit) {
+private fun Application.configureApplication(
+    koin: Koin,
+    installInterceptors: Application.(Koin) -> Unit,
+    installRoutes: Routing.() -> Unit,
+) {
     val log = Log.of("Application")
 
     // 注册「可按类型注入」的实例：控制器形参声明 ctx: Context / config: AppSettings 即自动注入
@@ -100,8 +105,6 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     koin.registerInjectable<SysUserRoleRepository>()
     koin.registerInjectable<ViewUserRoleRepository>()
 
-    installCtxInterceptor()
-
     install(ContentNegotiation) {
         json(
             Json {
@@ -111,6 +114,10 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
             }
         )
     }
+
+    // 中间件按 @Interceptor(order) 注册。必须晚于 ContentNegotiation：信封层按响应 MIME 判定，
+    // 要等内容协商把响应对象转成带 Content-Type 的 OutgoingContent 之后才认得出 JSON。
+    installInterceptors(koin)
 
     // 让静态资源支持 If-None-Match / If-Modified-Since 的 304 协商
     install(ConditionalHeaders)

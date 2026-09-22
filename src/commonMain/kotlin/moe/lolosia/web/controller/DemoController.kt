@@ -6,6 +6,7 @@ import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysRoleRepository
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
+import moe.lolosia.web.dto.RawJson
 import moe.lolosia.web.service.CacheManager
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.SessionMap
@@ -70,6 +71,10 @@ object DemoController {
             size = file.bytes.size,
             note = note,
         )
+
+    /** 已是 JSON 文本的响应体：声明 `application/json`，故仍会被信封包成 `{code,msg,data}`（对比 [ping]）。 */
+    @GET("/raw")
+    fun raw(): RawJson = RawJson("""{"name":"lolosia","times":3}""")
 
     /** 路径参数用显式名称（与形参名不同）。 */
     @GET("/explicit/{uid}")
