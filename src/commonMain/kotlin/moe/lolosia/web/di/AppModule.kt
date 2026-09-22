@@ -39,7 +39,7 @@ public fun appModule(config: AppConfig, cp: Classpath): Module = module {
 public fun serviceModule(): Module = module {
     single { CacheManager(get(), get()) }
     single { SessionManager(get(), get()) }
-    single { LoginService(get(), get(), get()) }
+    single { LoginService(get(), get(), get(), get(), get()) }
     single { UserService(get(), get(), get(), get()) }
     single { RoleService(get(), get(), get()) }
     single { UserRoleService(get(), get(), get(), get()) }

@@ -26,6 +26,9 @@ public const val ROLE_ID_UNKNOWN: Long = 0L
 /** 用户没有任何角色绑定时 `getUserInfo` 给出的默认角色 id（旧版沿用，即「教师」）。 */
 public const val ROLE_ID_DEFAULT: Long = 3L
 
+/** 注册（`/api/register`）时给新用户的角色 id（旧版写死 4，即「学生」，见 `sql/sys_role.sql`）。 */
+public const val ROLE_ID_STUDENT: Long = 4L
+
 /** `sys_user` 的安全视图（不含 `password`）。 */
 @Serializable
 public data class UserRow(

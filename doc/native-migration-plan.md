@@ -1372,6 +1372,82 @@ Traffic 日志形如 `[2026-09-22 10:27:21.922] [INFO ] [Traffic] POST /api/user
 - 前端还调了本项目**尚无**的端点：`/captcha`、`/verify`、`/register`、`/menu/list|create|update|destroy|navigate`、`/user/getStudentInfoByStudentId`、`/sse` + `/sse/registry`、`/opi/topic/llm/text/*`；`sys_logs` 落库、OSS 与头像（P1）；
 - 0.7 尾巴：`BCrypt.gensalt` 换平台 CSPRNG（expect/actual）。
 
+### 13.15 自研图形验证码 + `/captcha` `/verify` `/register`（2026-09-22）
+
+**范围**：补上前端已经在调、本项目尚无的三个端点。三个路径都已在 `AuthInterceptor.IGNORE` 白名单里（0.8 就加了）。
+
+**用户拍板**：① `/api/verify` **只校验图形验证码**（前端传的 `userName` / `email` 本轮不判断）；② 验证码的 `id` 用**随机 token**（不用 legacy 的客户端 IP 当 tag）。
+
+**① 为什么自研验证码**
+
+legacy 走 hutool `LineCaptcha` + `MathGenerator`，它依赖两件 JDK 能力：`java.awt` 的**文字栅格化**与 `javax.imageio` 的 **PNG 编码**。把 `hutool-captcha-5.8.47-sources.jar` 读完后确认：除这两件之外全是纯逻辑（随机算式、随机颜色、随机线段），可以在 commonMain 里写出来。于是自研：
+
+| 文件 | 内容 |
+| --- | --- |
+| [Png.kt](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/util/image/Png.kt) | 极简 PNG 编码器：签名 + IHDR/IDAT/IEND + **zlib STORED**（不压缩）+ CRC32 / Adler-32；附 `RgbCanvas`（填色 / Bresenham 画线 / 扫描线编码） |
+| [Captcha.kt](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/util/captcha/Captcha.kt) | 算式生成（复刻 `MathGenerator`）+ 5x7 点阵字形（`0-9 + - * =`）+ 150 条干扰线，产出 `MathCaptcha(expression, answer, png)` |
+
+**② 与 hutool 逐字对齐的部分**
+
+- `MathGenerator`：`numberLength = 2` → 两个 `[0,100)` 的随机数、运算符 `+ - *`、数字 `padEnd(2, ' ')`、末尾 `=` → 形如 `3 +5 =`；**结果允许为负**（hutool 默认 `resultHasNegativeNumber = true`，`"40-97="` 的答案是 `-57`，已用真 hutool 对照验证）；
+- `LineCaptcha`：尺寸 `100x40`、干扰线 `150` 条（`xs/ys ∈ 画布内`，终点偏移 `< width/8, height/8`）、**先画线后画字**、每个字符单独随机颜色、背景黑（legacy 显式 `setBackground(Color.BLACK)`）；
+- 字符位置：`charWidth = width / 字符数`，逐字符落在各自等分格内。
+
+**③ 有意差异（观感 / 语义）**
+
+- **字是 5x7 点阵**（hutool 是系统 SansSerif 抗锯齿渲染）：`scale = min(charWidth / 5, height / 7)`（100x40 的 6 字符算式 → `scale = 3`），每格按 `scale + 1` px 画（点阵笔画加粗 1px），字重接近 hutool；
+- **验证码 TTL = 5 分钟**（legacy 用的缓存组默认值，对验证码太长）；
+- **一次性消费**：`verify` 无论对错都删掉该 token 的答案，避免同一个验证码被拿去爆破；错一次后再用同一 id 会拿到「已过期」；
+- **PNG 不压缩**：12108 字节 / base64 后 16144 字符（hutool 压缩后约 1~2KB）——与 `classpath.zip` 只支持 STORED 同一取舍，要压需补 `platform.zlib` 或自写 DEFLATE，非当前需要；
+- 随机源是 `Random.Default`（非密码学强度），与 `BCrypt.gensalt` 同一个待办。
+
+**④ 端点与缓存**
+
+| 端点 | 入参 | 出参 / 行为 |
+| --- | --- | --- |
+| `POST /api/captcha` | — | `{image: base64(png), id: <随机 UUID>}`；答案按 `path = /system/login/captcha`、`tag = id` 落 `sys_cache` |
+| `POST /api/verify` | `{id, code, userName?, email?}` | `"success"`；失败 `400`：「验证码已过期，请点击图片刷新」/「验证码错误，请点击图片刷新」 |
+| `POST /api/register` | `{userName, password, email?, phone?, code?}` | 建号（`roleId = 4` 学生，抄 master 分支）后回 `UserListRow`；重复用户名 / 缺手机邮箱回 **400**（legacy 是 `IllegalStateException` 兜底成 500） |
+
+- `code` 是**邮箱验证码**，前端会传，本轮服务端忽略（与 legacy 注释「邮箱验证流程暂缓」一致）；
+- 前端注册是两步：`captcha` + `verify` → 填密码 → `register`（`views/login/index.vue`）。
+
+**⑤ 新踩到的坑**
+
+1. **点阵位判断写错 → 整幅图只有干扰线，一个字都没有**：字形表用的是 `"01110"` 这种字符串、判据却写成 `dot == '#'`，于是 `fillRect` 一次都没调。`/svc/captcha-render?lines=0` 出**全黑图**才暴露出来。
+2. **点阵字/抗锯齿字没法靠肉眼在缩略图上比对**：正确做法是拿真 hutool 生成同参数的图（临时 Java 程序 + Gradle 缓存里的 `hutool-core/captcha-5.8.47.jar`），再用 JDK 的 `ImageIO` 做 **4x 最近邻放大后纵向拼接**，才能判断「字够不够粗、够不够大」。
+3. **对象属性按声明顺序初始化**：`CRC_TABLE` 的初始化依赖 `CRC_POLY`，若 `CRC_POLY` 声明在后，表会被算成全 `0`（静默错，PNG 校验和全错）→ 常量一律声明在被引用者之前。
+4. **前端 `id: number` 与实际随机 token 不一致**：`captcha()` 返回的 `id` 现在是个字符串，而前端 TS 标注是 `number`（未加载验证码时是 `0`）→ `VerifyReq.id` 上加自定义 `CaptchaIdSerializer`，数字/字符串都收。
+
+**⑥ 实测**（mingwX64 release + 本机 MariaDB 10.11.6，端口 7160）
+
+编译三目标全绿：`compileKotlinMingwX64` / `linkReleaseExecutableMingwX64` / `compileKotlinLinuxArm64`。
+
+| 冒烟项 | 期望 | 实测 |
+| --- | --- | --- |
+| `POST /api/captcha` | 信封 + base64 图 + 随机 id | `id=6c1a58c1-…`、`b64=16144`、`sys_cache` 里 `value=1170` ✅ |
+| 成图与答案是否一致 | 图上的算式算出 `value` | 4x 放大后读出 `19*62=`，`value=1178`（19×62）✅ |
+| `POST /api/verify`（错 code） | 400 | `{"code":400,"msg":"验证码错误，请点击图片刷新"}` ✅ |
+| 同一 id 再用（含用对 code） | 400（一次性） | 「验证码已过期，请点击图片刷新」✅ |
+| `POST /api/verify`（数字 id `0`） | 400「已过期」而非反序列化失败 | ✅（`CaptchaIdSerializer` 生效） |
+| `POST /api/verify`（对 code） | 200 | `{"code":200,…,"data":"success"}` ✅ |
+| `POST /api/register` | 200 + `roleId=4` | `roleName=学生` / `type=student` ✅ |
+| 重复注册 | 400 | `同名用户已存在` ✅ |
+| 缺邮箱注册 | 400 | `请输入手机号或邮箱` ✅ |
+| 新账号 `POST /api/login` → `/user/myInfo` → `/user/myRole` | 200 | 登录 `firstLogin=false`；`myInfo` / `myRole`（`roleId=4`）✅ |
+
+Traffic 日志形如 `[2026-09-22 12:10:31.381] [INFO ] [Traffic] POST /api/captcha 3ms`，`Uncaught Kotlin exception` 计数为 0。冒烟造的 `reg-*` 用户与验证码缓存行已从库里清掉。
+
+**⑦ 顺带发现（未改，留给用户决策）**
+
+`/api/register` 回包里 `realName` 是 `<账户不存在>`：`ViewUserRoleEntity.toListRow(user)` 写的是 `user?.realName ?: MISSING_ACCOUNT`（0.8 落的代码），于是**用户存在但没填真名**时会显示成"账户不存在"。要改就得定「真名为空时前端显示什么」，故未擅自动它（同一个表达式也影响 `/user/list`）。
+
+**遗留**
+
+- `/menu/list|create|update|destroy|navigate`、`/user/getStudentInfoByStudentId`、`/api/sse` + `/sse/registry` 仍缺；
+- 验证码的随机源换平台 CSPRNG（与 0.7 的 `gensalt` 一并做）。
+
+
 
 
 

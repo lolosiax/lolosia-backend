@@ -4,7 +4,7 @@
 
 - 技术栈：**Kotlin 2.4.0（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB**
 - 目标平台：**`mingwX64`**（Windows 本地开发调试）与 **`linuxArm64`**（部署到开发板）；**不保留 JVM 目标**
-- 自研四件套：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**
+- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（PNG 编码 + 点阵算式，见 `util/image`、`util/captcha`）
 - 旧 JVM 代码整体放在 [legacy/jvm](legacy/jvm)，不参与编译，仅作迁移参考
 
 > 迁移方案与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)，
@@ -19,6 +19,7 @@
 - **多级配置覆盖**：数据类默认值 < 内嵌 JSON < 磁盘 `application.json` < 环境变量 < 命令行端口
 - **数据访问**：sqlx4k 的 `@Repository` + `@Query` 编译期代码生成（无 ORM、无反射），实体时间列统一 `kotlin.time.Instant`
 - **自研 multipart 解析**：Ktor 3.4 在 Native 上未实现 `receiveMultipart()`，改为读原始字节自行解析
+- **自研图形验证码**（`util/captcha`）：Native 上没有 `java.awt` / `javax.imageio`，于是自写 PNG 编码器（`util/image/Png.kt`：IHDR/IDAT/IEND + zlib STORED + CRC32/Adler-32）+ 5×7 点阵字形 + 算式生成，逐字对齐 hutool `LineCaptcha` / `MathGenerator`（100×40、150 条干扰线、`a+b=` 且结果可为负），零依赖出图
 - **统一响应信封** `{code,msg,data}`：由 KSP 生成的注册代码调 `respondEnveloped(...)` 自动包装（不靠 send pipeline 拦截 —— Native 上没有反射，显式包装才能把 `typeInfo` 完整交给序列化器）
 - **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
@@ -60,7 +61,7 @@
 │   │   ├── interceptor/          # TrafficInterceptor（耗时日志）/ AuthInterceptor（会话鉴权 + 白名单）
 │   │   ├── service/              # LoginService / SessionManager / CacheManager / SessionMap
 │   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
-│   │   └── util/                 # classpath / crypto(BCrypt) / router / session / time / log
+│   │   └── util/                 # classpath / crypto(BCrypt) / image(PNG) / captcha / router / session / time / log
 │   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
 │   ├── nativeMain/kotlin/…/      # Bootstrap.kt（startServer）/ ZipClasspath / 平台 Env
 │   ├── mingwX64Main/kotlin/…/    # Main.kt（入口 + platformModules）+ PE 资源读取
@@ -129,6 +130,11 @@ curl.exe -s -o "$env:TEMP\a.json" -w "no-token=%{http_code}`n" -X POST http://12
 curl.exe -s -X POST http://127.0.0.1:7129/api/role/list -H "Authorization: Bearer $tk"
 curl.exe -s -X POST http://127.0.0.1:7129/api/user/myInfo -H "Authorization: Bearer $tk"
 curl.exe -s -X POST http://127.0.0.1:7129/api/logout -H "Authorization: Bearer $tk"
+
+# 图形验证码 → verify（一次性消费）→ 注册（免鉴权）
+$cap = curl.exe -s -X POST http://127.0.0.1:7129/api/captcha    # {"data":{"image":"<base64 png>","id":"<token>"}}
+curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: application/json" -d '{"id":"<id>","code":"<算式结果>"}'
+curl.exe -s -X POST http://127.0.0.1:7129/api/register -H "Content-Type: application/json" -d '{"userName":"alice","password":"123456","email":"alice@example.com"}'
 ```
 
 ## 🛠 构建任务
@@ -178,7 +184,7 @@ object DemoController {
 - 无法绑定的形参会**编译期报错**并给出提示：要么加参数注解，要么给类型标 `@Injectable`
 - 支持的参数类型只有 `String / Int / Long / Double / Boolean / Uuid / 枚举`（不做嵌套泛型绑定，超范围请手写路由）
 
-业务接口（0.8，路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`。
+业务接口（路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`。
 这些接口（以及探针里的 `/api/classpath/*`）都走鉴权：`POST` + `Authorization: Bearer <sessionId>`；白名单只有 `/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar` 与取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）。
 
 当前模板自带的探针接口（**临时脚手架**，P0 收尾删除）：`/api/ping`、`/api/whoami`、`/api/config`、`/api/db/ping`、`/api/db/roles`、`/api/db/users`、`/api/cache/{put,get}`、`/api/session/{new,get/{id}}`、`/api/svc/selftest` 在开发期免鉴权（见 `AuthInterceptor.DEV_PROBES`）；`/api/classpath/{list,read}` 需鉴权。
@@ -242,10 +248,11 @@ object DemoController {
 | 0.7 自研 bcrypt（`$2a$` cost 10） | ✅ 移植完成（官方向量锁定），已接进建用户/改密码/登录校验 |
 | 0.8 鉴权拦截器链 + 登录 + 系统接口 | ✅ 信封改由 KSP 生成代码调 `respondEnveloped`；链 = Traffic → Ctx → Auth；`/api/login` `/api/logout` + 用户/角色/绑定/菜单控制器（**以前端工程契约为准**）。SSE 拦截器待做 |
 | 0.9 部署（systemd 拉起原生二进制） | ✅ |
+| 0.10 自研图形验证码 + `/captcha` `/verify` `/register` | ✅ 自写 PNG + 点阵算式验证码（复刻 hutool），验证码存 `sys_cache`（随机 token、5 分钟、一次性消费）；注册沿用前端两步流程（`roleId = 4` 学生） |
 
-> 下一步（P0 收尾）：删掉 `DemoController` 与 `AuthInterceptor.DEV_PROBES` 这组临时探针，然后进 P1（OSS / 头像 / `sys_logs` / SSE / 验证码）。
+> 下一步（P0 收尾）：删掉 `DemoController` 与 `AuthInterceptor.DEV_PROBES` 这组临时探针，然后进 P1（OSS / 头像 / `sys_logs` / SSE）。
 
-- **P1**：图形验证码、WebP 转换、OSS 上传/头像/菜单权限、SSE 事件总线实机回归、压缩（Nginx）、`classpath.zip` 改 DEFLATED
+- **P1**：WebP 转换、OSS 上传/头像/菜单权限、SSE 事件总线实机回归、压缩（Nginx）、`classpath.zip` 改 DEFLATED
 - **P2**：AI 相关按需改为纯 Ktor Client 直连 LLM HTTP API（不引入 AI 框架）
 
 ## 📜 License
