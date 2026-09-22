@@ -13,7 +13,7 @@
 ## ✨ 特性
 
 - **注解式控制器**：`@Controller("/api") object XxxController` + `@GET/@POST/@PUT/@DELETE/@PATCH`，KSP 编译期生成路由注册（`generatedRoutes()`），不依赖任何反射（Native 也没有反射）
-- **按类型自动注入**（Spring 风格）：形参类型标了 `@Injectable` 就**无需注解**直接注入，如 `fun whoami(ctx: Context)`、`fun config(config: AppConfig)`
+- **按类型自动注入**（Spring 风格）：形参类型标了 `@Injectable` 就**无需注解**直接注入，如 `fun whoami(ctx: Context)`、`fun config(config: AppSettings)`
 - **参数注解名称可省略**：`@Path` / `@Query` / `@Header` / `@Form` / `@FilePart` 不写名字默认取形参名；`@Body` 直接反序列化 `@Serializable` 请求体
 - **`classpath.zip` 中间层**：源集下的 `resources/**` 就是 classpath 根，构建期嵌入可执行文件，运行时 `classpath.read("static/home/index.html")` —— 写法与 Java 打资源文件一致
 - **多级配置覆盖**：数据类默认值 < 内嵌 JSON < 磁盘 `application.json` < 环境变量 < 命令行端口
@@ -49,13 +49,13 @@
 ├── router-ksp/                   # 自研路由的 KSP 处理器（JVM 件）：扫 @Controller → GeneratedRoutes.kt
 ├── src/
 │   ├── commonMain/kotlin/moe/lolosia/web/
-│   │   ├── ApiResult.kt          # {code,msg,data} 信封 + 默认端口 PORT = 7129
-│   │   ├── config/               # AppConfig（@Serializable）+ 多级覆盖 ConfigLoader
+│   │   ├── configuration/        # Koin 容器：appModule / serviceModule / startAppKoin
 │   │   ├── controller/           # DemoController / ClasspathController（插件验证用）
-│   │   ├── db/                   # Database（sqlx4k 驱动）+ 各 @Repository + db/model 实体
-│   │   ├── di/                   # Koin 容器：appModule / serviceModule / registerInjectable
+│   │   ├── database/             # Database（sqlx4k 驱动）+ repository 各 @Repository + model 实体
+│   │   ├── dto/                  # ApiResult（{code,msg,data} 信封）
 │   │   ├── service/              # SessionManager / CacheManager / SessionMap
-│   │   └── util/                 # classpath / crypto(BCrypt) / router / session / time / log
+│   │   ├── settings/             # AppSettings（@Serializable）+ 多级覆盖 SettingsLoader
+│   │   └── util/                 # classpath / crypto(BCrypt) / json / koin / ktor / log / router / session / time
 │   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
 │   ├── nativeMain/kotlin/…/      # Bootstrap.kt（startServer）/ ZipClasspath / 平台 Env
 │   ├── mingwX64Main/kotlin/…/    # Main.kt（入口 + platformModules）+ PE 资源读取
@@ -67,6 +67,10 @@
 ├── ktor-template.service         # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```
+
+> 代码组织（Java 风格分包）：一个 `.kt` 只放一个顶层类型（嵌套类随宿主保留）；与类型无关的散装函数放同包的 `package.kt`；
+> **扩展外部库类型**的函数按库分域（`util/ktor`、`util/koin`、`util/json`，域内再按 `<类型名>Ext.kt` 分文件），
+> 扩展自研类型的函数与类型同域（`util/classpath/ClasspathExt.kt`）；控制器专属的 DTO 作为该 `object` 的内部类。
 
 ## 🚀 快速开始
 
@@ -115,7 +119,7 @@ build\bin\mingwX64\releaseExecutable\ktor-template.exe 7129  # 首参覆盖端�
 curl.exe -s http://127.0.0.1:7129/api/ping            # pong
 curl.exe -s http://127.0.0.1:7129/api/config          # 生效配置（端口 / db / 日志级别）
 curl.exe -s http://127.0.0.1:7129/api/db/ping         # sqlx4k 连通性：版本 / 库名 / 会话时区
-curl.exe -s -X POST http://127.0.0.1:7129/api/echo -H "Content-Type: application/json" -d '{\"name\":\"a\",\"times\":3}'
+curl.exe -s -X POST http://127.0.0.1:7129/api/echo -H "Content-Type: application/json" -d '{"name":"a","times":3}'
 ```
 
 ## 🛠 构建任务
@@ -133,16 +137,17 @@ curl.exe -s -X POST http://127.0.0.1:7129/api/echo -H "Content-Type: application
 ## 🧭 写一个控制器
 
 ```kotlin
-@Serializable
-data class EchoReq(val name: String, val times: Int = 1)
-
 @Controller("/api")
 object DemoController {
+
+    /** 仅本控制器使用的 DTO：作为内部类，避免散落一堆单行文件 */
+    @Serializable
+    data class EchoReq(val name: String, val times: Int = 1)
 
     @GET("/ping")
     fun ping(): String = "pong"
 
-    /** 形参类型标了 @Injectable → 无需注解，自动注入（Context / AppConfig / Database / Service / Repository 均可用） */
+    /** 形参类型标了 @Injectable → 无需注解，自动注入（Context / AppSettings / Database / Service / Repository 均可用） */
     @GET("/whoami")
     fun whoami(ctx: Context): String = "uri=${ctx.call.request.local.uri}"
 
@@ -162,6 +167,7 @@ object DemoController {
 约定（迁移前的 ktorfitx 控制器**只改 import** 即可复用）：
 
 - `@Controller` 只能标在 `object` 上；方法返回值由 `call.respond(...)` 直接写出（`Unit` 不写响应体）
+- 控制器专属的 DTO 声明为该 `object` 的内部类（KSP 生成的全限定名如 `…Controller.EchoReq`）；跨控制器共用时才独立成文件
 - 无法绑定的形参会**编译期报错**并给出提示：要么加参数注解，要么给类型标 `@Injectable`
 - 支持的参数类型只有 `String / Int / Long / Double / Boolean / Uuid / 枚举`（不做嵌套泛型绑定，超范围请手写路由）
 
@@ -169,7 +175,7 @@ object DemoController {
 
 ## ⚙️ 配置
 
-配置只有一个入口：[AppConfig](src/commonMain/kotlin/moe/lolosia/web/config/AppConfig.kt)（`@Serializable` 数据类）。
+配置只有一个入口：[AppSettings](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable` 数据类）。
 优先级由低到高，**按字段深合并**：
 
 1. 数据类里的默认值
@@ -192,7 +198,7 @@ object DemoController {
 ```
 
 > 其它环境变量：`KTOR_CLASSPATH_DIR` 指向磁盘资源目录，开发期改前端/资源不必重编二进制。
-> 加配置项 = 改 `AppConfig`（+ 必要时改 `envOverrides`），不要另起一套读取逻辑；磁盘 JSON 带 BOM 也能解析（解析失败会记 WARN 而不是静默忽略）。
+> 加配置项 = 改 `AppSettings`（+ 必要时改 `envOverrides`），不要另起一套读取逻辑；磁盘 JSON 带 BOM 也能解析（解析失败会记 WARN 而不是静默忽略）。
 
 ## 🗄 数据层约定（sqlx4k）
 
@@ -202,7 +208,7 @@ object DemoController {
   - 方法名前缀白名单是精确匹配：`findAll` / `deleteAll` / `countAll`，或 `findAllBy*` / `findOneBy*` / `deleteBy*` / `countBy*` / `existsBy*` / `execute*`
   - **不支持 `IN (列表)`**（占位符在编译期固定），批量场景在服务层循环单条方法
   - MySQL 方言下**不要用生成的 `insert` / `update`**（会拼成多语句脚本，MariaDB 报 `1064`），写入用单语句 `@Query`
-- **生成物位置**：实现类在目标源集（`moe.lolosia.web.db.generated`，KSP2 在 KMP 下没有 common 编译单元）→ 在 [Main.kt](src/mingwX64Main/kotlin/moe/lolosia/web/Main.kt) 的 `platformModules()` 里 `single { XxxRepositoryImpl }` 绑定，再到 `Bootstrap.configureApplication` 里 `koin.registerInjectable<XxxRepository>()`
+- **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）→ 在 [Main.kt](src/mingwX64Main/kotlin/moe/lolosia/web/Main.kt) 的 `platformModules()` 里 `single { XxxRepositoryImpl }` 绑定，再到 `Bootstrap.configureApplication` 里 `koin.registerInjectable<XxxRepository>()`
 - **时间列一律 `kotlin.time.Instant`**（业务用 `Clock.System.now()`），驱动按 UTC 往返；只有日志用本地时间展示
 
 ## 🚢 部署（systemd）

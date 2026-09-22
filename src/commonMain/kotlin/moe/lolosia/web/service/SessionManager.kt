@@ -13,20 +13,18 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
-import moe.lolosia.web.db.Database
-import moe.lolosia.web.db.SessionRepository
+import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.SessionRepository
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.time.nowEpochMs
 
 /**
- * 会话管理器：**内存缓存 + 定期落库**（与旧 JVM 版同构）。
+ * 会话管理器：内存缓存 + 定期落库。
  *
  * - 内存里保留活跃会话，每 [AUTO_SAVE_INTERVAL_MS] 把有变更的会话写回 `sys_sessions`；
  * - 超过 [IDLE_RELEASE_MS] 未访问的会话从内存释放（库里仍有，下次访问再读回）；
  * - 会话整份以 JSON 存在 `data` 列，键值见 [SessionMap]。
- *
- * 与旧版的差异：用 [Mutex] 代替 JVM 的 `synchronized`（Native 上 common 代码没有 `synchronized`）。
  *
  * @author 洛洛希雅Lolosia
  */

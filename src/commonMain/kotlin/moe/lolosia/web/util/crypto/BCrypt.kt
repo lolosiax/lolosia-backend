@@ -17,11 +17,10 @@
  */
 
 /**
- * OpenBSD 风格 Blowfish 口令哈希（bcrypt）的 Kotlin Multiplatform 实现。
+ * OpenBSD 风格 Blowfish 口令哈希（bcrypt）。
  *
- * 移植自 jBCrypt 0.4（ISC/MIT 类许可，作者 Damien Miller），算法与常量表逐字等价：
- * 保持 `$2a$` 版本语义与默认 cost = 10，用于校验 MariaDB 里既有的 `$2a$10$...` 哈希。
- * 本文件不依赖任何 Java/JVM API（无 `java.*`、`SecureRandom`、`System.arraycopy` 等）。
+ * 移植自 jBCrypt 0.4（ISC 许可，作者 Damien Miller），保持 `$2a$` 版本语义与默认 cost = 10，
+ * 用于校验库中既有的 `$2a$10$...` 哈希。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -37,7 +36,7 @@ private const val BCRYPT_SALT_LEN = 16
 // ===== Blowfish 参数 =====
 private const val BLOWFISH_NUM_ROUNDS = 16
 
-// 密钥调度初始内容（逐字移植自 Java 版 P_orig，18 个 int）
+// 密钥调度初始内容（jBCrypt 的 P_orig，18 个 int）
 private val P_ORIG = intArrayOf(
     0x243f6a88, 0x85a308d3.toInt(), 0x13198a2e, 0x03707344,
     0xa4093822.toInt(), 0x299f31d0, 0x082efa98, 0xec4e6c89.toInt(),
@@ -46,7 +45,7 @@ private val P_ORIG = intArrayOf(
     0x9216d5d9.toInt(), 0x8979fb1b.toInt()
 )
 
-// 逐字移植自 Java 版 S_orig（4×256 = 1024 个 int），保持原文每行 4 个的分组便于核对
+// jBCrypt 的 S_orig（4×256 = 1024 个 int），每行 4 个便于与原表核对
 private val S_ORIG = intArrayOf(
     0xd1310ba6.toInt(), 0x98dfb5ac.toInt(), 0x2ffd72db, 0xd01adfb7.toInt(),
     0xb8e1afed.toInt(), 0x6a267e96, 0xba7c9045.toInt(), 0xf12c7f99.toInt(),
@@ -306,8 +305,7 @@ private val S_ORIG = intArrayOf(
     0xb74e6132.toInt(), 0xce77e25b.toInt(), 0x578fdfe3, 0x3ac372e6
 )
 
-// bcrypt IV: "OrpheanBeholderScryDoubt"。C 实现里叫 "ciphertext"，
-// 但它其实是明文/IV；这里保留原命名以便与原码对照。
+// bcrypt IV: "OrpheanBeholderScryDoubt"（jBCrypt 中名为 BF_CRYPT_CIPHERTEXT）
 private val BF_CRYPT_CIPHERTEXT = intArrayOf(
     0x4f727068, 0x65616e42, 0x65686f6c,
     0x64657253, 0x63727944, 0x6f756274
@@ -341,10 +339,7 @@ private val INDEX_64 = byteArrayOf(
 )
 
 /**
- * BCrypt：OpenBSD 风格 Blowfish 口令哈希。
- *
- * 移植自 jBCrypt 0.4（ISC/MIT 类许可），保持 `$2a$` 与 cost=10 语义，
- * 用于校验 MariaDB 里既有的 `$2a$10$...` 哈希。
+ * bcrypt 口令哈希。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -353,8 +348,7 @@ public object BCrypt {
     /**
      * 用给定成本生成 salt（形如 `$2a$10$...` 的 29 字符串）。
      *
-     * 注意：随机源为 Kotlin 默认 PRNG（[Random.Default]），**非密码学强度**；
-     * 后续如需可换平台 CSPRNG。除随机源外，编码与 cost 校验均与 jBCrypt 0.4 一致。
+     * 随机源为 [Random.Default]，非密码学强度。
      *
      * @param rounds 成本的 log2（有效范围 4..30，默认 10）
      * @throws IllegalArgumentException 当 `rounds > 30` 时
@@ -433,8 +427,8 @@ public object BCrypt {
     /**
      * 校验明文口令与既有哈希是否匹配。
      *
-     * 语义与 jBCrypt 完全一致：内部 `hashpw(plaintext, hashed)` 后与 [hashed] 原串逐字节比较，
-     * 任一步骤（salt 非法、越界等）抛异常时**返回 false 而不是抛**。
+     * 内部 `hashpw(plaintext, hashed)` 后与 [hashed] 原串逐字节比较；
+     * 任一步骤（salt 非法、越界等）抛异常时返回 false 而不是抛出。
      *
      * @param plaintext 待校验的明文口令
      * @param hashed 先前生成的哈希串
@@ -456,7 +450,7 @@ public object BCrypt {
         return ret.toInt() == 0
     }
 
-    // ===== 以下为内部实现，与 Java 原版方法一一对应 =====
+    // ===== 内部实现 =====
 
     /**
      * 用 bcrypt 那套略微改过的 base64 编码一个字节数组。
@@ -526,8 +520,6 @@ public object BCrypt {
         if (maxolen <= 0)
             throw IllegalArgumentException("Invalid maxolen")
 
-        // Java 原版用 StringBuffer 攒字符、最后再 (byte)charAt(i) 取出；
-        // 对 byte 取值而言该 char 往返是无损的，故这里直接写字节缓冲区，结果完全相同。
         val buf = ByteArray(maxolen)
 
         while (off < slen - 1 && olen < maxolen) {

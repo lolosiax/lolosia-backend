@@ -69,7 +69,7 @@ dependencies {
 
 ksp {
     // sqlx4k codegen：生成物包名与方言
-    arg("output-package", "moe.lolosia.web.db.generated")
+    arg("output-package", "moe.lolosia.web.database.generated")
     arg("dialect", "mysql")
 }
 

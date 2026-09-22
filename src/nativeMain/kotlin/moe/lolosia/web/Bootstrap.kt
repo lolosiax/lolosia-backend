@@ -17,23 +17,25 @@ import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
-import moe.lolosia.web.config.AppConfig
-import moe.lolosia.web.config.CONFIG_FILE
-import moe.lolosia.web.config.ENV_CONFIG_FILE
-import moe.lolosia.web.config.loadAppConfig
-import moe.lolosia.web.db.Database
-import moe.lolosia.web.db.SysRoleRepository
-import moe.lolosia.web.db.SysUserRepository
-import moe.lolosia.web.db.SysUserRoleRepository
-import moe.lolosia.web.db.ViewUserRoleRepository
-import moe.lolosia.web.di.registerInjectable
-import moe.lolosia.web.di.startAppKoin
+import moe.lolosia.web.settings.AppSettings
+import moe.lolosia.web.settings.ENV_SETTINGS_FILE
+import moe.lolosia.web.settings.SETTINGS_FILE
+import moe.lolosia.web.settings.loadAppSettings
+import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.SysRoleRepository
+import moe.lolosia.web.database.repository.SysUserRepository
+import moe.lolosia.web.database.repository.SysUserRoleRepository
+import moe.lolosia.web.database.repository.ViewUserRoleRepository
+import moe.lolosia.web.configuration.startAppKoin
+import moe.lolosia.web.dto.ApiResult
 import moe.lolosia.web.service.CacheManager
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
-import moe.lolosia.web.util.classpath.staticClasspath
+import moe.lolosia.web.util.koin.registerInjectable
+import moe.lolosia.web.util.ktor.installCtxInterceptor
+import moe.lolosia.web.util.ktor.staticClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.LogLevel
 import moe.lolosia.web.util.platform.envOrNull
@@ -41,23 +43,18 @@ import moe.lolosia.web.util.router.RouterInjection
 import moe.lolosia.web.util.router.RouterParamException
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.session.ContextKey
-import moe.lolosia.web.util.session.installCtxInterceptor
 import org.koin.core.Koin
 import org.koin.core.module.Module
 
 /**
  * 服务启动（native 专用：需要装载嵌入式 classpath）。
  *
- * [installRoutes] 由各目标源集传入 —— KSP 生成的路由注册代码位于目标源集，
- * 而 Kotlin 编译模型下 **common 代码看不到 platform 声明**，故入口必须下沉到本层/目标源集。
+ * [installRoutes] 由各目标源集传入：KSP 生成的路由注册代码位于目标源集，
+ * 而 common 代码看不到 platform 声明，故入口下沉到本层。
  *
- * 对应旧 JVM 版的 `ApplicationConfigKt.configureApplication`，差异：
- * - 启动方式从 `EngineMain` + `application.yaml` 改为 `embeddedServer`（Native 无 config-yaml / 无 EngineMain）；
- * - 资源访问从 classloader 改为嵌入式 `classpath.zip`（[ClasspathHolder]）；
- * - 日志用自研 [Log]，配置用 [loadAppConfig]（多级覆盖）。
- *
- * @param portOverride 命令行参数传来的端口（最高优先级）；为 `null` 时取配置里的端口。
- * @param platformModules 目标源集特有的绑定（sqlx4k 生成的仓库实现只在该目标源集可见）。
+ * @param portOverride 命令行参数传来的端口（最高优先级）；为 `null` 时取配置里的端口
+ * @param platformModules 目标源集特有的绑定（sqlx4k 生成的仓库实现只在该目标源集可见）
+ * @param installRoutes 路由注册（由目标源集传入 `generatedRoutes()`）
  */
 public fun startServer(
     portOverride: Int?,
@@ -67,9 +64,9 @@ public fun startServer(
     val log = Log.of("Bootstrap")
 
     val cp = installPlatformClasspath()
-    val loaded = loadAppConfig(
+    val loaded = loadAppSettings(
         classpath = cp,
-        diskPath = envOrNull(ENV_CONFIG_FILE) ?: CONFIG_FILE,
+        diskPath = envOrNull(ENV_SETTINGS_FILE) ?: SETTINGS_FILE,
         env = ::envOrNull,
     )
     // 命令行参数优先级最高：直接写回配置，保证「生效配置」与真实监听端口一致
@@ -92,9 +89,9 @@ public fun startServer(
 private fun Application.configureApplication(koin: Koin, installRoutes: Routing.() -> Unit) {
     val log = Log.of("Application")
 
-    // 注册「可按类型注入」的实例：控制器形参声明 ctx: Context / config: AppConfig 即自动注入
+    // 注册「可按类型注入」的实例：控制器形参声明 ctx: Context / config: AppSettings 即自动注入
     RouterInjection.register(Context::class) { call -> call.attributes[ContextKey] }
-    koin.registerInjectable<AppConfig>()
+    koin.registerInjectable<AppSettings>()
     koin.registerInjectable<Database>()
     koin.registerInjectable<CacheManager>()
     koin.registerInjectable<SessionManager>()
