@@ -30,6 +30,9 @@ import moe.lolosia.web.di.registerInjectable
 import moe.lolosia.web.di.startAppKoin
 import moe.lolosia.web.service.CacheManager
 import moe.lolosia.web.service.SessionManager
+import moe.lolosia.web.service.system.RoleService
+import moe.lolosia.web.service.system.UserRoleService
+import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
@@ -98,6 +101,9 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     koin.registerInjectable<Database>()
     koin.registerInjectable<CacheManager>()
     koin.registerInjectable<SessionManager>()
+    koin.registerInjectable<UserService>()
+    koin.registerInjectable<RoleService>()
+    koin.registerInjectable<UserRoleService>()
     koin.registerInjectable<SysUserRepository>()
     koin.registerInjectable<SysRoleRepository>()
     koin.registerInjectable<SysUserRoleRepository>()

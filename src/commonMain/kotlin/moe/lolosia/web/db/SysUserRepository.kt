@@ -84,4 +84,39 @@ public interface SysUserRepository : CrudRepository<SysUserEntity> {
         updatedAt: Instant,
         updatedBy: String?,
     ): Result<Long>
+
+    /**
+     * 整行更新「业务列」（不含 `created_at` / `created_by`）。
+     *
+     * 供服务层做**读-改-写**的部分更新用：先读出实体，把要改的字段覆盖掉，再整行写回 ——
+     * 这样 `null = 不修改` 的语义不会有「不小心把 null 写进库」的风险，
+     * 也不必为每个字段组合单开一条 SQL。`password` 由调用方决定（不改就传回原值）。
+     */
+    @Query(
+        "update sys_user set user_name = :userName, password = :password, real_name = :realName, " +
+            "phone = :phone, email = :email, avatar = :avatar, is_use = :isUse, " +
+            "updated_at = :updatedAt, updated_by = :updatedBy where id = :id and deleted = 0"
+    )
+    public suspend fun executeUpdateById(
+        context: QueryExecutor,
+        id: String,
+        userName: String,
+        password: String?,
+        realName: String?,
+        phone: String?,
+        email: String?,
+        avatar: String?,
+        isUse: Boolean?,
+        updatedAt: Instant,
+        updatedBy: String?,
+    ): Result<Long>
+
+    /** 软删除用户（`@Query` 不支持批量，多 id 请在服务层循环）。 */
+    @Query("update sys_user set deleted = 1, updated_at = :updatedAt, updated_by = :updatedBy where id = :id and deleted = 0")
+    public suspend fun executeSoftDeleteById(
+        context: QueryExecutor,
+        id: String,
+        updatedAt: Instant,
+        updatedBy: String?,
+    ): Result<Long>
 }

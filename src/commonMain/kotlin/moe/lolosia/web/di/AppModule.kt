@@ -4,6 +4,9 @@ import moe.lolosia.web.config.AppConfig
 import moe.lolosia.web.db.Database
 import moe.lolosia.web.service.CacheManager
 import moe.lolosia.web.service.SessionManager
+import moe.lolosia.web.service.system.RoleService
+import moe.lolosia.web.service.system.UserRoleService
+import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.classpath.Classpath
 import moe.lolosia.web.util.router.RouterInjection
 import org.koin.core.Koin
@@ -35,6 +38,9 @@ public fun appModule(config: AppConfig, cp: Classpath): Module = module {
 public fun serviceModule(): Module = module {
     single { CacheManager(get(), get()) }
     single { SessionManager(get(), get()) }
+    single { UserService(get(), get(), get(), get()) }
+    single { RoleService(get(), get(), get()) }
+    single { UserRoleService(get(), get(), get(), get()) }
 }
 
 /** 启动容器。[platformModules] 由各目标 `main()` 传入（含 sqlx4k 生成的仓库实现）。 */

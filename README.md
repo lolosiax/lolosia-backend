@@ -54,7 +54,9 @@
 │   │   ├── controller/           # DemoController / ClasspathController（插件验证用）
 │   │   ├── db/                   # Database（sqlx4k 驱动）+ 各 @Repository + db/model 实体
 │   │   ├── di/                   # Koin 容器：appModule / serviceModule / registerInjectable
+│   │   ├── dto/                  # 接口出参/入参 DTO（SystemDtos：用户 / 角色 / 绑定）
 │   │   ├── service/              # SessionManager / CacheManager / SessionMap
+│   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
 │   │   └── util/                 # classpath / crypto(BCrypt) / router / session / time / log
 │   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
 │   ├── nativeMain/kotlin/…/      # Bootstrap.kt（startServer）/ ZipClasspath / 平台 Env
@@ -115,6 +117,7 @@ build\bin\mingwX64\releaseExecutable\ktor-template.exe 7129  # 首参覆盖端�
 curl.exe -s http://127.0.0.1:7129/api/ping            # pong
 curl.exe -s http://127.0.0.1:7129/api/config          # 生效配置（端口 / db / 日志级别）
 curl.exe -s http://127.0.0.1:7129/api/db/ping         # sqlx4k 连通性：版本 / 库名 / 会话时区
+curl.exe -s http://127.0.0.1:7129/api/svc/selftest    # 服务层自检：建用户→查→改→改密码→改绑定→删 + 角色增删改
 curl.exe -s -X POST http://127.0.0.1:7129/api/echo -H "Content-Type: application/json" -d '{\"name\":\"a\",\"times\":3}'
 ```
 
@@ -222,9 +225,9 @@ object DemoController {
 | 0.3 自研路由插件（注解 + KSP + 运行时 + multipart） | ✅ |
 | 0.4 `classpath.zip` 中间层 | ✅ |
 | 0.5 基础设施替换（日志 / 配置 / Koin / datetime / okio / Uuid） | ✅ |
-| 0.6 sqlx4k 数据层 | 🔄 会话/缓存/用户/角色读写已通；剩 Service 层迁入 |
-| 0.7 自研 bcrypt（`$2a$` cost 10） | 🔄 移植完成并用 jBCrypt 官方向量锁定；剩接入登录链路 |
-| 0.8 鉴权拦截器链（Traffic → Ctx → SSE → Auth → Envelope） | ⬜ 目前只有 `CtxInterceptor` |
+| 0.6 sqlx4k 数据层 | ✅ 会话/缓存 + 用户/角色/绑定的读写与 Service 层（`/api/svc/selftest` 12 步全绿） |
+| 0.7 自研 bcrypt（`$2a$` cost 10） | 🔄 移植完成、已接进建用户/改密码（官方向量 + 改密往返锁定）；剩登录链路 |
+| 0.8 鉴权拦截器链（Traffic → Ctx → SSE → Auth → Envelope） | ⬜ 目前只有 `CtxInterceptor`；业务控制器与 `my*` 接口随它一起接 |
 | 0.9 部署（systemd 拉起原生二进制） | ✅ |
 
 > 注意：`ApiResult` 信封**结构已定义**，但「自动给 `/api/**` 包信封」的中间件属于 0.8，尚未落地。

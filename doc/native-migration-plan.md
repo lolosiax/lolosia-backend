@@ -1208,6 +1208,78 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 
 **清理**：验收用的临时端点 `/api/auth/verify` 已删除（它是通用哈希预言机，不该留在工程里），回归确认该路由 404、其余接口 200。
 
+### 13.13 P0-0.6 收尾：用户 / 角色 / 绑定 Service 层（2026-09-22）
+
+**范围**：`legacy/.../service/system/` 三个服务迁到 `commonMain`，返回值从 `Bundle`（`MutableMap<String, Any?>`）换成**强类型 DTO**。
+`sys_logs` / OSS 与头像上传（`avatarPathOf` / `saveAvatar`）仍不迁（分别属 0.8 与 P1），`my*`（`myUserInfo` / `myUserRole` / `mySession`）**依赖登录态，随 0.8 的鉴权链一起接**。
+
+**三处 legacy 存疑行为 —— 用户拍板结果**（原样记录，避免下次再纠结）
+
+| 行为 | 旧版 | 定案 |
+| --- | --- | --- |
+| `UserService.delete` | 只软删 `sys_user_roles`，用户仍能登录 | **同时软删 `sys_user`**（语义正常化） |
+| `UserRoleService.getByUserId(userId)` | 忽略形参、硬用登录人 `ctx.user.id` | **按形参查**（旧版对前端就是个坏接口） |
+| `getUserInfo` / `userSearching` 出参 | 回传整行，含 bcrypt 哈希 | **不回传 `password`**（DTO 里干脆没有该字段） |
+
+**设计要点**
+
+- **DTO 层**（[SystemDtos.kt](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/dto/SystemDtos.kt)）：键名沿用旧版 JSON（`roleType`、`isUse`，分页键一个叫 `list` 一个叫 `rows` —— 历史遗留照搬，免得前端跟着改）；实体→DTO 的转换写成扩展函数（`toRow()` / `toListRow(user)` / `toUserRoleRow()`）。
+- **时间出参是展示串** `yyyy-MM-dd HH:mm:ss`（固定 `+08:00`，`Instant.toDisplayString()`）——旧版用 `@JsonFormat(pattern="yyyy-MM-dd HH:mm:ss", timezone="GMT+8")`，前端直接把该字段当字符串显示；换成 ISO-8601 会肉眼改变页面观感。**库里仍是 `Instant`**，约定 14 不变。
+- **`null` = 不修改**：用**读-改-写**实现（先 `findOneById` 读出实体，覆盖非空字段，再整行 `executeUpdateById` 写回）。好处是不必为每个字段组合单开 SQL，也不会把 `null` 误写进库；代价是一次额外读、且不能把某列「改回 NULL」（旧版 Ebean 的部分更新同样做不到）。`updatedBy` 取 `operatorId ?: 现有值`，避免无操作者时把既有审计值抹成 NULL。
+- **`operatorId` 显式传参**：服务层不碰 `ctx`（native 侧 `Context` 目前只有 `call`，登录态是 0.8 的事），「谁在操作」由控制器从登录态取后传入；传 `null` 表示无操作者。
+- **N+1 是已知代价**：`list()` 每行补 `sys_user` 字段（视图缺 `is_use`），而 `@Query` 不支持 `IN (列表)`（§13.11 规则 3），只能循环单条；默认每页 10 行。旧版是一条 `id.isIn(...)` 批量取，这属该限制下的不可避免退化。
+- 旧版 `list()` 的关键字查询是「用户 id 集合 OR 角色 id 集合」两条 SQL 预筛，现在直接在 `view_user_role` 上 `LIKE`（多匹配 `type` 一列），语义等价、SQL 更少。
+
+**改动一览**
+
+| 文件 | 说明 |
+| --- | --- |
+| `dto/SystemDtos.kt`（新） | 用户 / 角色 / 绑定的入参出参 DTO + 实体转换 |
+| `util/time/Time.kt` | 新增 `toDisplayString()` 与 `DISPLAY_ZONE`（固定 +08:00） |
+| `service/system/UserService.kt`（新） | `list` / `searching` / `get` / `create` / `info` / `update` / `delete` / `changePassword` |
+| `service/system/RoleService.kt`（新） | `list` / `page` / `create` / `update` / `destroy`（保护规则照搬） |
+| `service/system/UserRoleService.kt`（新） | `getByUserId` / `getRoleByUserId`（后者缺绑定时自动补 `student` 角色）；旧版没人调用的 `create` 去掉 |
+| `service/system/QuerySupport.kt`（新） | `likePattern()`：`null` / 空串 → `%`（等价「不过滤」） |
+| `db/SysUserRepository.kt` | 补 `executeUpdateById`（整行业务列）与 `executeSoftDeleteById` |
+| `di/AppModule.kt` / `nativeMain/Bootstrap.kt` | 三个服务 `single { … }` + `registerInjectable` |
+| `controller/DemoController.kt` | `/api/svc/selftest` 逐步自检（临时探针，正式接口在 0.8） |
+
+**新踩到的坑（已回写开发记忆）**
+
+1. **`executeInsert` 取不到自增 id**：`execute*` 返回的是**受影响行数**（生成代码注释写明），生成器要拿到自增 id 只能把 `insert` 拼成 `insert …; select id from … where id = coalesce(nullif(last_insert_id(), 0), ?)` —— 而 MySQL 方言下这条多语句脚本正是 §13.10 那个 `1064`。
+   → 角色 `create` 用**插入后回查**（按 `type + roleName` 取最大 id）绕开，代价是一次额外查询。
+2. **`updated_by` 会被抹成 NULL**：读-改-写里若直接 `updatedBy = operatorId`，未接登录态时（`operatorId == null`）会把库里已有的审计值覆盖掉 → 改成 `operatorId ?: current.updatedBy`。
+3. **配套前端副本与 legacy 后端已经漂移**（0.8 写控制器时必须先拍板以谁为准）：
+   - 前端调 `/user/edit`，legacy 后端只有 `/user/update`；前端调 `/userRole/getByUserId`，legacy 后端**没有**这个路由；
+   - 前端按 `const { data } = await request(...)` 后又读 `data.rows` / `data.roleId` / `data.data`，只有「信封把 data 摊平到顶层」的后端才成立，而本项目信封是 `{code,msg,data:{…}}`；
+   - 前端用 `row.isUse === 1` 判启用，而本项目 `isUse` 一直是布尔。
+
+**实测**（mingwX64 release + 本机 MariaDB 10.11.6；`linkReleaseExecutableLinuxArm64` 同步通过）
+
+`/api/svc/selftest` 逐步跑「建用户→查→改→改密码→改绑定→删」与「建角色→改→删」：**12/12 通过**
+
+| 步骤 | 结果 |
+| --- | --- |
+| 角色列表 / 分页（keys=管理 → total=2） | ✅ |
+| 建用户（唯一用户名/邮箱，密码 bcrypt；视图回读 `roleType=student`、`isUse=true`） | ✅ |
+| 重复创建同名 → `同名用户已存在` | ✅ |
+| 详情（`roleId` 回读、`createdAt` 有值） | ✅ |
+| 搜索 + 列表（`roleName` / `roleType` / `updatedAt` 齐全） | ✅ |
+| 改用户（`realName` / `isUse` 生效，未给的 `userName` 保持原值） | ✅ |
+| 改密码（新密码可用、旧密码立即失效 → bcrypt 往返） | ✅ |
+| 改绑定（`roleId` 生效并可改回） | ✅ |
+| 角色 建 → 改 → 删（软删后不在列表） | ✅ |
+| 保护规则（`super_admin` / 使用中的角色不可删） | ✅ |
+| 删用户（软删绑定 + 软删用户；查不到、列表也没有） | ✅ |
+
+**时区交叉核对**：`/api/db/ping` 的库端 `now()` = `2026-09-22 01:56:01`（会话 `+00:00`，即 UTC），同一时刻业务 DTO 里 `createdAt=2026-09-22 09:56:01`（+08:00 展示串）；`mysql` 用本地时区（+08:00）查同一行也是 `09:56:01` —— 三方自洽。
+
+**库内落地检查**（`mysql` 直查）：`selftest-*` 用户 `deleted=1`、`is_use=0`、`password` 非空、`created_by` = 自身；绑定与自检角色均 `deleted=1`；`lolosia` 等既有数据未被触碰。
+
+> 自检会留下**软删**的 `selftest-*` 用户与 `type='selftest'` 角色（视图已过滤，不可见）。要硬清：
+> `delete from sys_user_roles where user_id in (select id from sys_user where user_name like 'selftest-%'); delete from sys_user where user_name like 'selftest-%'; delete from sys_role where type='selftest';`
+
+
 
 
 
