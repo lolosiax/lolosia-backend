@@ -3,6 +3,7 @@ package moe.lolosia.web.di
 import moe.lolosia.web.config.AppConfig
 import moe.lolosia.web.db.Database
 import moe.lolosia.web.service.CacheManager
+import moe.lolosia.web.service.LoginService
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.system.RoleService
 import moe.lolosia.web.service.system.UserRoleService
@@ -38,6 +39,7 @@ public fun appModule(config: AppConfig, cp: Classpath): Module = module {
 public fun serviceModule(): Module = module {
     single { CacheManager(get(), get()) }
     single { SessionManager(get(), get()) }
+    single { LoginService(get(), get(), get()) }
     single { UserService(get(), get(), get(), get()) }
     single { RoleService(get(), get(), get()) }
     single { UserRoleService(get(), get(), get(), get()) }

@@ -29,10 +29,13 @@ import moe.lolosia.web.db.ViewUserRoleRepository
 import moe.lolosia.web.di.registerInjectable
 import moe.lolosia.web.di.startAppKoin
 import moe.lolosia.web.service.CacheManager
+import moe.lolosia.web.service.LoginService
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.system.RoleService
 import moe.lolosia.web.service.system.UserRoleService
 import moe.lolosia.web.service.system.UserService
+import moe.lolosia.web.interceptor.installAuthInterceptor
+import moe.lolosia.web.interceptor.installTrafficInterceptor
 import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
@@ -101,6 +104,7 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     koin.registerInjectable<Database>()
     koin.registerInjectable<CacheManager>()
     koin.registerInjectable<SessionManager>()
+    koin.registerInjectable<LoginService>()
     koin.registerInjectable<UserService>()
     koin.registerInjectable<RoleService>()
     koin.registerInjectable<UserRoleService>()
@@ -109,7 +113,10 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     koin.registerInjectable<SysUserRoleRepository>()
     koin.registerInjectable<ViewUserRoleRepository>()
 
+    // 拦截器链（注册顺序 = 由外到内）：Traffic → Ctx → Auth
+    installTrafficInterceptor()
     installCtxInterceptor()
+    installAuthInterceptor(koin.get())
 
     install(ContentNegotiation) {
         json(
@@ -125,6 +132,10 @@ private fun Application.configureApplication(koin: Koin, installRoutes: Routing.
     install(ConditionalHeaders)
 
     install(StatusPages) {
+        // 业务/鉴权异常：HTTP 状态码与信封 code 取同一个值
+        exception<ApiException> { call, cause ->
+            call.respond(HttpStatusCode.fromValue(cause.status), ApiResult.err<Unit>(cause.status, cause.message ?: "请求失败"))
+        }
         exception<RouterParamException> { call, cause ->
             call.respond(HttpStatusCode.BadRequest, ApiResult.err<Unit>(400, cause.message ?: "参数错误"))
         }

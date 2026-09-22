@@ -82,6 +82,7 @@ class RouterProcessor(
             appendLine("import io.ktor.server.request.receive")
             appendLine("import io.ktor.server.response.respond")
             appendLine("import io.ktor.server.routing.Routing")
+            appendLine("import moe.lolosia.web.respondEnveloped")
             HTTP_METHODS.values.forEach { appendLine("import io.ktor.server.routing.$it") }
             appendLine("import $FQ.inject")
             appendLine("import $FQ.readForm")
@@ -225,7 +226,8 @@ class RouterProcessor(
         if (fn.isUnitReturning()) {
             appendLine("        $callExpr")
         } else {
-            appendLine("        call.respond($callExpr)")
+            // 返回值统一走 respondEnveloped 包成 `{code,msg,data}`（见 ApiResult.kt 的说明）
+            appendLine("        call.respondEnveloped($callExpr)")
         }
         appendLine("    }")
     }

@@ -19,6 +19,8 @@
 - **多级配置覆盖**：数据类默认值 < 内嵌 JSON < 磁盘 `application.json` < 环境变量 < 命令行端口
 - **数据访问**：sqlx4k 的 `@Repository` + `@Query` 编译期代码生成（无 ORM、无反射），实体时间列统一 `kotlin.time.Instant`
 - **自研 multipart 解析**：Ktor 3.4 在 Native 上未实现 `receiveMultipart()`，改为读原始字节自行解析
+- **统一响应信封** `{code,msg,data}`：由 KSP 生成的注册代码调 `respondEnveloped(...)` 自动包装（不靠 send pipeline 拦截 —— Native 上没有反射，显式包装才能把 `typeInfo` 完整交给序列化器）
+- **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
 - **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件（自动留 `.previous` 回滚文件）
 
@@ -51,11 +53,12 @@
 │   ├── commonMain/kotlin/moe/lolosia/web/
 │   │   ├── ApiResult.kt          # {code,msg,data} 信封 + 默认端口 PORT = 7129
 │   │   ├── config/               # AppConfig（@Serializable）+ 多级覆盖 ConfigLoader
-│   │   ├── controller/           # DemoController / ClasspathController（插件验证用）
+│   │   ├── controller/           # Login / User / Role / UserRole / Menu（业务）+ Demo / Classpath（插件验证用）
 │   │   ├── db/                   # Database（sqlx4k 驱动）+ 各 @Repository + db/model 实体
 │   │   ├── di/                   # Koin 容器：appModule / serviceModule / registerInjectable
-│   │   ├── dto/                  # 接口出参/入参 DTO（SystemDtos：用户 / 角色 / 绑定）
-│   │   ├── service/              # SessionManager / CacheManager / SessionMap
+│   │   ├── dto/                  # 接口出参/入参 DTO（SystemDtos：用户/角色/绑定；LoginDtos：登录）
+│   │   ├── interceptor/          # TrafficInterceptor（耗时日志）/ AuthInterceptor（会话鉴权 + 白名单）
+│   │   ├── service/              # LoginService / SessionManager / CacheManager / SessionMap
 │   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
 │   │   └── util/                 # classpath / crypto(BCrypt) / router / session / time / log
 │   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
@@ -114,11 +117,18 @@ build\bin\mingwX64\releaseExecutable\ktor-template.exe 7129  # 首参覆盖端�
 服务默认监听 `0.0.0.0:7129`，静态首页在 `http://127.0.0.1:7129/home/`。冒烟：
 
 ```powershell
-curl.exe -s http://127.0.0.1:7129/api/ping            # pong
+curl.exe -s http://127.0.0.1:7129/api/ping            # {"code":200,"msg":"success","data":"pong"}
 curl.exe -s http://127.0.0.1:7129/api/config          # 生效配置（端口 / db / 日志级别）
 curl.exe -s http://127.0.0.1:7129/api/db/ping         # sqlx4k 连通性：版本 / 库名 / 会话时区
-curl.exe -s http://127.0.0.1:7129/api/svc/selftest    # 服务层自检：建用户→查→改→改密码→改绑定→删 + 角色增删改
-curl.exe -s -X POST http://127.0.0.1:7129/api/echo -H "Content-Type: application/json" -d '{\"name\":\"a\",\"times\":3}'
+$st = curl.exe -s http://127.0.0.1:7129/api/svc/selftest   # 服务层自检（13 步）+ 末尾给出 token=…
+$st
+$tk = ($st | Select-String -Pattern 'token=(\S+)').Matches.Groups[1].Value
+
+# /api/** 默认要鉴权（Authorization: Bearer <sessionId>），无 token → 401 + {code:401,…}
+curl.exe -s -o "$env:TEMP\a.json" -w "no-token=%{http_code}`n" -X POST http://127.0.0.1:7129/api/role/list
+curl.exe -s -X POST http://127.0.0.1:7129/api/role/list -H "Authorization: Bearer $tk"
+curl.exe -s -X POST http://127.0.0.1:7129/api/user/myInfo -H "Authorization: Bearer $tk"
+curl.exe -s -X POST http://127.0.0.1:7129/api/logout -H "Authorization: Bearer $tk"
 ```
 
 ## 🛠 构建任务
@@ -164,11 +174,14 @@ object DemoController {
 
 约定（迁移前的 ktorfitx 控制器**只改 import** 即可复用）：
 
-- `@Controller` 只能标在 `object` 上；方法返回值由 `call.respond(...)` 直接写出（`Unit` 不写响应体）
+- `@Controller` 只能标在 `object` 上；方法返回值由生成代码调 `respondEnveloped(...)` 包成 `{code,msg,data}` 后写出
 - 无法绑定的形参会**编译期报错**并给出提示：要么加参数注解，要么给类型标 `@Injectable`
 - 支持的参数类型只有 `String / Int / Long / Double / Boolean / Uuid / 枚举`（不做嵌套泛型绑定，超范围请手写路由）
 
-当前模板自带的探针接口：`/api/ping`、`/api/whoami`、`/api/config`、`/api/db/ping`、`/api/db/roles`、`/api/db/users`、`/api/cache/{put,get}`、`/api/session/{new,get/{id}}`、`/api/classpath/{list,read}`。
+业务接口（0.8，路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`。
+这些接口（以及探针里的 `/api/classpath/*`）都走鉴权：`POST` + `Authorization: Bearer <sessionId>`；白名单只有 `/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar` 与取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）。
+
+当前模板自带的探针接口（**临时脚手架**，P0 收尾删除）：`/api/ping`、`/api/whoami`、`/api/config`、`/api/db/ping`、`/api/db/roles`、`/api/db/users`、`/api/cache/{put,get}`、`/api/session/{new,get/{id}}`、`/api/svc/selftest` 在开发期免鉴权（见 `AuthInterceptor.DEV_PROBES`）；`/api/classpath/{list,read}` 需鉴权。
 
 ## ⚙️ 配置
 
@@ -225,12 +238,12 @@ object DemoController {
 | 0.3 自研路由插件（注解 + KSP + 运行时 + multipart） | ✅ |
 | 0.4 `classpath.zip` 中间层 | ✅ |
 | 0.5 基础设施替换（日志 / 配置 / Koin / datetime / okio / Uuid） | ✅ |
-| 0.6 sqlx4k 数据层 | ✅ 会话/缓存 + 用户/角色/绑定的读写与 Service 层（`/api/svc/selftest` 12 步全绿） |
-| 0.7 自研 bcrypt（`$2a$` cost 10） | 🔄 移植完成、已接进建用户/改密码（官方向量 + 改密往返锁定）；剩登录链路 |
-| 0.8 鉴权拦截器链（Traffic → Ctx → SSE → Auth → Envelope） | ⬜ 目前只有 `CtxInterceptor`；业务控制器与 `my*` 接口随它一起接 |
+| 0.6 sqlx4k 数据层 | ✅ 会话/缓存 + 用户/角色/绑定的读写与 Service 层（`/api/svc/selftest` 自检全绿） |
+| 0.7 自研 bcrypt（`$2a$` cost 10） | ✅ 移植完成（官方向量锁定），已接进建用户/改密码/登录校验 |
+| 0.8 鉴权拦截器链 + 登录 + 系统接口 | ✅ 信封改由 KSP 生成代码调 `respondEnveloped`；链 = Traffic → Ctx → Auth；`/api/login` `/api/logout` + 用户/角色/绑定/菜单控制器（**以前端工程契约为准**）。SSE 拦截器待做 |
 | 0.9 部署（systemd 拉起原生二进制） | ✅ |
 
-> 注意：`ApiResult` 信封**结构已定义**，但「自动给 `/api/**` 包信封」的中间件属于 0.8，尚未落地。
+> 下一步（P0 收尾）：删掉 `DemoController` 与 `AuthInterceptor.DEV_PROBES` 这组临时探针，然后进 P1（OSS / 头像 / `sys_logs` / SSE / 验证码）。
 
 - **P1**：图形验证码、WebP 转换、OSS 上传/头像/菜单权限、SSE 事件总线实机回归、压缩（Nginx）、`classpath.zip` 改 DEFLATED
 - **P2**：AI 相关按需改为纯 Ktor Client 直连 LLM HTTP API（不引入 AI 框架）

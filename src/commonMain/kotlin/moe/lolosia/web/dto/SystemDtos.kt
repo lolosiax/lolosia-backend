@@ -9,13 +9,13 @@ import moe.lolosia.web.util.time.toDisplayString
 /**
  * 用户 / 角色 / 绑定相关的接口 DTO（入参与出参）。
  *
- * 约定：
- * - 字段名沿用旧 JVM 版的 JSON 键（`roleType`、`isUse`、`list` / `rows` 这类历史命名也一并保留），
- *   避免前端跟着改；
+ * 约定（**以前端副本 `F:\Develop\Node\lolosia-web` 为准**，见 `doc/开发记忆.md`）：
+ * - 字段名与分页键沿用前端读的键：用户分页是 `{data, total}`、角色分页是 `{rows, total}`；
+ * - `isUse` 线上是 **`1` / `0`**（前端表格 `row.isUse === 1` 判启用、编辑表单用 `1`/`0` 单选）；
  * - **出参一律不含 `password`**（旧版把 bcrypt 哈希回传给了前端，这里不再回传）；
  * - 时间字段是**展示字符串** `yyyy-MM-dd HH:mm:ss`（固定 +08:00），见 [toDisplayString]；
  *   库里的类型仍是 `kotlin.time.Instant`；
- * - 这些是"接口契约"类型，不放业务规则，业务在 `service/system/`。
+ * - 入参里 `null` = 不修改（由服务层的读-改-写实现）。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -35,7 +35,7 @@ public data class UserRow(
     val phone: String? = null,
     val email: String? = null,
     val avatar: String? = null,
-    val isUse: Boolean? = null,
+    val isUse: Int? = null,
     val createdAt: String? = null,
     val createdBy: String? = null,
     val updatedAt: String? = null,
@@ -58,7 +58,7 @@ public data class UserListRow(
     val phone: String? = null,
     val email: String? = null,
     val avatar: String? = null,
-    val isUse: Boolean? = null,
+    val isUse: Int? = null,
     val roleId: Long? = null,
     val roleName: String? = null,
     val type: String? = null,
@@ -67,10 +67,10 @@ public data class UserListRow(
     val updatedAt: String? = null,
 )
 
-/** 分页用户列表（旧版键名 `list` / `total`）。 */
+/** 分页用户列表；键名 `data` / `total` 是前端 `userManagement/index.vue` 读的（`data.data`）。 */
 @Serializable
 public data class UserListResult(
-    val list: List<UserListRow>,
+    val data: List<UserListRow>,
     val total: Long,
 )
 
@@ -83,7 +83,7 @@ public data class UserInfoRow(
     val phone: String? = null,
     val email: String? = null,
     val avatar: String? = null,
-    val isUse: Boolean? = null,
+    val isUse: Int? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
     val roleId: Long = ROLE_ID_DEFAULT,
@@ -104,7 +104,7 @@ public data class RoleRow(
     val menuTitle: List<String> = emptyList(),
 )
 
-/** 分页角色列表（旧版键名 `rows` / `total`，与用户列表的 `list` 不同名，属历史遗留）。 */
+/** 分页角色列表（键名 `rows` / `total`，与用户列表的 `data` 不同名，属前端历史遗留）。 */
 @Serializable
 public data class RolePageResult(
     val rows: List<RoleRow>,
@@ -129,6 +129,16 @@ public data class UserRoleRow(
     val updatedAt: String? = null,
 )
 
+/** 只改数据、不返回资源的接口统一回它（旧版是 `data: null`，前端只取 `msg`）。 */
+@Serializable
+public class EmptyResult
+
+/** 新建资源后回传主键（旧版 `/user/create` 的 `{id}`）。 */
+@Serializable
+public data class IdRow(val id: String)
+
+// ===== 入参 =====
+
 /** 新建用户入参。`userName` 缺席时取手机号或邮箱；`roleId` 必填（旧版直接解引用）。 */
 @Serializable
 public data class UserCreateReq(
@@ -137,7 +147,7 @@ public data class UserCreateReq(
     val realName: String? = null,
     val phone: String? = null,
     val email: String? = null,
-    val isUse: Boolean? = null,
+    val isUse: Int? = null,
     val roleId: Long,
 )
 
@@ -150,8 +160,44 @@ public data class UserUpdateReq(
     val realName: String? = null,
     val phone: String? = null,
     val email: String? = null,
-    val isUse: Boolean? = null,
+    val isUse: Int? = null,
     val roleId: Long? = null,
+)
+
+@Serializable
+public data class UserListReq(
+    val pageNo: Int? = null,
+    val pageSize: Int? = null,
+    val keys: String? = null,
+)
+
+@Serializable
+public data class SearchReq(val keys: String? = null)
+
+/** 按 id 批量取用户（`/user/get`）；数组里允许有 `null`（旧版如此）。 */
+@Serializable
+public data class IdListReq(val idList: List<String?> = emptyList())
+
+/** 批量删除（`/user/delete`）；前端传的是**逗号分隔的字符串**，不是数组。 */
+@Serializable
+public data class IdsReq(val ids: String = "")
+
+@Serializable
+public data class UserIdReq(val userId: String)
+
+/** 改密码；`id` 缺席时改的是登录人自己的密码。 */
+@Serializable
+public data class UpdatePasswordReq(
+    val id: String? = null,
+    val origin: String,
+    val target: String,
+)
+
+@Serializable
+public data class RolePageReq(
+    val pageNo: Int? = null,
+    val pageSize: Int? = null,
+    val roleName: String? = null,
 )
 
 @Serializable
@@ -168,6 +214,9 @@ public data class RoleUpdateReq(
     val type: String? = null,
 )
 
+@Serializable
+public data class RoleDestroyReq(val id: Long)
+
 // ===== 实体 → DTO =====
 
 public fun SysUserEntity.toRow(): UserRow = UserRow(
@@ -177,7 +226,7 @@ public fun SysUserEntity.toRow(): UserRow = UserRow(
     phone = phone,
     email = email,
     avatar = avatar,
-    isUse = isUse,
+    isUse = isUse.toFlag(),
     createdAt = createdAt?.toDisplayString(),
     createdBy = createdBy,
     updatedAt = updatedAt?.toDisplayString(),
@@ -192,7 +241,7 @@ public fun SysUserEntity.toInfoRow(roleId: Long): UserInfoRow = UserInfoRow(
     phone = phone,
     email = email,
     avatar = avatar,
-    isUse = isUse,
+    isUse = isUse.toFlag(),
     createdAt = createdAt?.toDisplayString(),
     updatedAt = updatedAt?.toDisplayString(),
     roleId = roleId,
@@ -218,7 +267,7 @@ public fun ViewUserRoleEntity.toListRow(user: SysUserEntity?): UserListRow = Use
     phone = user?.phone ?: phone,
     email = user?.email ?: email,
     avatar = user?.avatar ?: avatar,
-    isUse = user?.isUse ?: false,
+    isUse = (user?.isUse ?: false).toFlag(),
     roleId = roleId,
     roleName = roleName,
     type = type,
@@ -242,6 +291,12 @@ public fun ViewUserRoleEntity.toUserRoleRow(): UserRoleRow = UserRoleRow(
     createdAt = createdAt?.toDisplayString(),
     updatedAt = updatedAt?.toDisplayString(),
 )
+
+/** 布尔 → 接口上的 `1` / `0`（前端按数字判启用）。 */
+internal fun Boolean?.toFlag(): Int? = this?.let { if (it) 1 else 0 }
+
+/** 接口上的 `1` / `0` → 布尔（`0` 为 false）。 */
+internal fun Int?.toBool(): Boolean? = this?.let { it != 0 }
 
 /** 账户不存在时列表里的占位姓名（旧版同此）。 */
 private const val MISSING_ACCOUNT: String = "<账户不存在>"

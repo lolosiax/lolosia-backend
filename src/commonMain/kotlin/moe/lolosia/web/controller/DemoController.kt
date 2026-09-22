@@ -1,6 +1,7 @@
 package moe.lolosia.web.controller
 
 import kotlinx.serialization.Serializable
+import moe.lolosia.web.ApiException
 import moe.lolosia.web.config.AppConfig
 import moe.lolosia.web.db.Database
 import moe.lolosia.web.db.SysRoleRepository
@@ -11,6 +12,7 @@ import moe.lolosia.web.dto.RoleUpdateReq
 import moe.lolosia.web.dto.UserCreateReq
 import moe.lolosia.web.dto.UserUpdateReq
 import moe.lolosia.web.service.CacheManager
+import moe.lolosia.web.service.LoginService
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.SessionMap
 import moe.lolosia.web.service.system.RoleService
@@ -31,6 +33,11 @@ import moe.lolosia.web.util.time.nowEpochMs
 /**
  * 自研路由插件的验证用控制器：覆盖 @Controller / @GET / @POST /
  * 按类型自动注入 / @Path / @Query / @Body / @Form / @FilePart。
+ *
+ * ⚠️ **整体是 P0 期间的脚手架**：里面的探针（`/ping`、`/db/…`、`/svc/selftest` 等）
+ * 只在本地冒烟时用，且为了让冒烟脚本能取到 token，这些路径在
+ * [moe.lolosia.web.interceptor.AuthInterceptor] 的 `DEV_PROBES` 里免鉴权。
+ * P0 收尾时应**整块删除**（连同 `DEV_PROBES`）。
  *
  * 注意：写法与旧 ktorfitx 控制器一致，仅 import 包名不同。
  *
@@ -166,16 +173,22 @@ object DemoController {
     }
 
     /**
-     * 服务层自检（P0-0.6 验证用，**临时**）：跑一遍「建用户 → 查 → 改 → 改密码 → 改绑定 → 删」
-     * 与「建角色 → 改 → 删」的全链路，逐步报告成败（正式接口与登录态在 0.8 的拦截器链接入）。
+     * 服务层自检（**临时的 P0 脚手架**）：跑一遍「建用户 → 查 → 改 → 改密码 → 改绑定 →
+     * 登录（bcrypt 校验 + 建会话）→ 删」与「建角色 → 改 → 删」的全链路，逐步报告成败。
      *
      * 测试数据用 `selftest-<时间戳>` 命名，跑完自行清理；失败步骤保留现场便于排查。
+     *
+     * 末尾会输出 `token=<会话 id>`（这条会话**故意不清理**），冒烟脚本拿它去访问受保护接口
+     * （如 `/api/role/list`），从而在 HTTP 层验证「无 token → 401 / 带 token → 200」的鉴权链路；
+     * 验完用 `POST /api/logout` 关掉即可。
      */
     @GET("/svc/selftest")
     suspend fun serviceSelfTest(
         users: UserService,
         roles: RoleService,
         bindings: UserRoleService,
+        login: LoginService,
+        sessions: SessionManager,
     ): String {
         val report = mutableListOf<String>()
 
@@ -194,6 +207,7 @@ object DemoController {
         var tempRoleId = 0L
         var createdAt = ""
         var updatedAt = ""
+        var token = ""
 
         step("角色列表（应含 5 个内置角色）") {
             val list = roles.list()
@@ -217,7 +231,7 @@ object DemoController {
             userId = row.id
             check(row.roleType == "student") { "roleType=${row.roleType}" }
             check(row.roleName != null) { "roleName 为空" }
-            check(row.isUse == true) { "isUse=${row.isUse}" }
+            check(row.isUse == 1) { "isUse=${row.isUse}" }
         }
         step("重复创建同名 → 报「同名用户已存在」") {
             val t = runCatching {
@@ -232,17 +246,17 @@ object DemoController {
         }
         step("搜索 + 列表（roleName / roleType / updatedAt 都在）") {
             check(users.searching(userName).any { it.id == userId }) { "搜索不到新用户" }
-            val row = users.list(1, 10, userName).list.firstOrNull { it.id == userId } ?: error("列表里没有新用户")
+            val row = users.list(1, 10, userName).data.firstOrNull { it.id == userId } ?: error("列表里没有新用户")
             check(row.roleName != null) { "roleName 为空" }
             check(row.updatedAt != null) { "updatedAt 为空" }
             createdAt = row.createdAt.orEmpty()
             updatedAt = row.updatedAt.orEmpty()
         }
         step("改用户（未给的字段保持原值）") {
-            users.update(UserUpdateReq(id = userId, realName = "自检用户改", isUse = false))
+            users.update(UserUpdateReq(id = userId, realName = "自检用户改", isUse = 0))
             val info = users.info(userId)
             check(info.realName == "自检用户改") { "realName=${info.realName}" }
-            check(info.isUse == false) { "isUse=${info.isUse}" }
+            check(info.isUse == 0) { "isUse=${info.isUse}" }
             check(info.userName == userName) { "userName 被误改：${info.userName}" }
         }
         step("改密码（验旧密码 → bcrypt 往返）") {
@@ -250,6 +264,15 @@ object DemoController {
             val t = runCatching { users.changePassword(userId, "old-pass", "whatever") }.exceptionOrNull()
             check(t is IllegalStateException) { "旧密码应已失效，实际 $t" }
             users.changePassword(userId, "new-pass", "old-pass") // 换回去，便于重复跑
+        }
+        step("登录（bcrypt 校验 → 建会话 → 拿 token）") {
+            val wrong = runCatching { login.login(userName, "wrong-pass") }.exceptionOrNull()
+            check(wrong is ApiException) { "错误密码应报 400，实际 $wrong" }
+            val result = login.login(userName, "old-pass")
+            check(result.userName == userName) { "userName=${result.userName}" }
+            check(result.authorization.isNotBlank()) { "会话 id 为空" }
+            check(sessions.find(result.authorization)?.userId == userId) { "会话里没写用户 id" }
+            token = result.authorization
         }
         step("改绑定（roleId 生效并可改回）") {
             val guest = roles.list().firstOrNull { it.type == "guest" } ?: error("没有 guest 角色")
@@ -279,7 +302,7 @@ object DemoController {
         step("删用户（软删绑定 + 软删用户）") {
             users.delete(listOf(userId))
             check(runCatching { users.info(userId) }.isFailure) { "删完还能查到用户" }
-            check(users.list(1, 10, userName).list.none { it.id == userId }) { "删完还在列表里" }
+            check(users.list(1, 10, userName).data.none { it.id == userId }) { "删完还在列表里" }
             userId = ""
         }
 
@@ -289,6 +312,9 @@ object DemoController {
         }
         // 时间口径交叉核对：这里是「展示串」（固定 +08:00），对比 /api/db/ping 的库端 now()（UTC）
         report += "新用户时间：createdAt=$createdAt, updatedAt=$updatedAt"
+        // 登录会话**故意留着**：冒烟脚本拿它去打受保护接口（无 token → 401 / 带 token → 200）。
+        // 会话不校验用户是否还在，所以自检用户被软删后 token 依然可用；用完 POST /api/logout 关掉即可。
+        report += "token=$token"
         return report.joinToString("\n")
     }
 }

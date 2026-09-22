@@ -1279,6 +1279,99 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 > 自检会留下**软删**的 `selftest-*` 用户与 `type='selftest'` 角色（视图已过滤，不可见）。要硬清：
 > `delete from sys_user_roles where user_id in (select id from sys_user where user_name like 'selftest-%'); delete from sys_user where user_name like 'selftest-%'; delete from sys_role where type='selftest';`
 
+### 13.14 P0-0.8：鉴权拦截器链 + 登录链路 + 系统控制器（2026-09-22）
+
+**范围**：把 legacy 的「拦截器链 + 会话鉴权 + 登录 + 系统接口」一次接通，前端 `F:\Develop\Node\lolosia-web` 能真正登录并调通用户 / 角色管理。
+
+**用户拍板（本节的最高依据）**：**接口契约以前端副本为准**，不以 `legacy/` 后端为准（二者已漂移，见 §13.13 坑 3）。
+
+**① 信封改在生成代码里包，不做全局 send pipeline**
+
+legacy 用 `EnvelopeInterceptor` 在 `send` pipeline 上判 `subject is JsonObject` 再包一层。native 上没有通用反射，且 `proceedWith` 会沿用旧 `typeInfo` 去序列化 → 容易类型错配。改为：
+
+- [ApiResult.kt](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/ApiResult.kt) 新增 `respondEnveloped<T>(value)`（`inline` + `reified`），把 `ApiResult<T>` 的 `typeInfo` 完整交给 ContentNegotiation；
+- router-ksp 生成的注册代码由 `call.respond(httpMethod, Fn(...))` 改为 `call.respondEnveloped(Fn(...))`（[RouterProcessor.kt](file:///f:/Develop/Kotlin/ktor-template/router-ksp/src/main/kotlin/moe/lolosia/router/ksp/RouterProcessor.kt)）；
+- 直接 `call.respond(ApiResult…)` 的调用方（StatusPages、手写路由）不会被再包一层。
+
+**② 异常：`ApiException` + StatusPages**
+
+`ApiException(status, message)` 的 `status` 同时作 HTTP 状态码与信封 `code`（legacy `ErrorResponseException` 的对应物）。鉴权失败用 `401` —— 前端 `request.ts` 对 `401/403` 会清登录态并跳登录页。
+
+**③ 拦截器链（注册顺序 = 由外到内）**
+
+```
+Traffic（Monitoring，耗时日志）
+  → Ctx（Call，把 Context 放进 call.attributes）
+    → Auth（Call，解析 Authorization → 校验白名单 → 401）
+```
+
+- 会话**解析时机提前到拦截器**，`Context.session/userId/sessionId/requireUserId()` 全部改**同步**读取（legacy 是 suspend 懒解析）；
+- 白名单三分：`IGNORE`（全路径精确：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse`）、`IGNORE_MATCHES`（前缀，取件类 `<img src>` 带不了自定义头：`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）、`DEV_PROBES`（**临时**：DemoController 的探针，P0 收尾连同 `DemoController` 一起删）；
+- 有意**去掉** legacy 白名单里的 `/api/client/`、`/api/resources/checkFiles` —— 本项目没有这两个端点。
+
+**④ 登录链路**
+
+`LoginService.login(userName, password)`：账号可命中 `user_name` 或 `phone`（`findOneByAccount`）→ bcrypt 校验 → 建会话并把 `userId` 写进会话 → 返回强类型 `LoginResult`（含 `@SerialName("Authorization") session.id`，前端 `basicStore.setToken(data?.Authorization)`）。
+
+- 失败回 **400**（legacy 抛 `NoSuchElementException`/`IllegalAccessException` 被兜底成 500），前端只读 `msg` 展示；
+- 保留 legacy 的 `firstLogin` 语义：库里无密码 **且** 本次也没传密码 → 放行。
+
+**⑤ 系统控制器（按前端契约实现）**
+
+| 前端调用 | 控制器 | 与 legacy 的差异 |
+| --- | --- | --- |
+| `POST /api/login` `/api/logout` | [LoginController](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/controller/LoginController.kt) | 返回值改强类型；`logout` 仍回提示语字符串 |
+| `/user/list` `/searching` `/get` `/create` `/edit` `/delete` `/updatePassword` `/myInfo` `/myRole` | [UserController](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/controller/system/UserController.kt) | 用 **`/user/edit`**（legacy 只有 `/user/update`）；无 `/user/getByIds`；`/user/delete` 的 `ids` 收**逗号串**；**不回传 `password`**；`operatorId` 取 `ctx.userId` |
+| `/role/list` `/queryRoleByPage` `/create` `/update` `/destroy` | [RoleController](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/controller/system/RoleController.kt) | — |
+| `/userRole/getByUserId` | [UserRoleController](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/controller/system/UserRoleController.kt) | legacy **没有**这个路由 |
+| `POST /menu/config` | [MenuController](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/controller/system/MenuController.kt) | **有意差异**：legacy 回 `{}`，但前端 `use-permission.ts` 的 `filterTagRouters(routes, exp)` 按 `exp[tag \|\| 'default']` 过滤，空表会让「用户中心」等内置路由整块消失 → 回 `{"default": true}` |
+
+**⑥ 出参类型对齐（前端逐字读的字段）**
+
+| 字段 | 定案 |
+| --- | --- |
+| 用户列表分页键 | `data`（`UserListResult.data`，前端读 `data.data`） |
+| 角色分页键 | `rows`（`RolePageResult.rows`，前端读 `data.rows`） |
+| `isUse` | **`Int?`（1/0）**，前端 `row.isUse === 1`；读写边界用 `Boolean?.toFlag()` / `Int?.toBool()` |
+| 空返回 | `EmptyResult`（序列化成 `data: {}`） |
+| `/user/create` | `IdRow`（`data.id`） |
+
+**⑦ 新踩到的坑（已回写开发记忆）**
+
+1. **KDoc 里写 `/db/*` 会把注释吃掉**：Kotlin 块注释**可嵌套**，`` `/db/*` `` 里的 `/*` 被当成嵌套注释起点 → `Syntax error: Unclosed comment`，且报在文件末尾、与真正的行毫无关系。
+2. **`Attributes.getOrNull` 是成员函数，不是顶层函数**：`import io.ktor.util.getOrNull` 会 `Unresolved reference`，直接 `call.attributes.getOrNull(key)` 即可。
+3. **`Throwable.message` 是 `String?`**：`ApiResult.err(code, msg: String)` 处要 `cause.message ?: "…"`，别以为 ApiException 构造时传了非空就万事大吉。
+4. **探针接口的返回值现在也被包信封**：`/api/session/new`、`/api/svc/selftest` 的响应从裸字符串变成 `{"code":200,…,"data":"…"}`，冒烟脚本必须解 JSON（`(curl … | ConvertFrom-Json).data`），否则拿到的 token 是整段 JSON。
+5. **`/api/classpath/*` 由免鉴权变需鉴权**：该端点只被 `ClasspathController`（演示用）使用，已在 `lolosia-web` 源码里确认前端不调它，故未进白名单。
+
+**⑧ 实测**（mingwX64 release + 本机 MariaDB 10.11.6，端口 7160）
+
+编译三目标全绿：`compileKotlinMingwX64` / `linkReleaseExecutableMingwX64` / `compileKotlinLinuxArm64`。
+
+`GET /api/svc/selftest`：**13/13 通过**（新增第 9 步「登录」，末尾输出供冒烟用的 `token=`）。
+
+| 冒烟项 | 期望 | 实测 |
+| --- | --- | --- |
+| `GET /api/ping` | 信封包字符串 | `{"code":200,"msg":"success","data":"pong"}` ✅ |
+| `POST /api/role/list`（无 token） | 401 | `http=401`，`{"code":401,"msg":"身份认证失败，请重新登录","data":null}` ✅ |
+| `POST /api/role/list`（带 token） | 200 + 5 角色 | ✅ |
+| `POST /api/user/list` `{pageNo,pageSize,keys}` | `data.data` / `data.total` | `total=1`，`isUse=1`（Int），`roleName` 在 ✅ |
+| `POST /api/userRole/getByUserId` | 绑定的角色 | `roleId=1` / `super_admin` ✅ |
+| `POST /api/user/myInfo`（token 来自 `/api/session/new`） | 登录用户信息 | ✅（含 `isUse` / `roleId`） |
+| `POST /api/menu/config` | `{"default":true}` | ✅ |
+| `POST /api/user/create` → `edit` → `searching` → `delete`（逗号串）→ `searching` | 建 / 改（`isUse=0` 生效）/ 删（软删后搜不到） | ✅（`create` 回 `data.id`，`edit`/`delete` 回 `data:{}`） |
+| `POST /api/login`（错误密码） | 400 | `http=400`，`msg=密码不正确` ✅ |
+| `POST /api/logout` → 再用旧 token | 200 → 401 | ✅ |
+| `GET /home/` | 前端首页 | `home=200 size=395` ✅ |
+
+Traffic 日志形如 `[2026-09-22 10:27:21.922] [INFO ] [Traffic] POST /api/user/create 49ms`，`Uncaught Kotlin exception` 计数为 0。
+
+**遗留（P0 收尾 / 后续）**
+
+- `DemoController` 与 `AuthInterceptor.DEV_PROBES` 是**临时脚手架**，P0 收尾整块删；
+- 前端还调了本项目**尚无**的端点：`/captcha`、`/verify`、`/register`、`/menu/list|create|update|destroy|navigate`、`/user/getStudentInfoByStudentId`、`/sse` + `/sse/registry`、`/opi/topic/llm/text/*`；`sys_logs` 落库、OSS 与头像（P1）；
+- 0.7 尾巴：`BCrypt.gensalt` 换平台 CSPRNG（expect/actual）。
+
 
 
 

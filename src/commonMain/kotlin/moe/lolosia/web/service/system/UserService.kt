@@ -15,6 +15,7 @@ import moe.lolosia.web.dto.UserListResult
 import moe.lolosia.web.dto.UserListRow
 import moe.lolosia.web.dto.UserRow
 import moe.lolosia.web.dto.UserUpdateReq
+import moe.lolosia.web.dto.toBool
 import moe.lolosia.web.dto.toInfoRow
 import moe.lolosia.web.dto.toListRow
 import moe.lolosia.web.dto.toRow
@@ -96,7 +97,7 @@ public class UserService(
             phone = phone,
             email = email,
             avatar = null,
-            isUse = req.isUse ?: true,
+            isUse = req.isUse.toBool() ?: true,
             createdAt = now,
             createdBy = operator,
             updatedAt = now,
@@ -134,7 +135,7 @@ public class UserService(
             phone = req.phone ?: current.phone,
             email = req.email ?: current.email,
             avatar = current.avatar,
-            isUse = req.isUse ?: current.isUse,
+            isUse = req.isUse.toBool() ?: current.isUse,
             updatedAt = now,
             updatedBy = operatorId ?: current.updatedBy,
         ).getOrThrow()

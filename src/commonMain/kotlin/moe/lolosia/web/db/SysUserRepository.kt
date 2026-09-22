@@ -28,6 +28,10 @@ public interface SysUserRepository : CrudRepository<SysUserEntity> {
     @Query("select * from sys_user where user_name = :userName and deleted = 0")
     public suspend fun findOneByUserName(context: QueryExecutor, userName: String): Result<SysUserEntity?>
 
+    /** 登录用：账号既可以是 `user_name` 也可以是 `phone`（旧版 `or { userName.eq … phone.eq … }`）。 */
+    @Query("select * from sys_user where (user_name = :account or phone = :account) and deleted = 0 limit 1")
+    public suspend fun findOneByAccount(context: QueryExecutor, account: String): Result<SysUserEntity?>
+
     /** 关键字模糊搜索（用户名 / 真名 / 手机 / 邮箱），供「新建用户查重」与「搜索用户」共用。 */
     @Query(
         "select * from sys_user where deleted = 0 and (user_name like :keys or real_name like :keys " +
