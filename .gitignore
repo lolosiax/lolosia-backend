@@ -2,8 +2,8 @@
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
-!**/src/*[Mm]ain/**/build/
-!**/src/*[Tt]est/**/build/
+!**/src/*[Mm]ain/**
+!**/src/*[Tt]est/**
 
 # IntelliJ IDEA
 .idea/
@@ -28,8 +28,3 @@ config.yml
 platforms.json
 /application*.yaml
 /application*.json
-
-# 源码目录内的东西一律入库。
-# 兜底用：上面的通用目录名（log/ work/ out/ …）若漏写前导斜线，会匹配任意层级的同名目录，
-# 曾把 src/.../util/log/ 整层吞掉（Log.kt 一直没进库）。放最后，保证优先级最低但覆盖最广。
-!src/**
