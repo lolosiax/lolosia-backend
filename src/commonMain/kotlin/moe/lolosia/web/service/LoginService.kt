@@ -10,6 +10,7 @@ import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.dto.CaptchaResult
 import moe.lolosia.web.dto.LoginResult
+import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.dto.ROLE_ID_STUDENT
 import moe.lolosia.web.dto.UserCreateReq
 import moe.lolosia.web.dto.UserListRow
@@ -92,10 +93,10 @@ public class LoginService(
      * 登出：删掉会话（内存 + 库）。没有会话 id 时与旧版一致地返回提示语，
      * 而不是报错 —— `/api/logout` 在白名单之外，正常都带会话。
      */
-    public suspend fun logout(sessionId: String?): String {
-        if (sessionId == null) return "SessionId哪去了？"
+    public suspend fun logout(sessionId: String?): MessageResult {
+        if (sessionId == null) return MessageResult("SessionId哪去了？")
         sessions.remove(sessionId)
-        return "success"
+        return MessageResult("success")
     }
 
     /**
@@ -116,11 +117,11 @@ public class LoginService(
      * 一次性消费：无论对错都把该 token 的答案删掉，避免同一个验证码被拿去爆破。
      * 前端错一次后会拿到「已过期」，点一下图刷新即可。
      */
-    public suspend fun verify(id: String, code: String): String {
+    public suspend fun verify(id: String, code: String): MessageResult {
         val expected = captchaCache.get(id) ?: throw ApiException(400, "验证码已过期，请点击图片刷新")
         captchaCache.remove(id)
         if (expected != code.trim()) throw ApiException(400, "验证码错误，请点击图片刷新")
-        return "success"
+        return MessageResult("success")
     }
 
     /**

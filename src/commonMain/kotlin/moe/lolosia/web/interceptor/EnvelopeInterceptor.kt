@@ -12,8 +12,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-private val envelopeJson = Json { prettyPrint = true }
-private val responseJson = Json { ignoreUnknownKeys = true }
+/** 信封的解析与编码共用一套 Json：紧凑输出，与 `ContentNegotiation` 里那套保持形状一致。 */
+private val json = Json
 
 /** 信封的三个键；顶层同时出现即视为已带信封。 */
 private val ENVELOPE_KEYS = setOf("code", "msg", "data")
@@ -31,7 +31,9 @@ private val ENVELOPE_KEYS = setOf("code", "msg", "data")
  *   应返回 `moe.lolosia.web.dto.RawJson`；
  * - 顶层已含 [ENVELOPE_KEYS] 的响应（`ApiResult`、StatusPages 生成的错误响应）→ 跳过，避免双重包裹；
  * - 无法同步读取的内容（`WriteChannelContent`，如文件下载、SSE 流）与非 JSON 内容 → 不处理；
- * - 需要保持原样的响应（如 SSE 握手）由调用方给 call 打 [EnvelopeSkipKey]。
+ * - 需要保持原样的响应（如 SSE 握手）由调用方给 call 打 [EnvelopeSkipKey]；
+ * - 只按响应 MIME 判定、**不看 `subject` 的具体类型**：native 上没有通用反射，且 `proceedWith`
+ *   会沿用旧的 `typeInfo` 去序列化，按类型判定容易错配（legacy JVM 版那条路在 native 上不可用）。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -56,7 +58,7 @@ public fun Application.installEnvelopeInterceptor() {
             proceed()
             return@intercept
         }
-        val data = runCatching { responseJson.parseToJsonElement(text) }.getOrNull()
+        val data = runCatching { json.parseToJsonElement(text) }.getOrNull()
         if (data == null) {
             proceed()
             return@intercept
@@ -68,12 +70,12 @@ public fun Application.installEnvelopeInterceptor() {
 
 /** 顶层同时带 [ENVELOPE_KEYS] 即认为已经包过信封。 */
 private fun String.isEnveloped(): Boolean {
-    val obj = runCatching { responseJson.parseToJsonElement(this) as? JsonObject }.getOrNull() ?: return false
+    val obj = runCatching { json.parseToJsonElement(this) as? JsonObject }.getOrNull() ?: return false
     return ENVELOPE_KEYS.all { it in obj }
 }
 
 /** 把 [data] 包成 `{code, msg, data}` 的 JSON 文本。 */
-private fun envelopeOf(data: JsonElement): String = envelopeJson.encodeToString(
+private fun envelopeOf(data: JsonElement): String = json.encodeToString(
     JsonObject.serializer(),
     JsonObject(
         mapOf(

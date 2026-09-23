@@ -3,6 +3,7 @@ package moe.lolosia.web.controller
 import moe.lolosia.web.dto.CaptchaResult
 import moe.lolosia.web.dto.LoginReq
 import moe.lolosia.web.dto.LoginResult
+import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.dto.RegisterReq
 import moe.lolosia.web.dto.UserListRow
 import moe.lolosia.web.dto.VerifyReq
@@ -30,14 +31,14 @@ object LoginController {
         login.login(param.userName, param.password)
 
     @POST("/logout")
-    suspend fun logout(ctx: Context, login: LoginService): String =
+    suspend fun logout(ctx: Context, login: LoginService): MessageResult =
         login.logout(ctx.sessionId)
 
     @POST("/captcha")
     suspend fun captcha(login: LoginService): CaptchaResult = login.captcha()
 
     @POST("/verify")
-    suspend fun verify(login: LoginService, @Body param: VerifyReq): String =
+    suspend fun verify(login: LoginService, @Body param: VerifyReq): MessageResult =
         login.verify(param.id, param.code)
 
     @POST("/register")

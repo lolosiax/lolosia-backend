@@ -85,7 +85,6 @@ class RouterProcessor(
             appendLine("import io.ktor.server.request.receive")
             appendLine("import io.ktor.server.response.respond")
             appendLine("import io.ktor.server.routing.Routing")
-            appendLine("import moe.lolosia.web.dto.respondEnveloped")
             HTTP_METHODS.values.forEach { appendLine("import io.ktor.server.routing.$it") }
             appendLine("import $KTOR_FQ.inject")
             appendLine("import $KTOR_FQ.readForm")
@@ -229,8 +228,8 @@ class RouterProcessor(
         if (fn.isUnitReturning()) {
             appendLine("        $callExpr")
         } else {
-            // 返回值统一走 respondEnveloped 包成 `{code,msg,data}`（见 ApiResult.kt 的说明）
-            appendLine("        call.respondEnveloped($callExpr)")
+            // 返回值原样 respond：信封由 EnvelopeInterceptor 按响应 MIME 统一包（见该类 KDoc）
+            appendLine("        call.respond($callExpr)")
         }
         appendLine("    }")
     }

@@ -55,6 +55,10 @@ public data class CaptchaResult(
     val id: String,
 )
 
+/** 只需回一句状态文案的接口出参（`/api/logout`、`/api/verify`）。 */
+@Serializable
+public data class MessageResult(val message: String)
+
 /**
  * 人机校验入参（前端 `verify(captchaId, captchaValue, userName, email)`）。
  *

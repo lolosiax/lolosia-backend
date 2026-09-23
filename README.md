@@ -20,7 +20,7 @@
 - **数据访问**：sqlx4k 的 `@Repository` + `@Query` 编译期代码生成（无 ORM、无反射），实体时间列统一 `kotlin.time.Instant`
 - **自研 multipart 解析**：Ktor 3.4 在 Native 上未实现 `receiveMultipart()`，改为读原始字节自行解析
 - **自研图形验证码**（`util/captcha`）：Native 上没有 `java.awt` / `javax.imageio`，于是自写 PNG 编码器（`util/image/Png.kt`：IHDR/IDAT/IEND + zlib STORED + CRC32/Adler-32）+ 5×7 点阵字形 + 算式生成，逐字对齐 hutool `LineCaptcha` / `MathGenerator`（100×40、150 条干扰线、`a+b=` 且结果可为负），零依赖出图
-- **统一响应信封** `{code,msg,data}`：由 KSP 生成的注册代码调 `respondEnveloped(...)` 自动包装（不靠 send pipeline 拦截 —— Native 上没有反射，显式包装才能把 `typeInfo` 完整交给序列化器）
+- **统一响应信封** `{code,msg,data}`：由 `EnvelopeInterceptor` 在 send pipeline 上按**响应 MIME** 统一包装（只认 `/api/` 下的 JSON；`text/plain` 与文件流/SSE 原样放行，要强制包一段 JSON 文本就返回 `dto.RawJson`）
 - **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
 - **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件（自动留 `.previous` 回滚文件）
@@ -189,7 +189,7 @@ object DemoController {
 
 约定（迁移前的 ktorfitx 控制器**只改 import** 即可复用）：
 
-- `@Controller` 只能标在 `object` 上；方法返回值由生成代码调 `respondEnveloped(...)` 包成 `{code,msg,data}` 后写出（顶层已带三键的响应会被 `EnvelopeInterceptor` 跳过，不重复包）
+- `@Controller` 只能标在 `object` 上；方法返回值由生成代码 `call.respond(...)` 原样写出，信封交给 `EnvelopeInterceptor`（返回裸 `String` 会按 `text/plain` 发出、**不会被包**，要信封就返回业务对象或 `dto.RawJson`）
 - 控制器专属的 DTO 声明为该 `object` 的内部类（KSP 生成的全限定名如 `…Controller.EchoReq`）；跨控制器共用时才独立成文件（或建 `dto` 包）
 - 无法绑定的形参会**编译期报错**并给出提示：要么加参数注解，要么给类型标 `@Injectable`
 - 支持的参数类型只有 `String / Int / Long / Double / Boolean / Uuid / 枚举`（不做嵌套泛型绑定，超范围请手写路由）
@@ -256,7 +256,7 @@ object DemoController {
 | 0.5 基础设施替换（日志 / 配置 / Koin / datetime / okio / Uuid） | ✅ |
 | 0.6 sqlx4k 数据层 | ✅ 会话/缓存 + 用户/角色/绑定的读写与 Service 层（`/api/svc/selftest` 自检全绿） |
 | 0.7 自研 bcrypt（`$2a$` cost 10） | ✅ 移植完成（官方向量锁定），已接进建用户/改密码/登录校验 |
-| 0.8 鉴权拦截器链 + 登录 + 系统接口 | ✅ 信封改由 KSP 生成代码调 `respondEnveloped`；链 = Traffic → Ctx → Auth；`/api/login` `/api/logout` + 用户/角色/绑定/菜单控制器（**以前端工程契约为准**）。SSE 拦截器待做 |
+| 0.8 鉴权拦截器链 + 登录 + 系统接口 | ✅ 信封统一由 `EnvelopeInterceptor` 按响应 MIME 包；链 = Traffic → Ctx → Auth → Envelope；`/api/login` `/api/logout` + 用户/角色/绑定/菜单控制器（**以前端工程契约为准**）。SSE 拦截器待做 |
 | 0.9 部署（systemd 拉起原生二进制） | ✅ |
 | 0.10 自研图形验证码 + `/captcha` `/verify` `/register` | ✅ 自写 PNG + 点阵算式验证码（复刻 hutool），验证码存 `sys_cache`（随机 token、5 分钟、一次性消费）；注册沿用前端两步流程（`roleId = 4` 学生） |
 

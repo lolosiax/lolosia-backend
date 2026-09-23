@@ -1285,7 +1285,7 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 
 **用户拍板（本节的最高依据）**：**接口契约以前端副本为准**，不以 `legacy/` 后端为准（二者已漂移，见 §13.13 坑 3）。
 
-**① 信封改在生成代码里包，不做全局 send pipeline**
+**① 信封改在生成代码里包，不做全局 send pipeline**（⚠️ **已修订**：`origin/native` 后续带来按**响应 MIME** 判定的 `EnvelopeInterceptor`，绕开了下面这个 `typeInfo` 限制 —— 生成代码已改回 `call.respond(...)`、`respondEnveloped` 已删，现状见 `doc/开发记忆.md` §2-18）
 
 legacy 用 `EnvelopeInterceptor` 在 `send` pipeline 上判 `subject is JsonObject` 再包一层。native 上没有通用反射，且 `proceedWith` 会沿用旧 `typeInfo` 去序列化 → 容易类型错配。改为：
 
