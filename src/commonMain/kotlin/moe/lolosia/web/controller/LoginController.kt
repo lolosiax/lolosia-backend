@@ -27,21 +27,21 @@ import moe.lolosia.web.util.session.Context
 object LoginController {
 
     @POST("/login")
-    suspend fun login(login: LoginService, @Body param: LoginReq): LoginResult =
-        login.login(param.userName, param.password)
+    suspend fun login(ctx: Context, login: LoginService, @Body param: LoginReq): LoginResult =
+        login.login(ctx, param.userName, param.password)
 
     @POST("/logout")
     suspend fun logout(ctx: Context, login: LoginService): MessageResult =
-        login.logout(ctx.sessionId)
+        login.logout(ctx)
 
     @POST("/captcha")
-    suspend fun captcha(login: LoginService): CaptchaResult = login.captcha()
+    suspend fun captcha(ctx: Context, login: LoginService): CaptchaResult = login.captcha(ctx)
 
     @POST("/verify")
-    suspend fun verify(login: LoginService, @Body param: VerifyReq): MessageResult =
-        login.verify(param.id, param.code)
+    suspend fun verify(ctx: Context, login: LoginService, @Body param: VerifyReq): MessageResult =
+        login.verify(ctx, param.id, param.code)
 
     @POST("/register")
-    suspend fun register(login: LoginService, @Body param: RegisterReq): UserListRow =
-        login.register(param.userName, param.password, param.email, param.phone)
+    suspend fun register(ctx: Context, login: LoginService, @Body param: RegisterReq): UserListRow =
+        login.register(ctx, param.userName, param.password, param.email, param.phone)
 }

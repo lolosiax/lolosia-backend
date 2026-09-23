@@ -17,28 +17,15 @@ import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
-import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.settings.ENV_SETTINGS_FILE
 import moe.lolosia.web.settings.SETTINGS_FILE
 import moe.lolosia.web.settings.loadAppSettings
-import moe.lolosia.web.database.Database
-import moe.lolosia.web.database.repository.SysRoleRepository
-import moe.lolosia.web.database.repository.SysUserRepository
-import moe.lolosia.web.database.repository.SysUserRoleRepository
-import moe.lolosia.web.database.repository.ViewUserRoleRepository
 import moe.lolosia.web.configuration.startAppKoin
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.ApiResult
-import moe.lolosia.web.service.CacheManager
-import moe.lolosia.web.service.LoginService
-import moe.lolosia.web.service.SessionManager
-import moe.lolosia.web.service.system.RoleService
-import moe.lolosia.web.service.system.UserRoleService
-import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
-import moe.lolosia.web.util.koin.registerInjectable
 import moe.lolosia.web.util.ktor.staticClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.LogLevel
@@ -53,18 +40,21 @@ import org.koin.core.module.Module
 /**
  * 服务启动（native 专用：需要装载嵌入式 classpath）。
  *
- * [installInterceptors] 与 [installRoutes] 由各目标源集传入：KSP 生成的中间件注册表与路由注册代码
- * 都位于目标源集，而 common 代码看不到 platform 声明，故入口下沉到本层。
+ * [installInterceptors]、[installInjectables] 与 [installRoutes] 由各目标源集传入：KSP 生成的
+ * 中间件注册表、DI 绑定表与路由注册代码都位于目标源集，而 common 代码看不到 platform 声明，
+ * 故入口下沉到本层。
  *
  * @param portOverride 命令行参数传来的端口（最高优先级）；为 `null` 时取配置里的端口
  * @param platformModules 目标源集特有的绑定（sqlx4k 生成的仓库实现只在该目标源集可见）
  * @param installInterceptors 中间件注册（由目标源集传入 `configureInterceptors(koin)`）
+ * @param installInjectables 路由按类型注入的注册（由目标源集传入生成的 `Koin.registerInjectables`）
  * @param installRoutes 路由注册（由目标源集传入 `generatedRoutes()`）
  */
 public fun startServer(
     portOverride: Int?,
     platformModules: List<Module>,
     installInterceptors: Application.(Koin) -> Unit,
+    installInjectables: Koin.() -> Unit,
     installRoutes: Routing.() -> Unit,
 ) {
     val log = Log.of("Bootstrap")
@@ -88,31 +78,22 @@ public fun startServer(
     log.info { "starting on ${config.server.host}:${config.server.port} (Kotlin/Native + CIO)" }
 
     embeddedServer(CIO, port = config.server.port, host = config.server.host) {
-        configureApplication(koin, installInterceptors, installRoutes)
+        configureApplication(koin, installInterceptors, installInjectables, installRoutes)
     }.start(wait = true)
 }
 
 private fun Application.configureApplication(
     koin: Koin,
     installInterceptors: Application.(Koin) -> Unit,
+    installInjectables: Koin.() -> Unit,
     installRoutes: Routing.() -> Unit,
 ) {
     val log = Log.of("Application")
 
-    // 注册「可按类型注入」的实例：控制器形参声明 ctx: Context / config: AppSettings 即自动注入
+    // 路由的「按类型注入」分两半：
+    // 逐请求的 Context 由 call.attributes 提供（键由鉴权中间件写入）；容器实例由生成的注册表接入
     RouterInjection.register(Context::class) { call -> call.attributes[ContextKey] }
-    koin.registerInjectable<AppSettings>()
-    koin.registerInjectable<Database>()
-    koin.registerInjectable<CacheManager>()
-    koin.registerInjectable<SessionManager>()
-    koin.registerInjectable<LoginService>()
-    koin.registerInjectable<UserService>()
-    koin.registerInjectable<RoleService>()
-    koin.registerInjectable<UserRoleService>()
-    koin.registerInjectable<SysUserRepository>()
-    koin.registerInjectable<SysRoleRepository>()
-    koin.registerInjectable<SysUserRoleRepository>()
-    koin.registerInjectable<ViewUserRoleRepository>()
+    koin.installInjectables()
 
     install(ContentNegotiation) {
         json(

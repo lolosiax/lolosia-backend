@@ -38,50 +38,50 @@ object UserController {
 
     /** 分页列表（前端读 `data.data` / `data.total`）。 */
     @POST("/user/list")
-    suspend fun list(users: UserService, @Body req: UserListReq): UserListResult =
-        users.list(req.pageNo ?: 1, req.pageSize ?: 10, req.keys)
+    suspend fun list(ctx: Context, users: UserService, @Body req: UserListReq): UserListResult =
+        users.list(ctx, req.pageNo ?: 1, req.pageSize ?: 10, req.keys)
 
     /** 模糊搜索用户，最多 10 条（前端直接把它当数组用）。 */
     @POST("/user/searching")
-    suspend fun searching(users: UserService, @Body req: SearchReq): List<UserRow> =
-        users.searching(req.keys)
+    suspend fun searching(ctx: Context, users: UserService, @Body req: SearchReq): List<UserRow> =
+        users.searching(ctx, req.keys)
 
     /** 按 id 批量取用户（`@Query` 不支持 `IN`，服务层循环单条）。 */
     @POST("/user/get")
-    suspend fun get(users: UserService, @Body req: IdListReq): List<UserRow> =
-        users.get(req.idList.filterNotNull())
+    suspend fun get(ctx: Context, users: UserService, @Body req: IdListReq): List<UserRow> =
+        users.get(ctx, req.idList.filterNotNull())
 
     @POST("/user/create")
     suspend fun create(ctx: Context, users: UserService, @Body req: UserCreateReq): IdRow =
-        IdRow(users.create(req, ctx.userId).id)
+        IdRow(users.create(ctx, req, ctx.userId).id)
 
     @POST("/user/edit")
     suspend fun edit(ctx: Context, users: UserService, @Body req: UserUpdateReq): EmptyResult {
-        users.update(req, ctx.userId)
+        users.update(ctx, req, ctx.userId)
         return EmptyResult()
     }
 
     @POST("/user/delete")
     suspend fun delete(ctx: Context, users: UserService, @Body req: IdsReq): EmptyResult {
         val ids = req.ids.split(',').map(String::trim).filter(String::isNotEmpty)
-        if (ids.isNotEmpty()) users.delete(ids, ctx.userId)
+        if (ids.isNotEmpty()) users.delete(ctx, ids, ctx.userId)
         return EmptyResult()
     }
 
     /** 改密码；`id` 缺席时改登录人自己的（前端 `updatePassword` 允许不传 id）。 */
     @POST("/user/updatePassword")
     suspend fun updatePassword(ctx: Context, users: UserService, @Body req: UpdatePasswordReq): EmptyResult {
-        users.changePassword(req.id ?: ctx.requireUserId(), req.origin, req.target)
+        users.changePassword(ctx, req.id ?: ctx.requireUserId(), req.origin, req.target)
         return EmptyResult()
     }
 
     /** 当前登录用户信息（前端路由守卫在 `Promise.all` 里取它）。 */
     @POST("/user/myInfo")
     suspend fun myInfo(ctx: Context, users: UserService): UserInfoRow =
-        users.info(ctx.requireUserId())
+        users.info(ctx, ctx.requireUserId())
 
     /** 当前登录用户的角色（没有绑定时自动补一条「学生」，与旧版一致）。 */
     @POST("/user/myRole")
     suspend fun myRole(ctx: Context, bindings: UserRoleService): UserRoleRow =
-        bindings.getRoleByUserId(ctx.requireUserId())
+        bindings.getRoleByUserId(ctx, ctx.requireUserId())
 }

@@ -25,26 +25,26 @@ object RoleController {
 
     /** 全部角色（前端下拉 / 单选组用；`roleName` 与 `type` 都不含 admin 的会被前端筛掉）。 */
     @POST("/role/list")
-    suspend fun list(roles: RoleService): List<RoleRow> = roles.list()
+    suspend fun list(ctx: Context, roles: RoleService): List<RoleRow> = roles.list(ctx)
 
     @POST("/role/queryRoleByPage")
-    suspend fun page(roles: RoleService, @Body req: RolePageReq): RolePageResult =
-        roles.page(req.pageNo ?: 1, req.pageSize ?: 10, req.roleName)
+    suspend fun page(ctx: Context, roles: RoleService, @Body req: RolePageReq): RolePageResult =
+        roles.page(ctx, req.pageNo ?: 1, req.pageSize ?: 10, req.roleName)
 
     @POST("/role/create")
     suspend fun create(ctx: Context, roles: RoleService, @Body req: RoleCreateReq): RoleRow =
-        roles.create(req, ctx.userId)
+        roles.create(ctx, req, ctx.userId)
 
     @POST("/role/update")
     suspend fun update(ctx: Context, roles: RoleService, @Body req: RoleUpdateReq): EmptyResult {
-        roles.update(req, ctx.userId)
+        roles.update(ctx, req, ctx.userId)
         return EmptyResult()
     }
 
     /** 删除角色（`super_admin` / 使用中的角色会被拒），前端只取 `msg`。 */
     @POST("/role/destroy")
     suspend fun destroy(ctx: Context, roles: RoleService, @Body req: RoleDestroyReq): EmptyResult {
-        roles.destroy(req.id, ctx.userId)
+        roles.destroy(ctx, req.id, ctx.userId)
         return EmptyResult()
     }
 }

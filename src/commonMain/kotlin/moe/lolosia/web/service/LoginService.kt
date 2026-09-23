@@ -1,13 +1,11 @@
 package moe.lolosia.web.service
 
-import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import kotlin.io.encoding.Base64
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.uuid.Uuid
-import moe.lolosia.web.dto.ApiException
-import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysUserRepository
+import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.CaptchaResult
 import moe.lolosia.web.dto.LoginResult
 import moe.lolosia.web.dto.MessageResult
@@ -18,6 +16,7 @@ import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.captcha.createMathCaptcha
 import moe.lolosia.web.util.crypto.BCrypt
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.time.toDisplayString
 
 /**
@@ -38,18 +37,17 @@ import moe.lolosia.web.util.time.toDisplayString
  * 「邮箱验证流程本轮暂缓」与旧版注释一致：注册是「用户名 + 密码 + 手机号/邮箱」直接建号，
  * 前端多传的 `code`（邮箱验证码）被忽略。
  *
+ * [ctx] 是请求上下文，**首参透传**：语句执行句柄从它取（`ctx.db`），本层不持有连接池。
+ *
  * @author 洛洛希雅Lolosia
  */
 @Injectable
 public class LoginService(
-    private val db: Database,
     private val users: SysUserRepository,
     private val sessions: SessionManager,
     private val cache: CacheManager,
     private val userService: UserService,
 ) {
-
-    private val ctx: QueryExecutor get() = db.driver
 
     /** 图形验证码的缓存分组（沿用旧版的 path，答案按随机 token 落在这里）。 */
     private val captchaCache: CacheManager.Accessor by lazy { cache[CAPTCHA_PATH] }
@@ -60,8 +58,8 @@ public class LoginService(
      * 密码语义与旧版一致：库里没密码 **且** 本次也没传密码 → `firstLogin = true` 放行；
      * 库里没密码但传了密码、或密码不匹配 → 「密码不正确」。
      */
-    public suspend fun login(userName: String, password: String?): LoginResult {
-        val user = users.findOneByAccount(ctx, userName).getOrThrow()
+    public suspend fun login(ctx: Context, userName: String, password: String?): LoginResult {
+        val user = users.findOneByAccount(ctx.db, userName).getOrThrow()
             ?: throw ApiException(400, "用户不存在！")
 
         val stored = user.password
@@ -93,8 +91,8 @@ public class LoginService(
      * 登出：删掉会话（内存 + 库）。没有会话 id 时与旧版一致地返回提示语，
      * 而不是报错 —— `/api/logout` 在白名单之外，正常都带会话。
      */
-    public suspend fun logout(sessionId: String?): MessageResult {
-        if (sessionId == null) return MessageResult("SessionId哪去了？")
+    public suspend fun logout(ctx: Context): MessageResult {
+        val sessionId = ctx.sessionId ?: return MessageResult("SessionId哪去了？")
         sessions.remove(sessionId)
         return MessageResult("success")
     }
@@ -104,7 +102,7 @@ public class LoginService(
      *
      * TTL 取 [CAPTCHA_TTL]（旧版用的是缓存组的默认值，对验证码太长；这里显式收紧）。
      */
-    public suspend fun captcha(): CaptchaResult {
+    public suspend fun captcha(ctx: Context): CaptchaResult {
         val generated = createMathCaptcha()
         val id = Uuid.random().toString()
         captchaCache.put(id, generated.answer.toString(), CAPTCHA_TTL)
@@ -117,7 +115,7 @@ public class LoginService(
      * 一次性消费：无论对错都把该 token 的答案删掉，避免同一个验证码被拿去爆破。
      * 前端错一次后会拿到「已过期」，点一下图刷新即可。
      */
-    public suspend fun verify(id: String, code: String): MessageResult {
+    public suspend fun verify(ctx: Context, id: String, code: String): MessageResult {
         val expected = captchaCache.get(id) ?: throw ApiException(400, "验证码已过期，请点击图片刷新")
         captchaCache.remove(id)
         if (expected != code.trim()) throw ApiException(400, "验证码错误，请点击图片刷新")
@@ -132,7 +130,13 @@ public class LoginService(
      * 它的 `IllegalArgumentException` / `IllegalStateException` 都是用户输入问题（缺手机邮箱、同名用户已存在），
      * 转成 `400`（旧版是兜底 `500`）。
      */
-    public suspend fun register(userName: String, password: String, email: String?, phone: String?): UserListRow {
+    public suspend fun register(
+        ctx: Context,
+        userName: String,
+        password: String,
+        email: String?,
+        phone: String?,
+    ): UserListRow {
         val req = UserCreateReq(
             userName = userName,
             password = password,
@@ -141,7 +145,7 @@ public class LoginService(
             roleId = ROLE_ID_STUDENT,
         )
         return try {
-            userService.create(req)
+            userService.create(ctx, req)
         } catch (e: IllegalArgumentException) {
             throw ApiException(400, e.message ?: "注册信息不完整")
         } catch (e: IllegalStateException) {

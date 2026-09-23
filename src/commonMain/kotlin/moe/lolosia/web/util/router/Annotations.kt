@@ -14,10 +14,15 @@ package moe.lolosia.web.util.router
 @Retention(AnnotationRetention.BINARY)
 public annotation class Controller(val prefix: String = "")
 
-/** 标注"可按类型注入"的类型：控制器形参声明为该类型（或其子类型）时无需任何注解，自动注入。 */
+/**
+ * 标注"可按类型注入"的类型：控制器形参声明为该类型（或其子类型）时无需任何注解，自动注入。
+ *
+ * @param requestScoped 该类型由请求上下文逐次提供（如 `Context`），**不在 DI 容器里**；
+ *   `InjectionProcessor` 据此跳过它的 `registerInjectable`，避免注册出一个容器里没有的工厂。
+ */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
-public annotation class Injectable
+public annotation class Injectable(val requestScoped: Boolean = false)
 
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.BINARY)

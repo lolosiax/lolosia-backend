@@ -179,6 +179,7 @@ object DemoController {
      */
     @GET("/svc/selftest")
     suspend fun serviceSelfTest(
+        ctx: Context,
         users: UserService,
         roles: RoleService,
         bindings: UserRoleService,
@@ -205,16 +206,17 @@ object DemoController {
         var token = ""
 
         step("角色列表（应含 5 个内置角色）") {
-            val list = roles.list()
+            val list = roles.list(ctx)
             check(list.size >= 5) { "角色数 ${list.size} < 5" }
             studentRoleId = list.firstOrNull { it.type == "student" }?.id ?: error("没有 student 角色")
         }
         step("角色分页（keys=管理 → 2 条）") {
-            val page = roles.page(1, 5, "管理")
+            val page = roles.page(ctx, 1, 5, "管理")
             check(page.total >= 2) { "total=${page.total}" }
         }
         step("建用户（唯一用户名 / 邮箱，密码走 bcrypt）") {
             val row = users.create(
+                ctx,
                 UserCreateReq(
                     userName = userName,
                     password = "old-pass",
@@ -230,74 +232,74 @@ object DemoController {
         }
         step("重复创建同名 → 报「同名用户已存在」") {
             val t = runCatching {
-                users.create(UserCreateReq(userName = userName, email = "$userName@example.com", roleId = studentRoleId))
+                users.create(ctx, UserCreateReq(userName = userName, email = "$userName@example.com", roleId = studentRoleId))
             }.exceptionOrNull()
             check(t is IllegalStateException) { "期望 IllegalStateException，实际 $t" }
         }
         step("详情（角色 id 回读、无 password 字段）") {
-            val info = users.info(userId)
+            val info = users.info(ctx, userId)
             check(info.roleId == studentRoleId) { "roleId=${info.roleId} 期望 $studentRoleId" }
             check(info.createdAt != null) { "createdAt 为空" }
         }
         step("搜索 + 列表（roleName / roleType / updatedAt 都在）") {
-            check(users.searching(userName).any { it.id == userId }) { "搜索不到新用户" }
-            val row = users.list(1, 10, userName).data.firstOrNull { it.id == userId } ?: error("列表里没有新用户")
+            check(users.searching(ctx, userName).any { it.id == userId }) { "搜索不到新用户" }
+            val row = users.list(ctx, 1, 10, userName).data.firstOrNull { it.id == userId } ?: error("列表里没有新用户")
             check(row.roleName != null) { "roleName 为空" }
             check(row.updatedAt != null) { "updatedAt 为空" }
             createdAt = row.createdAt.orEmpty()
             updatedAt = row.updatedAt.orEmpty()
         }
         step("改用户（未给的字段保持原值）") {
-            users.update(UserUpdateReq(id = userId, realName = "自检用户改", isUse = 0))
-            val info = users.info(userId)
+            users.update(ctx, UserUpdateReq(id = userId, realName = "自检用户改", isUse = 0))
+            val info = users.info(ctx, userId)
             check(info.realName == "自检用户改") { "realName=${info.realName}" }
             check(info.isUse == 0) { "isUse=${info.isUse}" }
             check(info.userName == userName) { "userName 被误改：${info.userName}" }
         }
         step("改密码（验旧密码 → bcrypt 往返）") {
-            users.changePassword(userId, "old-pass", "new-pass")
-            val t = runCatching { users.changePassword(userId, "old-pass", "whatever") }.exceptionOrNull()
+            users.changePassword(ctx, userId, "old-pass", "new-pass")
+            val t = runCatching { users.changePassword(ctx, userId, "old-pass", "whatever") }.exceptionOrNull()
             check(t is IllegalStateException) { "旧密码应已失效，实际 $t" }
-            users.changePassword(userId, "new-pass", "old-pass") // 换回去，便于重复跑
+            users.changePassword(ctx, userId, "new-pass", "old-pass") // 换回去，便于重复跑
         }
         step("登录（bcrypt 校验 → 建会话 → 拿 token）") {
-            val wrong = runCatching { login.login(userName, "wrong-pass") }.exceptionOrNull()
+            val wrong = runCatching { login.login(ctx, userName, "wrong-pass") }.exceptionOrNull()
             check(wrong is ApiException) { "错误密码应报 400，实际 $wrong" }
-            val result = login.login(userName, "old-pass")
+            val result = login.login(ctx, userName, "old-pass")
             check(result.userName == userName) { "userName=${result.userName}" }
             check(result.authorization.isNotBlank()) { "会话 id 为空" }
             check(sessions.find(result.authorization)?.userId == userId) { "会话里没写用户 id" }
             token = result.authorization
         }
         step("改绑定（roleId 生效并可改回）") {
-            val guest = roles.list().firstOrNull { it.type == "guest" } ?: error("没有 guest 角色")
-            users.update(UserUpdateReq(id = userId, roleId = guest.id))
-            check(bindings.getByUserId(userId).roleId == guest.id) { "绑定没改" }
-            users.update(UserUpdateReq(id = userId, roleId = studentRoleId))
+            val guest = roles.list(ctx).firstOrNull { it.type == "guest" } ?: error("没有 guest 角色")
+            users.update(ctx, UserUpdateReq(id = userId, roleId = guest.id))
+            check(bindings.getByUserId(ctx, userId).roleId == guest.id) { "绑定没改" }
+            users.update(ctx, UserUpdateReq(id = userId, roleId = studentRoleId))
         }
         step("角色 建 → 改 → 删（软删）") {
-            val created = roles.create(RoleCreateReq(roleName = "自检角色", type = "selftest"))
+            val created = roles.create(ctx, RoleCreateReq(roleName = "自检角色", type = "selftest"))
             tempRoleId = created.id
             check(created.id > 0L) { "自增 id=${created.id}" }
-            roles.update(RoleUpdateReq(id = tempRoleId, roleName = "自检角色改"))
-            val row = roles.list().firstOrNull { it.id == tempRoleId } ?: error("改完找不到")
+            roles.update(ctx, RoleUpdateReq(id = tempRoleId, roleName = "自检角色改"))
+            val row = roles.list(ctx).firstOrNull { it.id == tempRoleId } ?: error("改完找不到")
             check(row.roleName == "自检角色改") { "roleName=${row.roleName}" }
             check(row.type == "selftest") { "type 被误改：${row.type}" }
-            roles.destroy(tempRoleId)
-            check(roles.list().none { it.id == tempRoleId }) { "软删后仍在列表里" }
+            roles.destroy(ctx, tempRoleId)
+            check(roles.list(ctx).none { it.id == tempRoleId }) { "软删后仍在列表里" }
             tempRoleId = 0L
         }
         step("保护规则（super_admin / 使用中的角色不可删）") {
-            val superAdmin = roles.list().firstOrNull { it.type == "super_admin" } ?: error("没有 super_admin")
-            val t = runCatching { roles.destroy(superAdmin.id) }.exceptionOrNull()
+            val superAdmin = roles.list(ctx).firstOrNull { it.type == "super_admin" } ?: error("没有 super_admin")
+            val t = runCatching { roles.destroy(ctx, superAdmin.id) }.exceptionOrNull()
             check(t is IllegalStateException) { "super_admin 应报错，实际 $t" }
-            val t2 = runCatching { roles.destroy(studentRoleId) }.exceptionOrNull()
+            val t2 = runCatching { roles.destroy(ctx, studentRoleId) }.exceptionOrNull()
             check(t2 is IllegalStateException) { "使用中的角色应报错，实际 $t2" }
         }
         step("删用户（软删绑定 + 软删用户）") {
-            users.delete(listOf(userId))
-            check(runCatching { users.info(userId) }.isFailure) { "删完还能查到用户" }
-            check(users.list(1, 10, userName).data.none { it.id == userId }) { "删完还在列表里" }
+            users.delete(ctx, listOf(userId))
+            check(runCatching { users.info(ctx, userId) }.isFailure) { "删完还能查到用户" }
+            check(users.list(ctx, 1, 10, userName).data.none { it.id == userId }) { "删完还在列表里" }
             userId = ""
         }
 

@@ -6,6 +6,7 @@ import moe.lolosia.web.service.system.UserRoleService
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller
 import moe.lolosia.web.util.router.POST
+import moe.lolosia.web.util.session.Context
 
 /**
  * 用户-角色绑定接口。
@@ -20,6 +21,6 @@ object UserRoleController {
 
     /** 取指定用户的角色绑定；没有绑定时返回 `roleId = 0` 的兜底行。 */
     @POST("/userRole/getByUserId")
-    suspend fun getByUserId(bindings: UserRoleService, @Body req: UserIdReq): UserRoleRow =
-        bindings.getByUserId(req.userId)
+    suspend fun getByUserId(ctx: Context, bindings: UserRoleService, @Body req: UserIdReq): UserRoleRow =
+        bindings.getByUserId(ctx, req.userId)
 }

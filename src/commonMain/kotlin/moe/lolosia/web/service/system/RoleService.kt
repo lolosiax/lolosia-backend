@@ -1,8 +1,6 @@
 package moe.lolosia.web.service.system
 
-import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import kotlin.time.Clock
-import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysRoleRepository
 import moe.lolosia.web.database.repository.SysUserRoleRepository
 import moe.lolosia.web.dto.RoleCreateReq
@@ -11,9 +9,12 @@ import moe.lolosia.web.dto.RoleRow
 import moe.lolosia.web.dto.RoleUpdateReq
 import moe.lolosia.web.dto.toRow
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.session.Context
 
 /**
  * 角色服务（迁移自旧 JVM 版的 `RoleService`，返回值由 `Bundle` 改为强类型 DTO）。
+ *
+ * [ctx] 是请求上下文，**首参透传**：语句执行句柄从它取（`ctx.db`），本层不持有连接池。
  *
  * 与旧版的差异：
  * - 时间字段输出 `yyyy-MM-dd HH:mm:ss`（固定 +08:00），同旧版 `@JsonFormat`；
@@ -28,34 +29,31 @@ import moe.lolosia.web.util.router.Injectable
  */
 @Injectable
 public class RoleService(
-    private val db: Database,
     private val roles: SysRoleRepository,
     private val bindings: SysUserRoleRepository,
 ) {
 
-    private val ctx: QueryExecutor get() = db.driver
-
     /** 全部未删除角色，按 id 升序（前端下拉用）。 */
-    public suspend fun list(): List<RoleRow> =
-        roles.findAllByDeletedFalse(ctx).getOrThrow().map { it.toRow() }
+    public suspend fun list(ctx: Context): List<RoleRow> =
+        roles.findAllByDeletedFalse(ctx.db).getOrThrow().map { it.toRow() }
 
     /** 分页查询（角色名 / 类型模糊匹配；菜单字段已弃用，只给空数组保持前端兼容）。 */
-    public suspend fun page(pageNo: Int = 1, pageSize: Int = 10, roleName: String? = null): RolePageResult {
+    public suspend fun page(ctx: Context, pageNo: Int = 1, pageSize: Int = 10, roleName: String? = null): RolePageResult {
         val pattern = likePattern(roleName)
-        val total = roles.countByKeys(ctx, pattern).getOrThrow()
-        val rows = roles.findAllByKeys(ctx, pattern, pageSize, (pageNo - 1) * pageSize).getOrThrow()
+        val total = roles.countByKeys(ctx.db, pattern).getOrThrow()
+        val rows = roles.findAllByKeys(ctx.db, pattern, pageSize, (pageNo - 1) * pageSize).getOrThrow()
         return RolePageResult(rows.map { it.toRow() }, total)
     }
 
     /** 新建角色（`roleName` / `type` 必填，与旧版报错信息一致），返回整行（含自增 id）。 */
-    public suspend fun create(req: RoleCreateReq, operatorId: String? = null): RoleRow {
+    public suspend fun create(ctx: Context, req: RoleCreateReq, operatorId: String? = null): RoleRow {
         val roleName = req.roleName ?: throw IllegalArgumentException("必须填写roleName")
         val type = req.type ?: throw IllegalArgumentException("必须填写type")
 
         val now = Clock.System.now()
-        roles.executeInsert(ctx, roleName, type, now, operatorId, now, operatorId).getOrThrow()
+        roles.executeInsert(ctx.db, roleName, type, now, operatorId, now, operatorId).getOrThrow()
 
-        return roles.findAllByType(ctx, type).getOrThrow()
+        return roles.findAllByType(ctx.db, type).getOrThrow()
             .filter { it.roleName == roleName }
             .maxByOrNull { it.id }
             ?.toRow()
@@ -63,10 +61,10 @@ public class RoleService(
     }
 
     /** 修改角色：`null` 的字段保持原值。 */
-    public suspend fun update(req: RoleUpdateReq, operatorId: String? = null) {
-        val current = roles.findOneById(ctx, req.id).getOrThrow() ?: throw NoSuchElementException("角色不存在")
+    public suspend fun update(ctx: Context, req: RoleUpdateReq, operatorId: String? = null) {
+        val current = roles.findOneById(ctx.db, req.id).getOrThrow() ?: throw NoSuchElementException("角色不存在")
         roles.executeUpdateById(
-            context = ctx,
+            context = ctx.db,
             id = current.id,
             roleName = req.roleName ?: current.roleName,
             type = req.type ?: current.type,
@@ -76,11 +74,11 @@ public class RoleService(
     }
 
     /** 删除角色：不存在直接返回（旧版同此）；超级管理员与使用中的角色不许删。 */
-    public suspend fun destroy(id: Long, operatorId: String? = null) {
-        val role = roles.findOneById(ctx, id).getOrThrow() ?: return
+    public suspend fun destroy(ctx: Context, id: Long, operatorId: String? = null) {
+        val role = roles.findOneById(ctx.db, id).getOrThrow() ?: return
         if (role.type == SUPER_ADMIN) throw IllegalStateException("不能删除超级管理员角色")
-        if (bindings.countByRoleId(ctx, id).getOrThrow() > 0) throw IllegalStateException("该角色正在使用")
-        roles.executeSoftDeleteById(ctx, id, Clock.System.now(), operatorId).getOrThrow()
+        if (bindings.countByRoleId(ctx.db, id).getOrThrow() > 0) throw IllegalStateException("该角色正在使用")
+        roles.executeSoftDeleteById(ctx.db, id, Clock.System.now(), operatorId).getOrThrow()
     }
 
     private companion object {

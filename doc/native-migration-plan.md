@@ -1083,6 +1083,9 @@ binary 分支的处理：
 - 实体：`@Table("表名")` data class，列名自动 snake_case ↔ camelCase；`@Id`（DB 自增，INSERT 不带、回填）与 `@Id(insert = true)`（应用给主键，如会话 UUID）。
 - 仓库：`@Repository` + `CrudRepository<T>`，自定义查询写 `@Query`，KSP（`sqlx4k-codegen`）生成 `object XxxRepositoryImpl` 与 `XxxAutoRowMapper`，SQL 会被 JSqlParser 规范化并回显在生成代码的注释里（可读、可断点）。
 - 生成物落在**目标源集**（KSP2 在 KMP 下没有 common 编译单元）→ 注册走 `startServer(..., platformModules)`，由各目标 `main()` 传 `module { single<SysCacheRepository> { SysCacheRepositoryImpl } }`。
+  > ⚠️ **已修订（0.8 后期）**：这段手写绑定已由 `router-ksp` 的 `InjectionProcessor` 生成（`GeneratedInjection.kt` 的
+  > `repositoryModules()` + `Koin.registerInjectables()`），各目标 `Main.kt` 只调用；`Bootstrap` 的 `configureApplication`
+  > 多收一个 `installInjectables` 参数。以下表格保留为当时的记录。
 
 **三条硬规则（KSP 直接报错，试出来的）**
 
@@ -1226,7 +1229,7 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 - **DTO 层**（[SystemDtos.kt](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/dto/SystemDtos.kt)）：键名沿用旧版 JSON（`roleType`、`isUse`，分页键一个叫 `list` 一个叫 `rows` —— 历史遗留照搬，免得前端跟着改）；实体→DTO 的转换写成扩展函数（`toRow()` / `toListRow(user)` / `toUserRoleRow()`）。
 - **时间出参是展示串** `yyyy-MM-dd HH:mm:ss`（固定 `+08:00`，`Instant.toDisplayString()`）——旧版用 `@JsonFormat(pattern="yyyy-MM-dd HH:mm:ss", timezone="GMT+8")`，前端直接把该字段当字符串显示；换成 ISO-8601 会肉眼改变页面观感。**库里仍是 `Instant`**，约定 14 不变。
 - **`null` = 不修改**：用**读-改-写**实现（先 `findOneById` 读出实体，覆盖非空字段，再整行 `executeUpdateById` 写回）。好处是不必为每个字段组合单开 SQL，也不会把 `null` 误写进库；代价是一次额外读、且不能把某列「改回 NULL」（旧版 Ebean 的部分更新同样做不到）。`updatedBy` 取 `operatorId ?: 现有值`，避免无操作者时把既有审计值抹成 NULL。
-- **`operatorId` 显式传参**：服务层不碰 `ctx`（native 侧 `Context` 目前只有 `call`，登录态是 0.8 的事），「谁在操作」由控制器从登录态取后传入；传 `null` 表示无操作者。
+- **`operatorId` 显式传参**（⚠️ **已修订**：服务层后来已按 §13.16 首参透传 `ctx`，但 `operatorId` 仍显式传、不从 `ctx.userId` 隐式取；原文「服务层不碰 `ctx`」作废）：「谁在操作」由控制器从登录态取后传入；传 `null` 表示无操作者。
 - **N+1 是已知代价**：`list()` 每行补 `sys_user` 字段（视图缺 `is_use`），而 `@Query` 不支持 `IN (列表)`（§13.11 规则 3），只能循环单条；默认每页 10 行。旧版是一条 `id.isIn(...)` 批量取，这属该限制下的不可避免退化。
 - 旧版 `list()` 的关键字查询是「用户 id 集合 OR 角色 id 集合」两条 SQL 预筛，现在直接在 `view_user_role` 上 `LIKE`（多匹配 `type` 一列），语义等价、SQL 更少。
 
@@ -1446,6 +1449,80 @@ Traffic 日志形如 `[2026-09-22 12:10:31.381] [INFO ] [Traffic] POST /api/capt
 
 - `/menu/list|create|update|destroy|navigate`、`/user/getStudentInfoByStudentId`、`/api/sse` + `/sse/registry` 仍缺；
 - 验证码的随机源换平台 CSPRNG（与 0.7 的 `gensalt` 一并做）。
+
+### 13.16 请求上下文 `ctx` 恢复透传 + 事务入口（2026-09-23）
+
+**背景（用户研判，本节最高依据）**：`F:\ZCE`、`F:\Ventures` 下的同族项目全部出自同一个官方模板
+（`F:\ZCE\Trae\project-template\backend`，其 `README.md:3` 原文「这是Kotlin SpringBoot项目的模板」），
+Controller / Service 行为**已成文**：
+
+- `F:\ZCE\Trae\alumni-link\doc\project-guide.md:169-171`：「所有方法为 `suspend` 函数」「`ctx: Context` 是第一个参数，通过 `= ctx { }` 或 `= ctx` 进入作用域」；
+- `F:\Ventures\Trae\med-agent\AGENT.md:335`：Controller「第一个参数固定为 `ctx: Context`（由 `ContextArgumentResolver` 自动注入）」，`:387-400` 给出 Service 的基本模式；
+- 覆盖广度：`F:\Ventures\Kotlin` 下 `fun xxx(ctx: Context` 共 **351 处 / 80 个文件**，模板自带 service（`UserService` / `RoleService` / `UserFileService` / `HomeService`…）在 12 个项目里逐字相同。
+
+用户判定：**同族项目的后续业务要在 K/N 上继续写，ctx 不能丢** —— 否则开发者肌肉记忆失效（每条签名都要改），且「跨层共享数据」失去通道。即便 ORM（Ebean → sqlx4k）与容器（Spring → Koin）的差异不可避免，也不该把 ctx 本身一起丢掉。
+
+**① 旧 ctx 是什么（透传的实质）**
+
+| 面 | 旧 JVM 版 | 现在 |
+| --- | --- | --- |
+| 请求面 | `IWebExchangeContext`：`exchange` / `headers` / `clientAddress` / `clientUserAgent` / `clientReferer` | `ctx.call`（Ktor `ApplicationCall`，与 `ServerWebExchange` 同层级） |
+| 共享数据 | 把 `tenantId` / `examId` 等挂 `ctx` 上逐层传（实证：`F:\ZCE\Trae\ai-lab\doc\创职云-改造方案.md:83` 的 `ctx.czyExamId`、`:136` 的 `ctx.gpuAllowed`） | `ctx.data`（`io.ktor.util.Attributes`） |
+| 用户面 | `session` / `userId` / `user`（`UserInfo`：懒查 + 实例内缓存 `roleEntity`，派生 `isAdmin/isTeacher/isStudent`） | `ctx.session…` + **恢复的 `UserInfo`** |
+| 执行面 | `ctx.query<Q…>()` / `ctx.database` / `ctx.createModel` / **`ctx.transaction { }`** | `ctx.db`（`QueryExecutor`）+ `ctx.transaction { }`（**本次新加**） |
+| 容器 | `ctx.applicationContext.getBean(...)` | Koin（语义等价，反射无法复刻） |
+
+**② 落法：能力分区（关键取舍）**
+
+旧版最典型的反面教材是 `F:\Ventures\Kotlin\med-ocr\…\service\LoginService.kt` 的 `captcha(ctx)`：service 吃到整个 ctx，顺手就用了 `ctx.clientAddressString`。所以恢复 ctx ≠ 把请求面交给 service：
+
+- **请求面仅控制器可用**，service 禁用 `ctx.call`；需要 IP / UA / 请求头时由控制器抽成普通参数传下去。
+- **用户面 / 执行面 / `ctx.data` 对 service 开放** —— 这才是透传要保的东西。
+
+`Context` 因此显式分了三面写进 KDoc；实现类 [ApplicationCallContext](file:///f:/Develop/Kotlin/ktor-template/src/commonMain/kotlin/moe/lolosia/web/util/session/ApplicationCallContext.kt) 持**驱动**与**用户/绑定两个仓库**（形参由 `CtxInterceptor` 从容器取），`UserInfo` 挂在 `ctx.user` 上。
+
+**③ 改动一览**
+
+| 文件 | 说明 |
+| --- | --- |
+| `util/session/Context.kt` | 分三面：请求面 `call` / `data`；用户面 `session` / `sessionId` / `userId` / `requireUserId` / **`user`**；执行面 **`db`** / **`transaction`** |
+| `util/session/UserInfo.kt`（新） | `id` / `entity()` / `role()` / `roleType()` / `isAdmin()` / `isTeacher()` / `isStudent()`；**一次请求只查一次**（旧版 `by lazy`，这里因仓库是 suspend 改为「首次访问加载并记住」）；查不到回 `null`（旧版抛 `NoSuchElementException` 被兜底成 500） |
+| `util/session/ApplicationCallContext.kt` | 唯一实现：持 `IMySQL` + 两个仓库；`data = Attributes(concurrent = false)`；`transaction` 直通驱动 |
+| `interceptor/CtxInterceptor.kt` | `installCtxInterceptor(db, users, bindings)` —— 形参即依赖，KSP 生成 `koin.get(...)` |
+| `service/{LoginService,system/UserService,system/RoleService,system/UserRoleService}.kt` | 去掉构造里的 `db: Database` 与 `private val ctx: QueryExecutor get() = db.driver`；**方法首参加 `ctx: Context`**，语句句柄改用 `ctx.db` |
+| 控制器 `LoginController` / `UserController` / `RoleController` / `UserRoleController` / `DemoController` | 透传 `ctx` |
+| `configuration/AppModule.kt` | `serviceModule()` 少一个 `get()`（服务不再注入 `Database`） |
+
+**④ 有意保留的差异（不是漏改）**
+
+- **`CacheManager` / `SessionManager` 仍持自己的 `db.driver`**：它们是容器单例，会被 `AuthInterceptor`（ctx 还没建）与后台链路调用，不能依赖请求上下文 —— 对应旧族的 `ctx` / `acp` 二分（`F:\Ventures\Trae\med-ocr\doc\实施方案.md:595`：「后台队列内没有请求 `Context`，统一改用 `ApplicationContextProvider`」）。
+- **`operatorId` 仍显式传参**，不从 `ctx.userId` 隐式取：注册链路（`LoginService.register`）没有登录态，隐式取会让「记谁名下」变得不明显。
+- **`DemoController` 的 `/db/*` 探针仍直接用注入的 `Database`**：它们是 P0 收尾要整块删的脚手架。
+- **`LoginService.captcha(ctx)` / `verify(ctx, …)` 的首参当前未被读**：为与同族约定一致（任何请求域方法都从 ctx 起步，日后加 DB / 事务访问不必改签名）而保留。
+
+**⑤ 本次只恢复能力，不改既有行为**
+
+`ctx.transaction { }` 已可用，但**没有**顺手把 `UserService.create` / `update` / `delete` 包进事务 —— 那三处（`create` 建号+建绑定、`update` 改用户+改绑定、`delete` 软删绑定+软删用户）目前仍是两条独立语句，中途失败会留中间态（`delete` 尤其：只删掉绑定会让该用户仍能登录，正是 0.13 要修的旧版 bug）。改它属于**行为变更**，留给用户单独拍板。
+
+**⑥ 实测**（mingwX64 debug + 本机 MariaDB 10.11.6，端口 7137）
+
+编译与链接全绿：`compileKotlinMingwX64` / `linkDebugExecutableMingwX64` / `compileKotlinLinuxArm64`。
+
+| 冒烟项 | 期望 | 实测 |
+| --- | --- | --- |
+| 启动（新的三参 `installCtxInterceptor` 从容器取依赖） | 正常起服务 | `classpath 已装载：87 个条目` + `Responding at http://127.0.0.1:7137` ✅ |
+| `GET /api/ping` | `pong` | ✅ |
+| `POST /api/user/list`（无 token） | 401 | `{"code":401,"msg":"身份认证失败，请重新登录","data":null}` ✅ |
+| `POST /api/captcha`（新的 `captcha(ctx)` 路径） | 200 + base64 图 | ✅ |
+| `GET /api/db/ping` | 库连通 | `db=10.11.6-MariaDB / ktor-template / tz=+00:00` ✅ |
+| `POST /api/login`（不存在的用户） | 400 | `{"code":400,"msg":"用户不存在！"}` —— **证明 `ctx.db` 真到了仓库并执行了 SQL** ✅ |
+
+生成的注册表与路由已核对：`GeneratedInterceptors.kt` 为 `installCtxInterceptor(koin.get(Database::class), koin.get(SysUserRepository::class), koin.get(ViewUserRoleRepository::class))`；`GeneratedRoutes.kt` 里每个新加 `ctx` 形参都是 `call.inject<…session.Context>()`。
+
+**⑦ 配套文档**
+
+`doc/开发记忆.md` 约定 19（服务层写法：首参 `ctx`、禁用 `ctx.call`、`operatorId` 仍显式）、§3 的 0.8 行、§4 文件地图（`Context.kt` 三面 / 新增 `UserInfo.kt` / `CtxInterceptor` 说明）；`README.md` 技术亮点新增「请求上下文 `ctx`」一条、控制器约定后新增「服务层约定」三条。
+
 
 
 

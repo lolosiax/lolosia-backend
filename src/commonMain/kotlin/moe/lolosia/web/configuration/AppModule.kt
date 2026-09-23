@@ -19,7 +19,8 @@ import org.koin.dsl.module
  *
  * 容器实例由启动流程显式持有并向下传，不依赖全局容器。
  * 仓库实现由 sqlx4k 的 KSP 生成且只存在于各目标源集，故经 [startAppKoin] 的
- * `platformModules` 参数由各目标 `main()` 传入。
+ * `platformModules` 参数由各目标 `main()` 传入 —— 传的是 `router-ksp` 生成的
+ * `repositoryModules()`，绑定表不手写。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -29,14 +30,14 @@ public fun appModule(config: AppSettings, cp: Classpath): Module = module {
     single { Database(config.datasource) }
 }
 
-/** 业务服务（依赖仓库，仓库由平台模块提供）。 */
+/** 业务服务（依赖仓库，仓库由平台模块提供）。请求域服务的 DB 句柄来自方法首参 `ctx: Context`。 */
 public fun serviceModule(): Module = module {
     single { CacheManager(get(), get()) }
     single { SessionManager(get(), get()) }
-    single { LoginService(get(), get(), get(), get(), get()) }
-    single { UserService(get(), get(), get(), get()) }
-    single { RoleService(get(), get(), get()) }
-    single { UserRoleService(get(), get(), get(), get()) }
+    single { LoginService(get(), get(), get(), get()) }
+    single { UserService(get(), get(), get()) }
+    single { RoleService(get(), get()) }
+    single { UserRoleService(get(), get(), get()) }
 }
 
 /** 启动容器。[platformModules] 由各目标 `main()` 传入（含 sqlx4k 生成的仓库实现）。 */
