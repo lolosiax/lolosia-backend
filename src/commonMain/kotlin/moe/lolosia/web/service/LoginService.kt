@@ -5,9 +5,9 @@ import kotlin.io.encoding.Base64
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.uuid.Uuid
-import moe.lolosia.web.ApiException
-import moe.lolosia.web.db.Database
-import moe.lolosia.web.db.SysUserRepository
+import moe.lolosia.web.dto.ApiException
+import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.dto.CaptchaResult
 import moe.lolosia.web.dto.LoginResult
 import moe.lolosia.web.dto.ROLE_ID_STUDENT

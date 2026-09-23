@@ -11,7 +11,7 @@ import moe.lolosia.web.util.time.nowEpochMs
 /**
  * 会话数据：一层 `String -> JSON 值` 的映射，序列化后整份存进 `sys_sessions.data`。
  *
- * 键沿用旧 JVM 版的约定：[KEY_SESSION_ID]、[KEY_USER_ID]、[KEY_LAST_ACCESS]。
+ * 内置键见 [KEY_SESSION_ID]、[KEY_USER_ID]、[KEY_LAST_ACCESS]。
  *
  * @author 洛洛希雅Lolosia
  */

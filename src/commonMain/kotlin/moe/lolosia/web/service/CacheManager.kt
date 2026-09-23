@@ -4,15 +4,14 @@ import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
-import moe.lolosia.web.db.Database
-import moe.lolosia.web.db.SysCacheRepository
-import moe.lolosia.web.db.model.SysCacheEntity
+import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.SysCacheRepository
+import moe.lolosia.web.database.model.SysCacheEntity
 import moe.lolosia.web.util.router.Injectable
 
 /**
  * 缓存管理器：以 `path` 分组、`tag` 定位，存在 `sys_cache`。
  *
- * 语义与旧 JVM 版（Ebean）一致：
  * - `put(tag, value, ttl)` 按 tag upsert（查到**未过期**的同 tag 记录就更新，否则插一条新记录）；
  * - `get(tag)` 取该 path 下同 tag 的最新未过期值；
  * - `clear()` 清空整个 path 下的缓存。

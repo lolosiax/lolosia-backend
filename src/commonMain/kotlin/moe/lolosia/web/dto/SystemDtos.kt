@@ -1,9 +1,9 @@
 package moe.lolosia.web.dto
 
 import kotlinx.serialization.Serializable
-import moe.lolosia.web.db.model.SysRoleEntity
-import moe.lolosia.web.db.model.SysUserEntity
-import moe.lolosia.web.db.model.ViewUserRoleEntity
+import moe.lolosia.web.database.model.SysRoleEntity
+import moe.lolosia.web.database.model.SysUserEntity
+import moe.lolosia.web.database.model.ViewUserRoleEntity
 import moe.lolosia.web.util.time.toDisplayString
 
 /**

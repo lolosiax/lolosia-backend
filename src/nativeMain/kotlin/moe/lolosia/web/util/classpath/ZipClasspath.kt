@@ -2,23 +2,16 @@ package moe.lolosia.web.util.classpath
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.COpaquePointer
-import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
 
 /**
  * 读取 zip 内容的 [Classpath] 实现。
  *
- * 数据来源二选一：
- * - [open] (COpaquePointer)：可执行文件映像内的 `classpath.zip`（Windows `LockResource` / Linux 符号地址），
- *   打开时把映像拷入内存数组（几 MB，一次性；换来解析逻辑与平台无关、无指针歧义）；
- * - [open] (ByteArray)：直接使用给定数组。
+ * 只解析 zip 的中央目录建索引，读取条目时才拷贝该条目，因此内存占用 ≈ zip 本体 + 单条目。
+ * 打开时会把映像源数据拷入一次内存，使解析逻辑与平台无关。
  *
- * 只解析 zip 的 **中央目录**（Central Directory）建索引，读取条目时才拷贝该条目，
- * 因此内存占用 ≈ zip 本体 + 单条目。
- *
- * 已知边界：不支持 zip64（`classpath.zip` 不会超过 4GB）；目前只支持 STORED（不压缩）条目，
- * 换成 DEFLATED 需要在 [read] 中补 inflate（可用 Kotlin/Native 自带的 `platform.zlib`）。
+ * 已知边界：不支持 zip64（`classpath.zip` 不会超过 4GB）；只支持 STORED（不压缩）条目。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -53,8 +46,6 @@ public class ZipClasspath private constructor(private val data: ByteArray) : Cla
         return byName.keys.filter { p.isEmpty() || it.startsWith(p) }.sorted()
     }
 
-    // ===== 中央目录解析 =====
-
     private fun parseCentralDirectory(): Map<String, Entry> {
         val eocd = findEndOfCentralDirectory() ?: return emptyMap()
         val count = u16(eocd + 10)
@@ -73,7 +64,7 @@ public class ZipClasspath private constructor(private val data: ByteArray) : Cla
             val localHeaderOffset = u32(offset + 42)
             val name = data.decodeToString(offset + 46, offset + 46 + nameLen)
 
-            // 数据起点以「本地头」为准（本地头的 extra 长度可能与中央目录不同）
+            // 数据起点以「本地头」为准：本地头的 extra 长度可能与中央目录不同
             val dataOffset = localDataOffset(localHeaderOffset)
             if (!name.endsWith("/")) {
                 result[name] = Entry(method, dataOffset, uncompressedSize)
@@ -104,8 +95,6 @@ public class ZipClasspath private constructor(private val data: ByteArray) : Cla
         return null
     }
 
-    // ===== 小端读取 =====
-
     private fun u8(o: Int): Int = data[o].toInt() and 0xFF
 
     private fun u16(o: Int): Int = u8(o) or (u8(o + 1) shl 8)
@@ -121,8 +110,7 @@ public class ZipClasspath private constructor(private val data: ByteArray) : Cla
         private const val METHOD_STORED = 0
         private const val METHOD_DEFLATED = 8
 
-        /** 从可执行文件映像内的 zip 打开（拷贝一次映像数据）。 */
-        @OptIn(ExperimentalForeignApi::class)
+        /** 从可执行文件映像内的 zip 打开（会拷贝一次映像数据）。 */
         public fun open(image: COpaquePointer, size: Int): ZipClasspath =
             ZipClasspath(image.reinterpret<ByteVar>().readBytes(size))
 

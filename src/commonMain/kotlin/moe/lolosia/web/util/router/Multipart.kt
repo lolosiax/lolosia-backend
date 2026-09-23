@@ -1,18 +1,9 @@
 package moe.lolosia.web.util.router
 
 /**
- * 自研 `multipart/form-data` 解析器。
+ * `multipart/form-data` 解析器（纯字节扫描）。
  *
- * 为什么不用 Ktor 的 `receiveMultipart()`：Ktor 3.4 在 Kotlin/Native 上**未实现** multipart，
- * 平台侧实现直接是
- * ```
- * internal actual fun ...multiPartData(rc: ByteReadChannel): MultiPartData =
- *     error("Multipart is not supported in native")
- * ```
- * 因此这里自己解析（纯字节扫描，无第三方依赖，两个 native 目标共用）。
- *
- * 支持的边界：不处理 `Content-Transfer-Encoding`、嵌套 multipart、以及超长头部；
- * 这些对本项目场景不需要。
+ * 不处理 `Content-Transfer-Encoding`、嵌套 multipart 与超长头部。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -54,7 +45,7 @@ public fun parseMultipartBody(body: ByteArray, boundary: String): FormData {
 
         pos = body.skipCrlf(pos)
 
-        // 头部：逐行扫描直到遇到空行（空行本身即头部结束标记）
+        // 头部逐行扫描直到空行（空行本身即头部结束标记）
         var lineStart = pos
         var headerEnd = body.size
         while (lineStart < body.size) {
@@ -100,8 +91,6 @@ public fun parseMultipartBody(body: ByteArray, boundary: String): FormData {
 
     return FormData(fields, files)
 }
-
-// ===== 内部工具 =====
 
 private fun ByteArray.matchesAt(start: Int, needle: ByteArray): Boolean {
     if (start + needle.size > size) return false

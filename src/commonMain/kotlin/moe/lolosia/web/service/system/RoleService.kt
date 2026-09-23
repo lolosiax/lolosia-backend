@@ -2,9 +2,9 @@ package moe.lolosia.web.service.system
 
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import kotlin.time.Clock
-import moe.lolosia.web.db.Database
-import moe.lolosia.web.db.SysRoleRepository
-import moe.lolosia.web.db.SysUserRoleRepository
+import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.SysRoleRepository
+import moe.lolosia.web.database.repository.SysUserRoleRepository
 import moe.lolosia.web.dto.RoleCreateReq
 import moe.lolosia.web.dto.RolePageResult
 import moe.lolosia.web.dto.RoleRow

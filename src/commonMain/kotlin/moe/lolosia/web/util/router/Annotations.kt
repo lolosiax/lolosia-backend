@@ -1,13 +1,10 @@
 package moe.lolosia.web.util.router
 
 /**
- * 自研注解式路由：注解定义。
+ * 注解式路由的注解定义。
  *
- * 设计目标（对应迁移方案决策 9）：
- * 1. 与 ktorfitx server 端**同名同义**（`@Controller` / `@GET` / `@POST` / `@Body` / `@Path` / `@Query`），
- *    跨项目复制控制器代码时只需改 import；
- * 2. **去掉冗余的名称前缀**：可注入的上下文按**类型**自动注入（Spring 风格），不需要 `@Attribute("ctx")`；
- *    `@Path` / `@Query` / `@Header` / `@Form` 的名称可省略，默认取 Kotlin 形参名。
+ * 可注入的上下文按类型自动注入，不需要额外的名称前缀；
+ * `@Path` / `@Query` / `@Header` / `@Form` / `@FilePart` 的名称可省略，默认取形参名。
  *
  * @author 洛洛希雅Lolosia
  */

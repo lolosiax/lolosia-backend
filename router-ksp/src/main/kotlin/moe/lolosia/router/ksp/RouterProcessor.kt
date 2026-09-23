@@ -39,6 +39,9 @@ class RouterProcessorProvider : SymbolProcessorProvider {
 
 private const val FQ = "moe.lolosia.web.util.router"
 
+/** 运行时里挂在 Ktor 类型上的扩展（`ApplicationCall.inject` / `readForm`）所在包。 */
+private const val KTOR_FQ = "moe.lolosia.web.util.ktor"
+
 private val HTTP_METHODS = linkedMapOf(
     "GET" to "get",
     "POST" to "post",
@@ -82,10 +85,10 @@ class RouterProcessor(
             appendLine("import io.ktor.server.request.receive")
             appendLine("import io.ktor.server.response.respond")
             appendLine("import io.ktor.server.routing.Routing")
-            appendLine("import moe.lolosia.web.respondEnveloped")
+            appendLine("import moe.lolosia.web.dto.respondEnveloped")
             HTTP_METHODS.values.forEach { appendLine("import io.ktor.server.routing.$it") }
-            appendLine("import $FQ.inject")
-            appendLine("import $FQ.readForm")
+            appendLine("import $KTOR_FQ.inject")
+            appendLine("import $KTOR_FQ.readForm")
             appendLine()
             appendLine("/** 批量注册全部注解式控制器的路由。 */")
             appendLine("fun Routing.generatedRoutes() {")

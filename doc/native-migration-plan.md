@@ -680,7 +680,7 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 | 0.5 基础设施替换 | ✅ | 见 §13.8：自研 logger、`@Serializable` 配置多级覆盖、Koin 4.2.2 接入；okio 3.9.1 / kotlinx-datetime（0.5 时为 0.6.2，0.6 起对齐 sqlx4k 到 0.8.0）已接依赖 |
 | 0.6 sqlx4k 数据层 | 🔄 | 见 §13.9~§13.11：驱动 + 仓库 codegen + 会话/缓存服务 + **用户/角色链路的数据访问层**；剩余 Service 层迁移 |
 | 0.7 bcrypt | 🔄 | 见 §13.12：自研移植 jBCrypt 0.4 完成（纯 Kotlin common，官方向量逐字命中）；「真实账号登录」验收待登录链路 |
-| 0.8 鉴权拦截器链 | ⬜ | 已有 `CtxInterceptor` 雏形（`@Injectable Context`） |
+| 0.8 鉴权拦截器链 | 🔄 | `interceptor/` 顶级包 + Traffic / Ctx / Envelope 三层；顺序由 `@Interceptor(order)` 经 KSP 生成（`GeneratedInterceptors.kt`），拦截器形参由 Koin 注入；Auth 与 SSE 待登录链路 / `EventSource` |
 | 0.9 部署 | ✅ | 插件侧支持原生产物（`deploy { binary { } }`）+ **真机跑通**，见 13.6 |
 
 **实测数据**
@@ -1012,7 +1012,7 @@ binary 分支的处理：
 
 | 项 | 选型 | 理由 |
 | --- | --- | --- |
-| 配置 | **`@Serializable` `AppConfig` + JSON 多级覆盖** | 保留"资源走 classpath"的既有约定；服务器上改磁盘文件即可，不必重编二进制 |
+| 配置 | **`@Serializable` `AppSettings` + JSON 多级覆盖** | 保留"资源走 classpath"的既有约定；服务器上改磁盘文件即可，不必重编二进制 |
 | Service DI | **Koin 4.2.2** | 已核实 `koin-core-{linuxarm64,mingwx64}` 产物齐全 |
 | 日志 | **自研极简实现**（`util/log/Log.kt`） | 需求只有「级别 + 时间戳 + 异常栈」；Kermit 2.2.0 / log4k 2.5.0 虽有 native 产物，但时间戳能力官方都没写明，不值得为此引依赖 |
 | bcrypt（0.7） | **自研移植 jBCrypt 到 commonMain** | Maven Central 全量 46 个 bcrypt artifact **无一发布 native 变体**（`at.favre.lib`/`jbcrypt` 纯 JVM；`cryptography-kotlin` 有 native 但无 bcrypt 算法）；glibc 主线 `crypt(3)` 不保证支持 `$2a$`，mingw 侧更无等价物 |
@@ -1023,7 +1023,7 @@ binary 分支的处理：
 - 磁盘文件用 **okio** `FileSystem.SYSTEM` 读（顺带把 okio 在双 native 目标上验证掉了），并**剥 BOM**（PS 5.1 的 `Set-Content -Encoding UTF8`、记事本都会写 BOM，不剥直接解析失败）；某一层解析失败**记 WARN**，不再静默忽略。
 - 端口解析结果**写回配置对象**（`copy(server = …)`）后再注入 Koin，保证 `/api/config` 看到的端口就是真实监听端口。
 - Koin 容器由 `startAppKoin(config, cp)` 返回并**显式向下传**：Koin 4 里 `GlobalContext`、`koinApplication` 都不是公开 API（native 上直接 Unresolved），只有 `startKoin { }.koin` 可用。
-- 控制器是 `object`，拿不到构造注入 → 用 `Koin.registerInjectable<T>()` 把容器实例接进自研路由的「按类型注入」表，控制器形参写 `config: AppConfig` 即得。**0.6 的服务按同一方式注入**。
+- 控制器是 `object`，拿不到构造注入 → 用 `Koin.registerInjectable<T>()` 把容器实例接进自研路由的「按类型注入」表，控制器形参写 `settings: AppSettings` 即得。**0.6 的服务按同一方式注入**。
 - 日志格式 `[2026-09-21 14:03:22.123] [INFO ] [Bootstrap] 消息`；异常作为首个参数以支持尾随 lambda（`log.error(cause) { "…" }`）。
 
 **实测**（Windows 本机 mingwX64 release，12.6MB；`compileKotlinLinuxArm64` 同步通过）
@@ -1126,8 +1126,8 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 
 | 交付 | 说明 |
 | --- | --- |
-| `db/model/{Session,SysCache}Entity.kt` | 对应 `sys_sessions` / `sys_cache` |
-| `db/{Session,SysCache}Repository.kt` | 读 + 写入单语句 `@Query` |
+| `database/model/{Session,SysCache}Entity.kt` | 对应 `sys_sessions` / `sys_cache` |
+| `database/repository/{Session,SysCache}Repository.kt` | 读 + 写入单语句 `@Query` |
 | `service/SessionMap.kt` | 会话数据（JSON ↔ `Map<String, JsonElement>`），键沿用旧版 `sessionId` / `userId` / `session:lastAccess` |
 | `service/SessionManager.kt` | 内存缓存 + 每 10s 自动落库 + 闲置 5 分钟释放内存（旧版的 `synchronized` → `Mutex`，Native 的 common 代码没有 `synchronized`） |
 | `service/CacheManager.kt` | `path` 分组 / `tag` 定位，`put` 按 tag upsert，默认 TTL 1 天，语义与旧版一致 |
@@ -1151,8 +1151,8 @@ MariaDB 的单语句预处理直接回 `1064 You have an error in your SQL synta
 
 | 文件 | 说明 |
 | --- | --- |
-| `db/model/{SysUser,SysRole,SysUserRoles,ViewUserRole}Entity.kt` | 对应 `sys_user` / `sys_role` / `sys_user_roles` / 视图 `view_user_role`；时间列全用 `Instant` |
-| `db/{SysUser,SysRole,SysUserRole,ViewUserRole}Repository.kt` | 读查询 + 单语句 `@Query` 写入（`executeInsert` / `executeUpdate*` / `executeSoftDelete*`） |
+| `database/model/{SysUser,SysRole,SysUserRoles,ViewUserRole}Entity.kt` | 对应 `sys_user` / `sys_role` / `sys_user_roles` / 视图 `view_user_role`；时间列全用 `Instant` |
+| `database/repository/{SysUser,SysRole,SysUserRole,ViewUserRole}Repository.kt` | 读查询 + 单语句 `@Query` 写入（`executeInsert` / `executeUpdate*` / `executeSoftDelete*`） |
 | `Main.kt`（两目标）`platformModules()` | 6 个仓库实现注册进 Koin |
 | `Bootstrap.configureApplication` | 4 个仓库 `registerInjectable`（控制器形参可直接注入） |
 | `DemoController` | `/api/db/roles`、`/api/db/users`（视图分页 + 按 id 取），作为读路径验证 |

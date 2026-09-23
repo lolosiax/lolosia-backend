@@ -4,12 +4,12 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.request.path
-import moe.lolosia.web.ApiException
+import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.util.session.SessionKey
 
 /**
- * 会话鉴权（注解式路由之前）。
+ * 第 3 层：会话鉴权（Envelope 之前、Ctx 之后）。
  *
  * - 只检查 `/api/` 开头的路径；
  * - 携带有效 `Authorization: Bearer <sessionId>` 时把会话放进 `call.attributes[SessionKey]`，
@@ -19,6 +19,7 @@ import moe.lolosia.web.util.session.SessionKey
  *
  * @author 洛洛希雅Lolosia
  */
+@Interceptor(-3)
 public fun Application.installAuthInterceptor(sessions: SessionManager) {
     intercept(ApplicationCallPipeline.Call) {
         val path = call.request.path().substringBefore('?')

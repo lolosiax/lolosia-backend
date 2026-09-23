@@ -4,10 +4,10 @@ import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
-import moe.lolosia.web.db.Database
-import moe.lolosia.web.db.SysUserRepository
-import moe.lolosia.web.db.SysUserRoleRepository
-import moe.lolosia.web.db.ViewUserRoleRepository
+import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.SysUserRepository
+import moe.lolosia.web.database.repository.SysUserRoleRepository
+import moe.lolosia.web.database.repository.ViewUserRoleRepository
 import moe.lolosia.web.dto.ROLE_ID_DEFAULT
 import moe.lolosia.web.dto.UserCreateReq
 import moe.lolosia.web.dto.UserInfoRow
