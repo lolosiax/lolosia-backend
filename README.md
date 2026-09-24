@@ -124,7 +124,8 @@ build\bin\mingwX64\releaseExecutable\ktor-template.exe 7129  # 首参覆盖端�
 服务默认监听 `0.0.0.0:7129`，静态首页在 `http://127.0.0.1:7129/home/`。冒烟：
 
 ```powershell
-curl.exe -s http://127.0.0.1:7129/api/ping            # {"code":200,"msg":"success","data":"pong"}
+# ⚠️ 返回值**按响应 MIME**包信封：JSON 接口 → {"code":200,"msg":"success","data":…}；探针返回裸 String 是 text/plain，原样输出
+curl.exe -s http://127.0.0.1:7129/api/ping            # 裸文本 pong
 curl.exe -s http://127.0.0.1:7129/api/config          # 生效配置（端口 / db / 日志级别）
 curl.exe -s http://127.0.0.1:7129/api/db/ping         # sqlx4k 连通性：版本 / 库名 / 会话时区
 $st = curl.exe -s http://127.0.0.1:7129/api/svc/selftest   # 服务层自检（13 步）+ 末尾给出 token=…
@@ -138,8 +139,8 @@ curl.exe -s -X POST http://127.0.0.1:7129/api/user/myInfo -H "Authorization: Bea
 curl.exe -s -X POST http://127.0.0.1:7129/api/logout -H "Authorization: Bearer $tk"
 
 # 图形验证码 → verify（一次性消费）→ 注册（免鉴权）
-$cap = curl.exe -s -X POST http://127.0.0.1:7129/api/captcha    # {"data":{"image":"<base64 png>","id":"<token>"}}
-curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: application/json" -d '{"id":"<id>","code":"<算式结果>"}'
+$cap = curl.exe -s -X POST http://127.0.0.1:7129/api/captcha    # {"code":200,"msg":"success","data":{"image":"<base64 png>","id":"<token>"}}
+curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: application/json" -d '{"id":"<id>","code":"<算式结果>"}'   # data.message=success
 curl.exe -s -X POST http://127.0.0.1:7129/api/register -H "Content-Type: application/json" -d '{"userName":"alice","password":"123456","email":"alice@example.com"}'
 
 # @Body 绑定（DemoController 探针）
@@ -202,7 +203,7 @@ object DemoController {
 - 审计列的操作者（`created_by` / `updated_by`）仍**显式传 `operatorId`**，不从 `ctx.userId` 隐式取 —— 注册链路没有登录态
 
 业务接口（路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`。
-这些接口（以及探针里的 `/api/classpath/*`）都走鉴权：`POST` + `Authorization: Bearer <sessionId>`；白名单只有 `/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar` 与取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）。
+这些接口（以及探针里的 `/api/classpath/*`）默认都要鉴权：`POST` + `Authorization: Bearer <sessionId>`；免鉴权白名单是 `/api/login`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse` 与取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）—— **`/api/logout` 不在白名单里**，它要带有效 token（否则 401）。
 
 当前模板自带的探针接口（**临时脚手架**，P0 收尾删除）：`/api/ping`、`/api/whoami`、`/api/config`、`/api/db/ping`、`/api/db/roles`、`/api/db/users`、`/api/cache/{put,get}`、`/api/session/{new,get/{id}}`、`/api/svc/selftest` 在开发期免鉴权（见 `AuthInterceptor.DEV_PROBES`）；`/api/classpath/{list,read}` 需鉴权。
 

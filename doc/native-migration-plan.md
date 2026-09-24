@@ -1308,13 +1308,14 @@ Traffic（Monitoring，耗时日志）
     → Auth（Call，解析 Authorization → 校验白名单 → 401）
 ```
 
-- 会话**解析时机提前到拦截器**，`Context.session/userId/sessionId/requireUserId()` 全部改**同步**读取（legacy 是 suspend 懒解析）；
-- 白名单三分：`IGNORE`（全路径精确：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse`）、`IGNORE_MATCHES`（前缀，取件类 `<img src>` 带不了自定义头：`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）、`DEV_PROBES`（**临时**：DemoController 的探针，P0 收尾连同 `DemoController` 一起删）；
+- 会话**解析时机提前到拦截器**，`Context.session/userId/sessionId/requireUserId()` 全部改**同步**读取（legacy 是 suspend 懒解析）；只有 `ctx.user`（`UserInfo`，要查库）是 `suspend`；
+- 白名单三分：`IGNORE`（全路径精确：`/api/login`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse`）、`IGNORE_MATCHES`（前缀，取件类 `<img src>` 带不了自定义头：`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）、`DEV_PROBES`（**临时**：DemoController 的探针，P0 收尾连同 `DemoController` 一起删）；
+  ⚠️ **`/api/logout` 不在白名单**（它按会话删 token，必须带有效会话；实测不带 `Authorization` 直接 401）—— 原文曾把它列进 `IGNORE`，属笔误，见 §13.16；
 - 有意**去掉** legacy 白名单里的 `/api/client/`、`/api/resources/checkFiles` —— 本项目没有这两个端点。
 
 **④ 登录链路**
 
-`LoginService.login(userName, password)`：账号可命中 `user_name` 或 `phone`（`findOneByAccount`）→ bcrypt 校验 → 建会话并把 `userId` 写进会话 → 返回强类型 `LoginResult`（含 `@SerialName("Authorization") session.id`，前端 `basicStore.setToken(data?.Authorization)`）。
+`LoginService.login(ctx, userName, password)`（`ctx` 首参见 §13.16）：账号可命中 `user_name` 或 `phone`（`findOneByAccount`）→ bcrypt 校验 → 建会话并把 `userId` 写进会话 → 返回强类型 `LoginResult`（含 `@SerialName("Authorization") session.id`，前端 `basicStore.setToken(data?.Authorization)`）。
 
 - 失败回 **400**（legacy 抛 `NoSuchElementException`/`IllegalAccessException` 被兜底成 500），前端只读 `msg` 展示；
 - 保留 legacy 的 `firstLogin` 语义：库里无密码 **且** 本次也没传密码 → 放行。
@@ -1344,7 +1345,7 @@ Traffic（Monitoring，耗时日志）
 1. **KDoc 里写 `/db/*` 会把注释吃掉**：Kotlin 块注释**可嵌套**，`` `/db/*` `` 里的 `/*` 被当成嵌套注释起点 → `Syntax error: Unclosed comment`，且报在文件末尾、与真正的行毫无关系。
 2. **`Attributes.getOrNull` 是成员函数，不是顶层函数**：`import io.ktor.util.getOrNull` 会 `Unresolved reference`，直接 `call.attributes.getOrNull(key)` 即可。
 3. **`Throwable.message` 是 `String?`**：`ApiResult.err(code, msg: String)` 处要 `cause.message ?: "…"`，别以为 ApiException 构造时传了非空就万事大吉。
-4. **探针接口的返回值现在也被包信封**：`/api/session/new`、`/api/svc/selftest` 的响应从裸字符串变成 `{"code":200,…,"data":"…"}`，冒烟脚本必须解 JSON（`(curl … | ConvertFrom-Json).data`），否则拿到的 token 是整段 JSON。
+4. **信封是按响应 MIME 判定的**：`EnvelopeInterceptor` 只包 `application/json` / `text/json` / `*+json`。探针（`/api/session/new`、`/api/svc/selftest`、`/api/ping`、`/api/whoami`、`/api/config`）返回的是**裸 `String`**（`text/plain`），**不被包**，冒烟脚本拿到的就是裸值，直接 `.Trim()` 即可；只有 JSON 接口（`/api/login`、`/api/captcha`、`/api/logout`、`/api/verify`…）才需要解一层 `.data`。（原文曾记成「探针返回值也被包信封」，属误判，见 §13.16）
 5. **`/api/classpath/*` 由免鉴权变需鉴权**：该端点只被 `ClasspathController`（演示用）使用，已在 `lolosia-web` 源码里确认前端不调它，故未进白名单。
 
 **⑧ 实测**（mingwX64 release + 本机 MariaDB 10.11.6，端口 7160）
@@ -1355,7 +1356,7 @@ Traffic（Monitoring，耗时日志）
 
 | 冒烟项 | 期望 | 实测 |
 | --- | --- | --- |
-| `GET /api/ping` | 信封包字符串 | `{"code":200,"msg":"success","data":"pong"}` ✅ |
+| `GET /api/ping` | **裸文本**（探针返回 `String`，`text/plain` 不经信封） | `pong` ✅ |
 | `POST /api/role/list`（无 token） | 401 | `http=401`，`{"code":401,"msg":"身份认证失败，请重新登录","data":null}` ✅ |
 | `POST /api/role/list`（带 token） | 200 + 5 角色 | ✅ |
 | `POST /api/user/list` `{pageNo,pageSize,keys}` | `data.data` / `data.total` | `total=1`，`isUse=1`（Int），`roleName` 在 ✅ |
@@ -1502,7 +1503,7 @@ Controller / Service 行为**已成文**：
 
 **⑤ 本次只恢复能力，不改既有行为**
 
-`ctx.transaction { }` 已可用，但**没有**顺手把 `UserService.create` / `update` / `delete` 包进事务 —— 那三处（`create` 建号+建绑定、`update` 改用户+改绑定、`delete` 软删绑定+软删用户）目前仍是两条独立语句，中途失败会留中间态（`delete` 尤其：只删掉绑定会让该用户仍能登录，正是 0.13 要修的旧版 bug）。改它属于**行为变更**，留给用户单独拍板。
+`ctx.transaction { }` 已可用，但**没有**顺手把 `UserService.create` / `update` / `delete` 包进事务 —— 那三处（`create` 建号+建绑定、`update` 改用户+改绑定、`delete` 软删绑定+软删用户）目前仍是两条独立语句，中途失败会留中间态（`delete` 尤其：软删绑定的那句成功、软删用户的那句失败，该用户就会**仍能登录** —— 正是 §13.13 拍板要修的旧版 bug 症状）。改它属于**行为变更**，留给用户单独拍板。
 
 **⑥ 实测**（mingwX64 debug + 本机 MariaDB 10.11.6，端口 7137）
 
