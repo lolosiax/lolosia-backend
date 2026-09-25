@@ -7,8 +7,8 @@
 - 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（PNG 编码 + 点阵算式，见 `util/image`、`util/captcha`）
 - 旧 JVM 代码整体放在 [legacy/jvm](legacy/jvm)，不参与编译，仅作迁移参考
 
-> 迁移方案与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)，
-> 会话交接（约定 / 状态 / 工作流 / 踩坑）见 [doc/开发记忆.md](doc/开发记忆.md)。
+> 迁移方案与实测记录（`native-migration-plan.md`）、会话交接（约定 / 状态 / 工作流 / 踩坑，`开发记忆.md`）
+> 已移出本仓库，现放在 Trae 工作区的 `doc/` 下。
 
 ## ✨ 特性
 
@@ -68,7 +68,6 @@
 │   └── linuxArm64Main/kotlin/…/  # Main.kt（入口；DI 绑定取自生成的 GeneratedInjection）+ objcopy 符号读取
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── sql/                          # 建表脚本（7 张表 + view_user_role 视图）
-├── doc/                          # 迁移方案 + 开发记忆
 ├── legacy/jvm/                   # 旧 JVM 代码（不参与编译，仅参考）
 ├── ktor-template.service         # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
