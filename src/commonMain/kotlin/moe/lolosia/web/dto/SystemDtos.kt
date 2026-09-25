@@ -1,6 +1,16 @@
 package moe.lolosia.web.dto
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import moe.lolosia.web.database.model.SysRoleEntity
 import moe.lolosia.web.database.model.SysUserEntity
 import moe.lolosia.web.database.model.ViewUserRoleEntity
@@ -181,9 +191,39 @@ public data class SearchReq(val keys: String? = null)
 @Serializable
 public data class IdListReq(val idList: List<String?> = emptyList())
 
-/** 批量删除（`/user/delete`）；前端传的是**逗号分隔的字符串**，不是数组。 */
+/**
+ * 批量删除（`/user/delete`）。前端两种形状都发过：单行删除是数组 `["<uuid>"]`，
+ * 多选删除是逗号串 `"<uuid>,<uuid>"`，这里统一收成 id 列表。
+ */
 @Serializable
-public data class IdsReq(val ids: String = "")
+public data class IdsReq(
+    @Serializable(with = IdsSerializer::class)
+    val ids: List<String> = emptyList(),
+)
+
+/** 数组 / 逗号串 / 单条字符串都读成 id 列表（写法参考 [moe.lolosia.web.dto.CaptchaIdSerializer]）。 */
+public object IdsSerializer : KSerializer<List<String>> {
+    private val delegate: KSerializer<List<String>> = ListSerializer(String.serializer())
+
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: List<String>) {
+        encoder.encodeString(value.joinToString(","))
+    }
+
+    override fun deserialize(decoder: Decoder): List<String> {
+        val json = decoder as? JsonDecoder ?: return splitIds(decoder.decodeString())
+        return when (val element = json.decodeJsonElement()) {
+            is JsonArray -> element.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.map(String::trim)
+                .filter(String::isNotEmpty)
+
+            else -> splitIds((element as? JsonPrimitive)?.contentOrNull.orEmpty())
+        }
+    }
+
+    private fun splitIds(raw: String): List<String> =
+        raw.split(',').map(String::trim).filter(String::isNotEmpty)
+}
 
 @Serializable
 public data class UserIdReq(val userId: String)

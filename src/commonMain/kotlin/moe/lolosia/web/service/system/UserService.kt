@@ -6,6 +6,7 @@ import kotlin.uuid.Uuid
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.database.repository.SysUserRoleRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
+import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.ROLE_ID_DEFAULT
 import moe.lolosia.web.dto.UserCreateReq
 import moe.lolosia.web.dto.UserInfoRow
@@ -18,7 +19,9 @@ import moe.lolosia.web.dto.toInfoRow
 import moe.lolosia.web.dto.toListRow
 import moe.lolosia.web.dto.toRow
 import moe.lolosia.web.util.crypto.BCrypt
+import moe.lolosia.web.util.fs.FileStore
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.UploadedFile
 import moe.lolosia.web.util.session.Context
 
 /**
@@ -32,7 +35,8 @@ import moe.lolosia.web.util.session.Context
  * - `delete` 除了软删角色绑定，**同时软删 `sys_user`**（旧版只删绑定，用户仍能登录）；
  * - 时间字段输出 `yyyy-MM-dd HH:mm:ss`（固定 +08:00），与旧版 `@JsonFormat` 一致；
  * - 旧版依赖 Ebean `@SoftDelete` 自动过滤，这里 `deleted = 0` 由仓库 SQL 显式写；
- * - 头像上传（`avatarPathOf` / `saveAvatar`）与 `my*`（需登录态）不在这里，属 P1 / 0.8。
+ * - 头像（[saveAvatar] / [avatarOf]）落 `work/image/avatar/<用户 id>.<扩展名>`，`sys_user.avatar`
+ *   只存**文件名**（与列长 `varchar(255)` 和旧版 `avatarPathOf` 的解析方式一致）。
  *
  * `operatorId` 是「谁在操作」（审计列的 `created_by` / `updated_by`），仍**显式传参**而不从
  * `ctx.userId` 隐式取 —— 注册链路（`LoginService.register`）没有登录态，隐式取会让「记谁名下」
@@ -45,6 +49,7 @@ public class UserService(
     private val users: SysUserRepository,
     private val bindings: SysUserRoleRepository,
     private val view: ViewUserRoleRepository,
+    private val files: FileStore,
 ) {
 
     /**
@@ -192,11 +197,50 @@ public class UserService(
         }
     }
 
+    /**
+     * 保存头像：写入存储后把**文件名**写回 `sys_user.avatar`。
+     *
+     * 扩展名只认 [AVATAR_EXTENSIONS] 里的白名单，其余（含无扩展名、前端传的 `<id>.jpg` 之外的怪名字）
+     * 一律按 `png` 存 —— 文件名会直接参与拼路径，白名单是防目录穿越的第二道闸（第一道在 [FileStore]）。
+     */
+    public suspend fun saveAvatar(ctx: Context, id: String, file: UploadedFile, operatorId: String? = null) {
+        val current = users.findOneById(ctx.db, id).getOrThrow() ?: throw NoSuchElementException("用户不存在")
+        val name = "$id.${avatarExtension(file.fileName)}"
+        if (!files.write("$AVATAR_DIR/$name", file.bytes)) throw ApiException(500, "头像写入失败")
+        users.executeUpdateAvatarById(ctx.db, id, name, Clock.System.now(), operatorId ?: current.updatedBy).getOrThrow()
+    }
+
+    /**
+     * 读头像字节。没上传过（`avatar` 为空）或文件已丢失都按 404 处理
+     * —— 前端 `<img>` 的 `onerror` 会退回默认图，不需要给 200 的占位图。
+     */
+    public suspend fun avatarOf(ctx: Context, id: String): AvatarFile {
+        val user = users.findOneById(ctx.db, id).getOrThrow() ?: throw ApiException(404, "用户不存在")
+        val name = user.avatar?.takeIf { it.isNotEmpty() } ?: throw ApiException(404, "该用户没有头像")
+        val bytes = files.read("$AVATAR_DIR/$name") ?: throw ApiException(404, "头像文件不存在")
+        return AvatarFile(name, bytes)
+    }
+
+    /** 从上传的文件名里取扩展名；白名单外一律 `png`。 */
+    private fun avatarExtension(fileName: String?): String {
+        val ext = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
+        return if (ext in AVATAR_EXTENSIONS) ext else AVATAR_EXTENSIONS.first()
+    }
+
     /** bcrypt 哈希（cost 与旧版 `BCryptPasswordEncoder(10)` 一致）。 */
     private fun hash(plain: String): String = BCrypt.hashpw(plain, BCrypt.gensalt())
+
+    /** 头像文件的字节与其文件名（文件名带扩展名，控制器靠它判 MIME）。 */
+    public class AvatarFile(public val name: String, public val bytes: ByteArray)
 
     public companion object {
         /** `searching` 旧版固定返回 10 条。 */
         public const val SEARCH_LIMIT: Int = 10
+
+        /** 头像在 [FileStore] 根目录下的相对目录。 */
+        public const val AVATAR_DIR: String = "image/avatar"
+
+        /** 允许的扩展名，首个是兜底值；顺序不重要，取值时用到 [first]。 */
+        public val AVATAR_EXTENSIONS: List<String> = listOf("png", "jpg", "jpeg")
     }
 }

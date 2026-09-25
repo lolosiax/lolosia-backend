@@ -1,5 +1,6 @@
 package moe.lolosia.web
 
+import moe.lolosia.web.configuration.platformModule
 import moe.lolosia.web.generated.configureInterceptors
 import moe.lolosia.web.generated.generatedRoutes
 import moe.lolosia.web.generated.registerInjectables
@@ -17,7 +18,7 @@ import moe.lolosia.web.generated.repositoryModules
 fun main(args: Array<String>) {
     startServer(
         portOverride = args.firstOrNull()?.toIntOrNull(),
-        platformModules = repositoryModules(),
+        platformModules = repositoryModules() + platformModule(),
         installInterceptors = { koin -> configureInterceptors(koin) },
         installInjectables = { registerInjectables() },
     ) { generatedRoutes() }

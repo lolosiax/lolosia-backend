@@ -5,6 +5,7 @@ import moe.lolosia.web.database.Database
 import moe.lolosia.web.service.CacheManager
 import moe.lolosia.web.service.LoginService
 import moe.lolosia.web.service.SessionManager
+import moe.lolosia.web.service.SseService
 import moe.lolosia.web.service.system.RoleService
 import moe.lolosia.web.service.system.UserRoleService
 import moe.lolosia.web.service.system.UserService
@@ -34,8 +35,9 @@ public fun appModule(config: AppSettings, cp: Classpath): Module = module {
 public fun serviceModule(): Module = module {
     single { CacheManager(get(), get()) }
     single { SessionManager(get(), get()) }
+    single { SseService() }
     single { LoginService(get(), get(), get(), get()) }
-    single { UserService(get(), get(), get()) }
+    single { UserService(get(), get(), get(), get()) }
     single { RoleService(get(), get()) }
     single { UserRoleService(get(), get(), get()) }
 }

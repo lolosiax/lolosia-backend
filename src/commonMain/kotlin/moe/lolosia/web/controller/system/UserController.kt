@@ -1,5 +1,8 @@
 package moe.lolosia.web.controller.system
 
+import io.ktor.http.ContentType
+import io.ktor.http.content.ByteArrayContent
+import io.ktor.http.content.OutgoingContent
 import moe.lolosia.web.dto.EmptyResult
 import moe.lolosia.web.dto.IdListReq
 import moe.lolosia.web.dto.IdRow
@@ -17,7 +20,13 @@ import moe.lolosia.web.service.system.UserRoleService
 import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller
+import moe.lolosia.web.util.router.FilePart
+import moe.lolosia.web.util.router.GET
 import moe.lolosia.web.util.router.POST
+import moe.lolosia.web.util.router.PUT
+import moe.lolosia.web.util.router.Path
+import moe.lolosia.web.util.router.Query
+import moe.lolosia.web.util.router.UploadedFile
 import moe.lolosia.web.util.session.Context
 
 /**
@@ -63,8 +72,7 @@ object UserController {
 
     @POST("/user/delete")
     suspend fun delete(ctx: Context, users: UserService, @Body req: IdsReq): EmptyResult {
-        val ids = req.ids.split(',').map(String::trim).filter(String::isNotEmpty)
-        if (ids.isNotEmpty()) users.delete(ctx, ids, ctx.userId)
+        if (req.ids.isNotEmpty()) users.delete(ctx, req.ids, ctx.userId)
         return EmptyResult()
     }
 
@@ -84,4 +92,43 @@ object UserController {
     @POST("/user/myRole")
     suspend fun myRole(ctx: Context, bindings: UserRoleService): UserRoleRow =
         bindings.getRoleByUserId(ctx, ctx.requireUserId())
+
+    /**
+     * 上传头像（前端 `setAvatar`：`PUT /user/avatar?id=<uuid>`，FormData 字段名 `file`）。
+     *
+     * 路径在鉴权白名单里（因为同名的 GET 要能被 `<img>` 直接访问、带不了请求头），
+     * 所以**上传必须在这里自己校验登录态** —— 白名单只免掉了「没登录就 401」，不是免鉴权。
+     * `id` 缺省表示改自己的头像。
+     */
+    @PUT("/user/avatar")
+    suspend fun avatarUpload(
+        ctx: Context,
+        users: UserService,
+        @FilePart("file") file: UploadedFile,
+        @Query id: String?,
+    ): EmptyResult {
+        val operator = ctx.requireUserId()
+        users.saveAvatar(ctx, id ?: operator, file, operator)
+        return EmptyResult()
+    }
+
+    /** 读头像（前端 `getAvatar`：`GET /user/avatar?id=<uuid>`，`responseType: 'blob'`）。 */
+    @GET("/user/avatar")
+    suspend fun avatarGet(ctx: Context, users: UserService, @Query id: String?): OutgoingContent =
+        avatarContent(users.avatarOf(ctx, id ?: ctx.requireUserId()))
+
+    /** 取件式读头像（前端 store 的 `avatar` getter 拼的是 `/user/avatar/get/<id>`，给 `<img src>` 用）。 */
+    @GET("/user/avatar/get/{id}")
+    suspend fun avatarGetByPath(ctx: Context, users: UserService, @Path id: String): OutgoingContent =
+        avatarContent(users.avatarOf(ctx, id))
+
+    /** 按存的文件名判 MIME；`.jpeg` 归到 `image/jpeg`。 */
+    private fun avatarContent(avatar: UserService.AvatarFile): OutgoingContent = ByteArrayContent(
+        bytes = avatar.bytes,
+        contentType = if (avatar.name.endsWith(".png", ignoreCase = true)) {
+            ContentType.Image.PNG
+        } else {
+            ContentType.Image.JPEG
+        },
+    )
 }

@@ -56,6 +56,9 @@ private val DEV_PROBES: List<String> = listOf(
 /** 完全放行的路径（全路径精确匹配）。 */
 private val IGNORE: Set<String> = setOf(
     "/api/sse",
+    // 浏览器原生 EventSource 带不了自定义头，建流请求必然是匿名的；登录态靠它事后补绑，
+    // 所以这里必须放行 —— 未登录时服务端按空操作处理（见 SseController.registry）
+    "/api/sse/registry",
     "/api/login",
     "/api/captcha",
     "/api/verify",
