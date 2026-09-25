@@ -38,12 +38,14 @@ kotlin {
             // DI：Koin（native 产物已核实齐全）；日志与配置为自研，无额外依赖
             implementation(libs.koin.core)
             implementation(libs.kotlinx.datetime)
+            implementation(libs.kaml)
             implementation(libs.okio)
             implementation(libs.sqlx4k.mysql)
 
             implementation(ktorLibs.server.core)
             implementation(ktorLibs.server.cio)
             implementation(ktorLibs.server.contentNegotiation)
+            implementation(ktorLibs.server.cors)
             implementation(ktorLibs.server.statusPages)
             implementation(ktorLibs.server.conditionalHeaders)
             implementation(ktorLibs.serialization.kotlinx.json)

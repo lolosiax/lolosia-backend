@@ -1,6 +1,8 @@
 package moe.lolosia.web
 
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -9,6 +11,7 @@ import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
@@ -18,7 +21,6 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
 import moe.lolosia.web.settings.ENV_SETTINGS_FILE
-import moe.lolosia.web.settings.SETTINGS_FILE
 import moe.lolosia.web.settings.loadAppSettings
 import moe.lolosia.web.configuration.startAppKoin
 import moe.lolosia.web.dto.ApiException
@@ -62,7 +64,8 @@ public fun startServer(
     val cp = installPlatformClasspath()
     val loaded = loadAppSettings(
         classpath = cp,
-        diskPath = envOrNull(ENV_SETTINGS_FILE) ?: SETTINGS_FILE,
+        // KTOR_CONFIG 指了就用它；否则按 SETTINGS_FILES（yaml / yml / json）在启动目录里找第一个存在的
+        diskPath = envOrNull(ENV_SETTINGS_FILE),
         env = ::envOrNull,
     )
     // 命令行参数优先级最高：直接写回配置，保证「生效配置」与真实监听端口一致
@@ -103,6 +106,24 @@ private fun Application.configureApplication(
                 isLenient = true
             }
         )
+    }
+
+    // 跨域：前端 dev server（:5005）与后端（:7129）不同源，浏览器一律先发预检。
+    // 必须早于业务拦截器注册（Call 阶段按注册顺序执行），否则预检拿不到 Allow-Origin。
+    install(CORS) {
+        allowMethod(HttpMethod.Options)
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
+        allowMethod(HttpMethod.Patch)
+        allowHeader(HttpHeaders.Authorization)
+        // allowHeader(ContentType) 会顺带打开 allowNonSimpleContentTypes，
+        // 否则 JSON 请求的预检与实际请求都会被拦成 403
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader("x-upgrade") // SSE 握手自定义头
+        // 前端 getAvatar 显式带 `Cache-Control: no-cache`，它不属于 CORS 简单头，
+        // 不放行的话预检会被拒（403），浏览器侧表现为 `net::ERR_FAILED`
+        allowHeader(HttpHeaders.CacheControl)
+        anyHost()
     }
 
     // 中间件按 @Interceptor(order) 注册。必须晚于 ContentNegotiation：信封层按响应 MIME 判定，
