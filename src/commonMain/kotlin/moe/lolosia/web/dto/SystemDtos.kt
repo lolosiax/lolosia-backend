@@ -19,7 +19,7 @@ import moe.lolosia.web.util.time.toDisplayString
 /**
  * 用户 / 角色 / 绑定相关的接口 DTO（入参与出参）。
  *
- * 约定（**以前端副本 `F:\Develop\Node\lolosia-web` 为准**，见 `doc/开发记忆.md`）：
+ * 约定（**以前端副本 `F:\Develop\Node\lolosia-web` 为准**，见 `AGENTS.md` §8）：
  * - 字段名与分页键沿用前端读的键：用户分页是 `{data, total}`、角色分页是 `{rows, total}`；
  * - `isUse` 线上是 **`1` / `0`**（前端表格 `row.isUse === 1` 判启用、编辑表单用 `1`/`0` 单选）；
  * - **出参一律不含 `password`**（旧版把 bcrypt 哈希回传给了前端，这里不再回传）；

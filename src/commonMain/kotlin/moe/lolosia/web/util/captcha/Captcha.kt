@@ -16,7 +16,7 @@ import kotlin.random.Random
  * 算式、干扰线数量、配色策略（每个字符单独随机色）与旧版一致。
  *
  * 已知取舍：随机源是 [Random.Default]（非密码学强度），与 `BCrypt.gensalt` 同一个待办
- * （见 `doc/开发记忆.md` §8）。
+ * （见 `doc/development-notes.md` §5）。
  *
  * @author 洛洛希雅Lolosia
  */

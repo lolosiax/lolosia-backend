@@ -62,8 +62,7 @@ data class MessageResult(val message: String)
 /**
  * 人机校验入参（前端 `verify(captchaId, captchaValue, userName, email)`）。
  *
- * `userName` / `email` 是注册表单第一步收集的，本轮只校验图形验证码，故不参与判断
- * （见 `doc/开发记忆.md` 决策记录）。
+ * `userName` / `email` 是注册表单第一步收集的，本轮只校验图形验证码，故不参与判断。
  */
 @Serializable
 data class VerifyReq(

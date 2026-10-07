@@ -20,7 +20,7 @@ import kotlin.uuid.Uuid
  * [ctx] 是请求上下文，**首参透传**（与旧族 `ctx: Context` 同位）：语句执行句柄从它取（`ctx.db`），
  * 需要事务时用 `ctx.transaction { }`，本层不持有连接池。
  *
- * 与旧版的**有意差异**（都记在 `doc/开发记忆.md`）：
+ * 与旧版的**有意差异**：
  * - 出参不再带 `password`（旧版把 bcrypt 哈希回传了）；
  * - `delete` 除了软删角色绑定，**同时软删 `sys_user`**（旧版只删绑定，用户仍能登录）；
  * - 时间字段输出 `yyyy-MM-dd HH:mm:ss`（固定 +08:00），与旧版 `@JsonFormat` 一致；
