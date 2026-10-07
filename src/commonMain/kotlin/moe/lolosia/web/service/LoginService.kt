@@ -1,17 +1,7 @@
 package moe.lolosia.web.service
 
-import kotlin.io.encoding.Base64
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.minutes
-import kotlin.uuid.Uuid
 import moe.lolosia.web.database.repository.SysUserRepository
-import moe.lolosia.web.dto.ApiException
-import moe.lolosia.web.dto.CaptchaResult
-import moe.lolosia.web.dto.LoginResult
-import moe.lolosia.web.dto.MessageResult
-import moe.lolosia.web.dto.ROLE_ID_STUDENT
-import moe.lolosia.web.dto.UserCreateReq
-import moe.lolosia.web.dto.UserListRow
+import moe.lolosia.web.dto.*
 import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.captcha.createMathCaptcha
 import moe.lolosia.web.util.crypto.BCrypt
@@ -19,6 +9,10 @@ import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.time.toDisplayString
+import kotlin.io.encoding.Base64
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.uuid.Uuid
 
 /**
  * 登录 / 登出 / 图形验证码 / 注册。
@@ -44,7 +38,7 @@ import moe.lolosia.web.util.time.toDisplayString
  */
 @Injectable
 @Service
-public class LoginService(
+class LoginService(
     private val users: SysUserRepository,
     private val sessions: SessionManager,
     private val cache: CacheManager,
@@ -60,7 +54,7 @@ public class LoginService(
      * 密码语义与旧版一致：库里没密码 **且** 本次也没传密码 → `firstLogin = true` 放行；
      * 库里没密码但传了密码、或密码不匹配 → 「密码不正确」。
      */
-    public suspend fun login(ctx: Context, userName: String, password: String?): LoginResult {
+    suspend fun login(ctx: Context, userName: String, password: String?): LoginResult {
         val user = users.findOneByAccount(ctx.db, userName).getOrThrow()
             ?: throw ApiException(400, "用户不存在！")
 
@@ -93,7 +87,7 @@ public class LoginService(
      * 登出：删掉会话（内存 + 库）。没有会话 id 时与旧版一致地返回提示语，
      * 而不是报错 —— `/api/logout` 在白名单之外，正常都带会话。
      */
-    public suspend fun logout(ctx: Context): MessageResult {
+    suspend fun logout(ctx: Context): MessageResult {
         val sessionId = ctx.sessionId ?: return MessageResult("SessionId哪去了？")
         sessions.remove(sessionId)
         return MessageResult("success")
@@ -104,7 +98,7 @@ public class LoginService(
      *
      * TTL 取 [CAPTCHA_TTL]（旧版用的是缓存组的默认值，对验证码太长；这里显式收紧）。
      */
-    public suspend fun captcha(ctx: Context): CaptchaResult {
+    suspend fun captcha(ctx: Context): CaptchaResult {
         val generated = createMathCaptcha()
         val id = Uuid.random().toString()
         captchaCache.put(id, generated.answer.toString(), CAPTCHA_TTL)
@@ -117,7 +111,7 @@ public class LoginService(
      * 一次性消费：无论对错都把该 token 的答案删掉，避免同一个验证码被拿去爆破。
      * 前端错一次后会拿到「已过期」，点一下图刷新即可。
      */
-    public suspend fun verify(ctx: Context, id: String, code: String): MessageResult {
+    suspend fun verify(ctx: Context, id: String, code: String): MessageResult {
         val expected = captchaCache.get(id) ?: throw ApiException(400, "验证码已过期，请点击图片刷新")
         captchaCache.remove(id)
         if (expected != code.trim()) throw ApiException(400, "验证码错误，请点击图片刷新")
@@ -132,7 +126,7 @@ public class LoginService(
      * 它的 `IllegalArgumentException` / `IllegalStateException` 都是用户输入问题（缺手机邮箱、同名用户已存在），
      * 转成 `400`（旧版是兜底 `500`）。
      */
-    public suspend fun register(
+    suspend fun register(
         ctx: Context,
         userName: String,
         password: String,
@@ -155,11 +149,11 @@ public class LoginService(
         }
     }
 
-    public companion object {
+    companion object {
         /** 图形验证码的缓存分组（与旧版一致）。 */
-        public const val CAPTCHA_PATH: String = "/system/login/captcha"
+        const val CAPTCHA_PATH: String = "/system/login/captcha"
 
         /** 验证码有效期。 */
-        public val CAPTCHA_TTL: Duration = 5.minutes
+        val CAPTCHA_TTL: Duration = 5.minutes
     }
 }

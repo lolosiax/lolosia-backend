@@ -10,7 +10,7 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Table("sys_role")
-public data class SysRoleEntity(
+data class SysRoleEntity(
     @Id
     val id: Long = 0L,
     val roleName: String? = null,

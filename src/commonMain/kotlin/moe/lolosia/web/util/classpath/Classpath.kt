@@ -13,23 +13,23 @@ package moe.lolosia.web.util.classpath
  *
  * @author 洛洛希雅Lolosia
  */
-public interface Classpath {
+interface Classpath {
 
     /** 全部条目路径（`/` 分隔、无前导斜杠），已排序。 */
-    public val entries: List<String>
+    val entries: List<String>
 
     /** 读取条目；不存在返回 `null`。 */
-    public fun read(path: String): ByteArray?
+    fun read(path: String): ByteArray?
 
     /** 列表查询：返回以 [prefix] 开头的条目路径。 */
-    public fun list(prefix: String = ""): List<String>
+    fun list(prefix: String = ""): List<String>
 
     /** 是否存在该条目。 */
-    public fun exists(path: String): Boolean = read(path) != null
+    fun exists(path: String): Boolean = read(path) != null
 
     /** 来源标识（URI scheme）：`file`（磁盘回退）/ `classpath`（内嵌 zip）/ `empty`。 */
-    public val scheme: String
+    val scheme: String
 
     /** 供日志展示的来源描述；默认 `"$scheme://"`，磁盘回退实现会带上具体目录。 */
-    public val origin: String get() = "$scheme://"
+    val origin: String get() = "$scheme://"
 }

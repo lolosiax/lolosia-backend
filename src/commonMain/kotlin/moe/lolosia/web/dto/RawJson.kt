@@ -1,7 +1,7 @@
 package moe.lolosia.web.dto
 
-import io.ktor.http.ContentType
-import io.ktor.http.content.OutgoingContent
+import io.ktor.http.*
+import io.ktor.http.content.*
 
 /**
  * 已经拼好的 JSON 文本响应体，声明自己为 `application/json`。
@@ -12,7 +12,7 @@ import io.ktor.http.content.OutgoingContent
  * @param json 完整的 JSON 文本
  * @author 洛洛希雅Lolosia
  */
-public class RawJson(public val json: String) : OutgoingContent.ByteArrayContent() {
+class RawJson(val json: String) : OutgoingContent.ByteArrayContent() {
     override val contentType: ContentType = ContentType.Application.Json
 
     override fun bytes(): ByteArray = json.encodeToByteArray()

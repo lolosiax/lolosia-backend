@@ -1,7 +1,7 @@
 package moe.lolosia.web.configuration
 
-import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.database.Database
+import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.classpath.Classpath
 import org.koin.core.Koin
 import org.koin.core.context.startKoin
@@ -20,7 +20,7 @@ import org.koin.dsl.module
  *
  * @author 洛洛希雅Lolosia
  */
-public fun appModule(config: AppSettings, cp: Classpath): Module = module {
+fun appModule(config: AppSettings, cp: Classpath): Module = module {
     single<AppSettings> { config }
     single<Classpath> { cp }
     single { Database(config.datasource) }
@@ -30,11 +30,11 @@ public fun appModule(config: AppSettings, cp: Classpath): Module = module {
  * 手写绑定的逃生口：不能用 `@Service` 注解的服务（需要外部实例、条件绑定等）在此手动注册。
  * KSP 按 `@Service` 生成的绑定是 [moe.lolosia.web.generated.serviceModule]，与本函数同名但不同包。
  */
-public fun serviceModule() = module {
+fun serviceModule() = module {
 }
 
 /** 启动容器。[platformModules] 由 [moe.lolosia.web.main] 传入（sqlx4k 生成的仓库绑定、`@Service` 生成的服务绑定与平台绑定）。 */
-public fun startAppKoin(
+fun startAppKoin(
     config: AppSettings,
     cp: Classpath,
     platformModules: List<Module> = emptyList(),
@@ -43,4 +43,4 @@ public fun startAppKoin(
 }.koin
 
 /** 平台特有的 Koin 绑定（`actual` 见各目标源集，如 native 绑 `PosixFileStore`）。 */
-public expect fun platformModule(): Module
+expect fun platformModule(): Module

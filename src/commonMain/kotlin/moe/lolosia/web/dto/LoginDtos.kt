@@ -19,7 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** 登录入参（前端 `login(subForm)` 传的是整个表单，多余字段被 `ignoreUnknownKeys` 忽略）。 */
 @Serializable
-public data class LoginReq(
+data class LoginReq(
     val userName: String,
     val password: String? = null,
 )
@@ -31,7 +31,7 @@ public data class LoginReq(
  * `isUse` 是线上的 `1` / `0`，见 [UserRow]。
  */
 @Serializable
-public data class LoginResult(
+data class LoginResult(
     val id: String,
     val userName: String,
     val realName: String? = null,
@@ -48,7 +48,7 @@ public data class LoginResult(
 
 /** 图形验证码出参（前端 `captcha()` 用 `image` 拼 data URI、`id` 原样回传）。 */
 @Serializable
-public data class CaptchaResult(
+data class CaptchaResult(
     /** base64 的 PNG（**不含** `data:image/png;base64,` 前缀，前端自己拼）。 */
     val image: String,
     /** 随机 token，答案按它落在 `sys_cache` 里。 */
@@ -57,7 +57,7 @@ public data class CaptchaResult(
 
 /** 只需回一句状态文案的接口出参（`/api/logout`、`/api/verify`）。 */
 @Serializable
-public data class MessageResult(val message: String)
+data class MessageResult(val message: String)
 
 /**
  * 人机校验入参（前端 `verify(captchaId, captchaValue, userName, email)`）。
@@ -66,7 +66,7 @@ public data class MessageResult(val message: String)
  * （见 `doc/开发记忆.md` 决策记录）。
  */
 @Serializable
-public data class VerifyReq(
+data class VerifyReq(
     @Serializable(with = CaptchaIdSerializer::class) val id: String,
     val code: String,
     val userName: String? = null,
@@ -80,7 +80,7 @@ public data class VerifyReq(
  * 前端不传 `phone`，但保留字段以便非前端调用方用手机号注册。
  */
 @Serializable
-public data class RegisterReq(
+data class RegisterReq(
     val userName: String,
     val password: String,
     val email: String? = null,
@@ -92,7 +92,7 @@ public data class RegisterReq(
  * 验证码 id 的反序列化：前端 TS 里把它标注成 `number`（未加载验证码时是 `0`），
  * 实际是服务端发的随机 token → 数字、字符串都收下，统一当字符串用。
  */
-public object CaptchaIdSerializer : KSerializer<String> {
+object CaptchaIdSerializer : KSerializer<String> {
     override val descriptor: SerialDescriptor =
         PrimitiveSerialDescriptor("moe.lolosia.web.dto.CaptchaId", PrimitiveKind.STRING)
 

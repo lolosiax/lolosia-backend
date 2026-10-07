@@ -1,6 +1,6 @@
 package moe.lolosia.web.util.session
 
-import io.ktor.util.AttributeKey
+import io.ktor.util.*
 
 /** `call.attributes` 里存放 [Context] 的键。 */
-public val ContextKey: AttributeKey<Context> = AttributeKey("ctx")
+val ContextKey: AttributeKey<Context> = AttributeKey("ctx")

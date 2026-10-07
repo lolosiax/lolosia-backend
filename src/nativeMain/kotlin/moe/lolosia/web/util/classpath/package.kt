@@ -4,14 +4,14 @@ import kotlinx.cinterop.toKString
 import platform.posix.getenv
 
 /** 开发期回退目录的环境变量名。 */
-public const val ENV_CLASSPATH_DIR: String = "KTOR_CLASSPATH_DIR"
+const val ENV_CLASSPATH_DIR: String = "KTOR_CLASSPATH_DIR"
 
 /**
  * 按平台装载 classpath 并安装到 [ClasspathHolder]，由 [moe.lolosia.web.main] 启动时调用一次。
  *
  * 设置了 [ENV_CLASSPATH_DIR] 时读磁盘目录，否则读可执行文件内嵌的 `classpath.zip`。
  */
-public actual fun installPlatformClasspath(): Classpath {
+actual fun installPlatformClasspath(): Classpath {
     val diskRoot = getenv(ENV_CLASSPATH_DIR)?.toKString()
     val installed: Classpath = if (!diskRoot.isNullOrBlank()) {
         DiskClasspath(diskRoot)

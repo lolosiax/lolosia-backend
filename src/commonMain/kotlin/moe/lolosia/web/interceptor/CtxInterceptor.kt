@@ -1,8 +1,6 @@
 package moe.lolosia.web.interceptor
 
-import io.ktor.server.application.Application
-import io.ktor.server.application.ApplicationCallPipeline
-import io.ktor.server.application.call
+import io.ktor.server.application.*
 import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
@@ -18,7 +16,7 @@ import moe.lolosia.web.util.session.ContextKey
  * @author 洛洛希雅Lolosia
  */
 @Interceptor(-5)
-public fun Application.installCtxInterceptor(
+fun Application.installCtxInterceptor(
     db: Database,
     users: SysUserRepository,
     bindings: ViewUserRoleRepository,

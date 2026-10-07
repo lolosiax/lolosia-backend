@@ -14,7 +14,7 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Table("sys_cache")
-public data class SysCacheEntity(
+data class SysCacheEntity(
     @Id
     val id: Long = 0L,
     val path: String,

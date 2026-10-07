@@ -11,16 +11,16 @@ import kotlinx.serialization.Serializable
  * @author 洛洛希雅Lolosia
  */
 @Serializable
-public data class ApiResult<T>(
+data class ApiResult<T>(
     val code: Int = 200,
     val msg: String = "success",
     val data: T? = null,
 ) {
-    public companion object {
-        public fun <T> ok(data: T? = null, msg: String = "success"): ApiResult<T> =
+    companion object {
+        fun <T> ok(data: T? = null, msg: String = "success"): ApiResult<T> =
             ApiResult(200, msg, data)
 
-        public fun <T> err(code: Int, msg: String): ApiResult<T> = ApiResult(code, msg, null)
+        fun <T> err(code: Int, msg: String): ApiResult<T> = ApiResult(code, msg, null)
     }
 }
 
@@ -30,4 +30,4 @@ public data class ApiResult<T>(
  *
  * 鉴权失败用 `401`：前端 `request.ts` 对 `401/403` 会清登录态并跳回登录页。
  */
-public class ApiException(public val status: Int, message: String) : RuntimeException(message)
+class ApiException(val status: Int, message: String) : RuntimeException(message)

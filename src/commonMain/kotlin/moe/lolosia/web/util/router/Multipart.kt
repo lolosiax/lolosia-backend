@@ -14,7 +14,7 @@ private const val LF: Byte = 10
 private val CRLF = byteArrayOf(CR, LF)
 
 /** 从 `multipart/form-data; boundary=xxx` 里取出 boundary（兼容带引号写法）。 */
-public fun parseMultipartBoundary(contentType: String): String? {
+fun parseMultipartBoundary(contentType: String): String? {
     val key = "boundary="
     val idx = contentType.indexOf(key, ignoreCase = true)
     if (idx < 0) return null
@@ -30,7 +30,7 @@ public fun parseMultipartBoundary(contentType: String): String? {
 }
 
 /** 解析 multipart 请求体。 */
-public fun parseMultipartBody(body: ByteArray, boundary: String): FormData {
+fun parseMultipartBody(body: ByteArray, boundary: String): FormData {
     val fields = mutableMapOf<String, String>()
     val files = mutableListOf<UploadedFile>()
 

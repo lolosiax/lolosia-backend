@@ -1,7 +1,7 @@
 package moe.lolosia.web.util.captcha
 
-import kotlin.random.Random
 import moe.lolosia.web.util.image.RgbCanvas
+import kotlin.random.Random
 
 /**
  * 图形验证码（对等复刻旧 JVM 版的 hutool `LineCaptcha` + `MathGenerator`）。
@@ -20,13 +20,13 @@ import moe.lolosia.web.util.image.RgbCanvas
  *
  * @author 洛洛希雅Lolosia
  */
-public class MathCaptcha(
+class MathCaptcha(
     /** 图上画出来的算式，如 `3 +5 =`（数字按 hutool 的做法用空格补到 2 位）。 */
-    public val expression: String,
+    val expression: String,
     /** 正确答案（用户应该在输入框里填这个）。 */
-    public val answer: Int,
+    val answer: Int,
     /** PNG 字节（尚未 base64）。 */
-    public val png: ByteArray,
+    val png: ByteArray,
 )
 
 /**
@@ -35,7 +35,7 @@ public class MathCaptcha(
  * 尺寸与干扰线数量沿用旧版 `CaptchaUtil.createLineCaptcha(100, 40)`（= 150 条线），
  * 背景沿用旧版显式设置的黑色。
  */
-public fun createMathCaptcha(
+fun createMathCaptcha(
     width: Int = DEFAULT_WIDTH,
     height: Int = DEFAULT_HEIGHT,
     interfereCount: Int = INTERFERE_LINES,
@@ -50,13 +50,13 @@ public fun createMathCaptcha(
 }
 
 /** 宽度（旧版 100）。 */
-public const val DEFAULT_WIDTH: Int = 100
+const val DEFAULT_WIDTH: Int = 100
 
 /** 高度（旧版 40）。 */
-public const val DEFAULT_HEIGHT: Int = 40
+const val DEFAULT_HEIGHT: Int = 40
 
 /** 干扰线条数（hutool `LineCaptcha(width, height)` 默认 150）。 */
-public const val INTERFERE_LINES: Int = 150
+const val INTERFERE_LINES: Int = 150
 
 /** 背景色（旧版 `captcha.setBackground(Color.BLACK)`）。 */
 private const val BACKGROUND: Int = 0x000000

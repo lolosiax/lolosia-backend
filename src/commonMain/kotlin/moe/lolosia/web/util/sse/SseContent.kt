@@ -1,12 +1,8 @@
 package moe.lolosia.web.util.sse
 
-import io.ktor.http.ContentType
-import io.ktor.http.Headers
-import io.ktor.http.HttpHeaders
-import io.ktor.http.content.OutgoingContent
-import io.ktor.http.headersOf
-import io.ktor.utils.io.ByteWriteChannel
-import io.ktor.utils.io.writeFully
+import io.ktor.http.*
+import io.ktor.http.content.*
+import io.ktor.utils.io.*
 
 /**
  * 把 [KtorEventSource] 的帧队列写成 `text/event-stream` 的响应体。
@@ -18,7 +14,7 @@ import io.ktor.utils.io.writeFully
  *
  * @author 洛洛希雅Lolosia
  */
-public class SseContent(private val source: KtorEventSource) : OutgoingContent.WriteChannelContent() {
+class SseContent(private val source: KtorEventSource) : OutgoingContent.WriteChannelContent() {
 
     override val contentType: ContentType = ContentType.Text.EventStream
 
@@ -49,9 +45,9 @@ public class SseContent(private val source: KtorEventSource) : OutgoingContent.W
         channel.flush()
     }
 
-    public companion object {
+    companion object {
         /** 心跳间隔：空闲这么久就发一个注释帧。 */
-        public const val HEARTBEAT_INTERVAL_MS: Long = 5_000L
+        const val HEARTBEAT_INTERVAL_MS: Long = 5_000L
 
         /** SSE 注释帧（以 `:` 开头，客户端忽略）。 */
         private const val HEARTBEAT_FRAME: String = ": heartbeat\n\n"

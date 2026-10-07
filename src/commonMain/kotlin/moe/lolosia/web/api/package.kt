@@ -1,51 +1,19 @@
 package moe.lolosia.web.api
 
-import io.ktor.client.HttpClient
-import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
-import io.ktor.client.plugins.websocket.webSocketSession
-import io.ktor.client.request.accept
-import io.ktor.client.request.header
-import io.ktor.client.request.parameter
-import io.ktor.client.request.request
-import io.ktor.client.request.setBody
-import io.ktor.client.request.url
-import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsChannel
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
-import io.ktor.http.content.TextContent
-import io.ktor.http.isSuccess
-import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.readAvailable
-import io.ktor.websocket.Frame
-import io.ktor.websocket.close
+import io.ktor.client.*
+import io.ktor.client.plugins.websocket.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.http.content.*
+import io.ktor.utils.io.*
+import io.ktor.websocket.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.mapNotNull
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.takeWhile
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.*
 import kotlinx.serialization.KSerializer
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.*
 import kotlinx.serialization.serializer
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.ApiResult
@@ -66,7 +34,7 @@ private val json = Json {
 }
 
 /** 请求默认超时。 */
-public val DEFAULT_TIMEOUT: Duration = 14.seconds
+val DEFAULT_TIMEOUT: Duration = 14.seconds
 
 /** 从 [baseUrl] 到 [url] 的整体重试上限。 */
 private const val MAX_RETRY: Int = 5
@@ -107,7 +75,7 @@ internal val apiClient: HttpClient by lazy { createApiClient() }
  * @param timeout 请求超时
  * @param noLog 为 `true` 时不输出请求与响应日志
  */
-public suspend inline fun <reified T> post(
+suspend inline fun <reified T> post(
     baseUrl: String,
     url: String,
     body: JsonElement? = null,
@@ -136,7 +104,7 @@ public suspend inline fun <reified T> post(
  * @param timeout 请求超时
  * @param noLog 为 `true` 时不输出请求与响应日志
  */
-public suspend inline fun <reified T> put(
+suspend inline fun <reified T> put(
     baseUrl: String,
     url: String,
     body: JsonElement? = null,
@@ -165,7 +133,7 @@ public suspend inline fun <reified T> put(
  * @param timeout 请求超时
  * @param noLog 为 `true` 时不输出请求与响应日志
  */
-public suspend inline fun <reified T> get(
+suspend inline fun <reified T> get(
     baseUrl: String,
     url: String,
     query: Map<String, List<String>>? = null,
@@ -305,7 +273,7 @@ private suspend fun send(
 }
 
 /** 把响应体读成字节块流。 */
-public suspend fun HttpResponse.bodyAsFlow(): Flow<ByteArray> = bodyAsChannel().asFlow()
+suspend fun HttpResponse.bodyAsFlow(): Flow<ByteArray> = bodyAsChannel().asFlow()
 
 private fun ByteReadChannel.asFlow(): Flow<ByteArray> = flow {
     val buffer = ByteArray(STREAM_BUFFER_SIZE)
@@ -327,7 +295,7 @@ private fun ByteReadChannel.asFlow(): Flow<ByteArray> = flow {
  * @param noLog 为 `true` 时不输出请求与响应日志
  * @return `data` 字段的完整文本
  */
-public suspend fun streamingRequest(
+suspend fun streamingRequest(
     event: EventSource,
     baseUrl: String,
     url: String,
@@ -358,7 +326,7 @@ public suspend fun streamingRequest(
  * @param sessionId 显式指定的会话 id，优先于 [ctx]
  * @param noLog 为 `true` 时不输出请求与响应日志
  */
-public suspend fun sse(
+suspend fun sse(
     baseUrl: String,
     url: String,
     body: JsonElement? = null,
@@ -444,7 +412,7 @@ public suspend fun sse(
  * @param sessionId 显式指定的会话 id，优先于 [ctx]
  * @param noLog 为 `true` 时不输出请求与响应日志
  */
-public suspend fun ws(
+suspend fun ws(
     baseUrl: String,
     url: String,
     body: JsonElement? = null,
@@ -502,7 +470,7 @@ private fun decodeWsFrame(text: String): Pair<String, JsonElement?> {
  *
  * @throws ApiException 响应不是 JSON 对象，或 `success` 不为 `true`；错误详情取 `errors` 字段
  */
-public fun JsonElement.requireSuccess(): JsonObject {
+fun JsonElement.requireSuccess(): JsonObject {
     val obj = this as? JsonObject ?: throw ApiException(502, "响应不是 JSON 对象：${toString().s200()}")
     if ((obj["success"] as? JsonPrimitive)?.contentOrNull != "true") {
         throw ApiException(502, "接口返回失败：${(obj["errors"] ?: obj).toString().s200()}")
@@ -511,19 +479,19 @@ public fun JsonElement.requireSuccess(): JsonObject {
 }
 
 /** 一次流式会话的产物：下行事件流 + 远端会话 id + 承载协程 Job。 */
-public interface SSEResult {
+interface SSEResult {
     /** 下行事件流，元素为「事件名 to 数据」。 */
-    public val flow: Flow<Pair<String, JsonElement?>>
+    val flow: Flow<Pair<String, JsonElement?>>
 
     /** 远端下发的会话 id；[raw] 直连时为 `null`。 */
-    public val id: String?
+    val id: String?
 
     /** 承载该连接的 Job。 */
-    public val job: Job
+    val job: Job
 }
 
 /** [sse] 路径的会话产物。 */
-public class SSESession(
+class SSESession(
     override val flow: Flow<Pair<String, JsonElement?>>,
     override val id: String?,
     override val job: Job,
@@ -535,7 +503,7 @@ public class SSESession(
  * 帧格式与 [ws] 一致：`{"event": "<name>", "data": {...}}`。
  * 流结束（正常结束 / 收到 close / 异常）即视为连接关闭。
  */
-public class WSConnection(
+class WSConnection(
     private val session: DefaultClientWebSocketSession,
     rawFlow: Flow<Pair<String, JsonElement?>>,
     override val job: Job,
@@ -675,17 +643,17 @@ private const val LF: Byte = 10
  * @param warnMessage 记日志时的前缀
  * @param logger 日志出口
  */
-public class RetryScope(
-    public val maxRetry: Int = MAX_RETRY,
+class RetryScope(
+    val maxRetry: Int = MAX_RETRY,
     private val warnMessage: String = "发生未知异常",
     private val logger: Logger = Log.of("Retry"),
 ) {
     private var retryCount: Int = 0
-    public var exception: Throwable? = null
+    var exception: Throwable? = null
         private set
 
     /** 执行 [block]；成功则清空计数，失败则累计并在超限时抛出。 */
-    public fun <R> scope(block: () -> R): R? {
+    fun <R> scope(block: () -> R): R? {
         try {
             val result = block()
             clearCount()
@@ -697,13 +665,13 @@ public class RetryScope(
     }
 
     /** 清空失败计数与最后一次异常。 */
-    public fun clearCount() {
+    fun clearCount() {
         retryCount = 0
         exception = null
     }
 
     /** 记录一次失败；超过 [maxRetry] 次则把异常抛出。 */
-    public fun handleException(e: Throwable) {
+    fun handleException(e: Throwable) {
         logger.warn(e) { warnMessage }
         if (retryCount > maxRetry) throw e
         retryCount++
@@ -711,5 +679,5 @@ public class RetryScope(
     }
 
     /** 当前连续失败次数。 */
-    public val count: Int get() = retryCount
+    val count: Int get() = retryCount
 }

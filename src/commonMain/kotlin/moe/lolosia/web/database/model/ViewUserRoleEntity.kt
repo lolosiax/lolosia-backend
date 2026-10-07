@@ -12,7 +12,7 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Table("view_user_role")
-public data class ViewUserRoleEntity(
+data class ViewUserRoleEntity(
     @Id
     val id: Long = 0L,
     val userId: String,

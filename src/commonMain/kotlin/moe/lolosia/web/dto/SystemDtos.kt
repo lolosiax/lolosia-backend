@@ -31,17 +31,17 @@ import moe.lolosia.web.util.time.toDisplayString
  */
 
 /** 查不到角色绑定时 `roleId` 的哨兵值（旧版沿用）。 */
-public const val ROLE_ID_UNKNOWN: Long = 0L
+const val ROLE_ID_UNKNOWN: Long = 0L
 
 /** 用户没有任何角色绑定时 `getUserInfo` 给出的默认角色 id（旧版沿用，即「教师」）。 */
-public const val ROLE_ID_DEFAULT: Long = 3L
+const val ROLE_ID_DEFAULT: Long = 3L
 
 /** 注册（`/api/register`）时给新用户的角色 id（旧版写死 4，即「学生」，见 `sql/sys_role.sql`）。 */
-public const val ROLE_ID_STUDENT: Long = 4L
+const val ROLE_ID_STUDENT: Long = 4L
 
 /** `sys_user` 的安全视图（不含 `password`）。 */
 @Serializable
-public data class UserRow(
+data class UserRow(
     val id: String,
     val userName: String,
     val realName: String? = null,
@@ -63,7 +63,7 @@ public data class UserRow(
  * 旧版两个键都给了前端，故都保留。
  */
 @Serializable
-public data class UserListRow(
+data class UserListRow(
     val id: String,
     val userId: String,
     val userName: String? = null,
@@ -82,14 +82,14 @@ public data class UserListRow(
 
 /** 分页用户列表；键名 `data` / `total` 是前端 `userManagement/index.vue` 读的（`data.data`）。 */
 @Serializable
-public data class UserListResult(
+data class UserListResult(
     val data: List<UserListRow>,
     val total: Long,
 )
 
 /** 单个用户详情：`sys_user` 字段 + 其角色 id（旧版是扁平 Bundle）。 */
 @Serializable
-public data class UserInfoRow(
+data class UserInfoRow(
     val id: String,
     val userName: String,
     val realName: String? = null,
@@ -104,7 +104,7 @@ public data class UserInfoRow(
 
 /** `sys_role` 一行；`menuId` / `menuTitle` 是已弃用的菜单字段，仅为前端兼容保留空数组。 */
 @Serializable
-public data class RoleRow(
+data class RoleRow(
     val id: Long,
     val roleName: String? = null,
     val type: String? = null,
@@ -119,14 +119,14 @@ public data class RoleRow(
 
 /** 分页角色列表（键名 `rows` / `total`，与用户列表的 `data` 不同名，属前端历史遗留）。 */
 @Serializable
-public data class RolePageResult(
+data class RolePageResult(
     val rows: List<RoleRow>,
     val total: Long,
 )
 
 /** 用户-角色绑定视图的一行；`roleType` 与 `type` 同值（旧版两个键都给）。 */
 @Serializable
-public data class UserRoleRow(
+data class UserRoleRow(
     val id: Long = 0L,
     val userId: String,
     val userName: String? = null,
@@ -144,17 +144,17 @@ public data class UserRoleRow(
 
 /** 只改数据、不返回资源的接口统一回它（旧版是 `data: null`，前端只取 `msg`）。 */
 @Serializable
-public class EmptyResult
+class EmptyResult
 
 /** 新建资源后回传主键（旧版 `/user/create` 的 `{id}`）。 */
 @Serializable
-public data class IdRow(val id: String)
+data class IdRow(val id: String)
 
 // ===== 入参 =====
 
 /** 新建用户入参。`userName` 缺席时取手机号或邮箱；`roleId` 必填（旧版直接解引用）。 */
 @Serializable
-public data class UserCreateReq(
+data class UserCreateReq(
     val userName: String? = null,
     val password: String? = null,
     val realName: String? = null,
@@ -166,7 +166,7 @@ public data class UserCreateReq(
 
 /** 修改用户入参：**字段为 `null` = 不修改**；`password` 为空串 / `null` = 不改密码。 */
 @Serializable
-public data class UserUpdateReq(
+data class UserUpdateReq(
     val id: String,
     val userName: String? = null,
     val password: String? = null,
@@ -178,31 +178,31 @@ public data class UserUpdateReq(
 )
 
 @Serializable
-public data class UserListReq(
+data class UserListReq(
     val pageNo: Int? = null,
     val pageSize: Int? = null,
     val keys: String? = null,
 )
 
 @Serializable
-public data class SearchReq(val keys: String? = null)
+data class SearchReq(val keys: String? = null)
 
 /** 按 id 批量取用户（`/user/get`）；数组里允许有 `null`（旧版如此）。 */
 @Serializable
-public data class IdListReq(val idList: List<String?> = emptyList())
+data class IdListReq(val idList: List<String?> = emptyList())
 
 /**
  * 批量删除（`/user/delete`）。前端两种形状都发过：单行删除是数组 `["<uuid>"]`，
  * 多选删除是逗号串 `"<uuid>,<uuid>"`，这里统一收成 id 列表。
  */
 @Serializable
-public data class IdsReq(
+data class IdsReq(
     @Serializable(with = IdsSerializer::class)
     val ids: List<String> = emptyList(),
 )
 
 /** 数组 / 逗号串 / 单条字符串都读成 id 列表（写法参考 [moe.lolosia.web.dto.CaptchaIdSerializer]）。 */
-public object IdsSerializer : KSerializer<List<String>> {
+object IdsSerializer : KSerializer<List<String>> {
     private val delegate: KSerializer<List<String>> = ListSerializer(String.serializer())
 
     override val descriptor: SerialDescriptor = delegate.descriptor
@@ -226,43 +226,43 @@ public object IdsSerializer : KSerializer<List<String>> {
 }
 
 @Serializable
-public data class UserIdReq(val userId: String)
+data class UserIdReq(val userId: String)
 
 /** 改密码；`id` 缺席时改的是登录人自己的密码。 */
 @Serializable
-public data class UpdatePasswordReq(
+data class UpdatePasswordReq(
     val id: String? = null,
     val origin: String,
     val target: String,
 )
 
 @Serializable
-public data class RolePageReq(
+data class RolePageReq(
     val pageNo: Int? = null,
     val pageSize: Int? = null,
     val roleName: String? = null,
 )
 
 @Serializable
-public data class RoleCreateReq(
+data class RoleCreateReq(
     val roleName: String? = null,
     val type: String? = null,
 )
 
 /** 修改角色入参：**字段为 `null` = 不修改**。 */
 @Serializable
-public data class RoleUpdateReq(
+data class RoleUpdateReq(
     val id: Long,
     val roleName: String? = null,
     val type: String? = null,
 )
 
 @Serializable
-public data class RoleDestroyReq(val id: Long)
+data class RoleDestroyReq(val id: Long)
 
 // ===== 实体 → DTO =====
 
-public fun SysUserEntity.toRow(): UserRow = UserRow(
+fun SysUserEntity.toRow(): UserRow = UserRow(
     id = id,
     userName = userName,
     realName = realName,
@@ -277,7 +277,7 @@ public fun SysUserEntity.toRow(): UserRow = UserRow(
     deleted = deleted,
 )
 
-public fun SysUserEntity.toInfoRow(roleId: Long): UserInfoRow = UserInfoRow(
+fun SysUserEntity.toInfoRow(roleId: Long): UserInfoRow = UserInfoRow(
     id = id,
     userName = userName,
     realName = realName,
@@ -290,7 +290,7 @@ public fun SysUserEntity.toInfoRow(roleId: Long): UserInfoRow = UserInfoRow(
     roleId = roleId,
 )
 
-public fun SysRoleEntity.toRow(): RoleRow = RoleRow(
+fun SysRoleEntity.toRow(): RoleRow = RoleRow(
     id = id,
     roleName = roleName,
     type = type,
@@ -302,7 +302,7 @@ public fun SysRoleEntity.toRow(): RoleRow = RoleRow(
 )
 
 /** 视图行 + 用户行合并成列表行；[user] 为 `null` 表示账户已不存在（旧版同此兜底）。 */
-public fun ViewUserRoleEntity.toListRow(user: SysUserEntity?): UserListRow = UserListRow(
+fun ViewUserRoleEntity.toListRow(user: SysUserEntity?): UserListRow = UserListRow(
     id = user?.id ?: userId,
     userId = userId,
     userName = user?.userName ?: userName,
@@ -319,7 +319,7 @@ public fun ViewUserRoleEntity.toListRow(user: SysUserEntity?): UserListRow = Use
     updatedAt = (user?.updatedAt ?: updatedAt)?.toDisplayString(),
 )
 
-public fun ViewUserRoleEntity.toUserRoleRow(): UserRoleRow = UserRoleRow(
+fun ViewUserRoleEntity.toUserRoleRow(): UserRoleRow = UserRoleRow(
     id = id,
     userId = userId,
     userName = userName,

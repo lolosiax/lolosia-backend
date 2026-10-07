@@ -17,9 +17,9 @@ import moe.lolosia.web.util.router.Injectable
  * @author 洛洛希雅Lolosia
  */
 @Injectable
-public class Database(config: AppSettings.DatasourceConfig) {
+class Database(config: AppSettings.DatasourceConfig) {
 
-    public val driver: IMySQL = mySQL(
+    val driver: IMySQL = mySQL(
         url = config.url,
         username = config.username,
         password = config.password,
@@ -27,7 +27,7 @@ public class Database(config: AppSettings.DatasourceConfig) {
     )
 
     /** 连通性探测（运维 / 冒烟用）：返回「服务端版本 / 当前库名 / 会话时区 / 库端 now()」。 */
-    public suspend fun ping(): String {
+    suspend fun ping(): String {
         val rs = driver
             .fetchAll(
                 "select version() as version, database() as db, @@session.time_zone as tz, now() as db_now"

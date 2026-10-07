@@ -343,7 +343,7 @@ private val INDEX_64 = byteArrayOf(
  *
  * @author 洛洛希雅Lolosia
  */
-public object BCrypt {
+object BCrypt {
 
     /**
      * 用给定成本生成 salt（形如 `$2a$10$...` 的 29 字符串）。
@@ -353,7 +353,7 @@ public object BCrypt {
      * @param rounds 成本的 log2（有效范围 4..30，默认 10）
      * @throws IllegalArgumentException 当 `rounds > 30` 时
      */
-    public fun gensalt(rounds: Int = 10): String {
+    fun gensalt(rounds: Int = 10): String {
         val rs = StringBuilder()
         val rnd = ByteArray(BCRYPT_SALT_LEN)
 
@@ -378,7 +378,7 @@ public object BCrypt {
      * @param salt 与之一起哈希的 salt（可由 [gensalt] 生成）
      * @return 形如 `$2a$10$...` 的哈希串
      */
-    public fun hashpw(password: String, salt: String): String {
+    fun hashpw(password: String, salt: String): String {
         var minor = '\u0000'
         val off: Int
         val rs = StringBuilder()
@@ -434,7 +434,7 @@ public object BCrypt {
      * @param hashed 先前生成的哈希串
      * @return 匹配返回 true，否则 false
      */
-    public fun checkpw(plaintext: String, hashed: String): Boolean {
+    fun checkpw(plaintext: String, hashed: String): Boolean {
         val tryPw = try {
             hashpw(plaintext, hashed)
         } catch (e: Exception) {

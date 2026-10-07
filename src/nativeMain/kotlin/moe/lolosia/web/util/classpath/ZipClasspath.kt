@@ -15,7 +15,7 @@ import kotlinx.cinterop.reinterpret
  *
  * @author 洛洛希雅Lolosia
  */
-public class ZipClasspath private constructor(private val data: ByteArray) : Classpath {
+class ZipClasspath private constructor(private val data: ByteArray) : Classpath {
 
     private class Entry(
         val method: Int,
@@ -104,7 +104,7 @@ public class ZipClasspath private constructor(private val data: ByteArray) : Cla
     private fun u32(o: Int): Int =
         u8(o) or (u8(o + 1) shl 8) or (u8(o + 2) shl 16) or (u8(o + 3) shl 24)
 
-    public companion object {
+    companion object {
         private const val SIG_LOCAL_FILE_HEADER = 0x04034b50
         private const val SIG_CENTRAL_FILE_HEADER = 0x02014b50
         private const val SIG_END_OF_CENTRAL_DIRECTORY = 0x06054b50
@@ -113,10 +113,10 @@ public class ZipClasspath private constructor(private val data: ByteArray) : Cla
         private const val METHOD_DEFLATED = 8
 
         /** 从可执行文件映像内的 zip 打开（会拷贝一次映像数据）。 */
-        public fun open(image: COpaquePointer, size: Int): ZipClasspath =
+        fun open(image: COpaquePointer, size: Int): ZipClasspath =
             ZipClasspath(image.reinterpret<ByteVar>().readBytes(size))
 
         /** 从内存字节打开。 */
-        public fun open(bytes: ByteArray): ZipClasspath = ZipClasspath(bytes)
+        fun open(bytes: ByteArray): ZipClasspath = ZipClasspath(bytes)
     }
 }

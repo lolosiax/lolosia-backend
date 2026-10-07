@@ -10,4 +10,4 @@ import platform.posix.getenv
  * @author 洛洛希雅Lolosia
  */
 @OptIn(ExperimentalForeignApi::class)
-public actual fun envOrNull(name: String): String? = getenv(name)?.toKString()
+actual fun envOrNull(name: String): String? = getenv(name)?.toKString()

@@ -1,6 +1,6 @@
 package moe.lolosia.web.interceptor
 
-import io.ktor.util.AttributeKey
+import io.ktor.util.*
 
 /**
  * 打过此标记的请求，其响应不自动加信封（如 SSE 握手要返回裸的 `{data, code}`）。
@@ -8,7 +8,7 @@ import io.ktor.util.AttributeKey
  * 信封规则见 [installEnvelopeInterceptor]。
  * @author 洛洛希雅Lolosia
  */
-public val EnvelopeSkipKey: AttributeKey<Unit> = AttributeKey("envelope-skip")
+val EnvelopeSkipKey: AttributeKey<Unit> = AttributeKey("envelope-skip")
 
 
 /**
@@ -22,4 +22,4 @@ public val EnvelopeSkipKey: AttributeKey<Unit> = AttributeKey("envelope-skip")
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.BINARY)
-public annotation class Interceptor(val order: Int)
+annotation class Interceptor(val order: Int)

@@ -17,24 +17,24 @@ import kotlin.time.Instant
  */
 @Repository
 @Injectable
-public interface SysUserRepository : CrudRepository<SysUserEntity> {
+interface SysUserRepository : CrudRepository<SysUserEntity> {
 
     @Query("select * from sys_user where id = :id and deleted = 0")
-    public suspend fun findOneById(context: QueryExecutor, id: String): Result<SysUserEntity?>
+    suspend fun findOneById(context: QueryExecutor, id: String): Result<SysUserEntity?>
 
     @Query("select * from sys_user where user_name = :userName and deleted = 0")
-    public suspend fun findOneByUserName(context: QueryExecutor, userName: String): Result<SysUserEntity?>
+    suspend fun findOneByUserName(context: QueryExecutor, userName: String): Result<SysUserEntity?>
 
     /** 登录用：账号既可以是 `user_name` 也可以是 `phone`（旧版 `or { userName.eq … phone.eq … }`）。 */
     @Query("select * from sys_user where (user_name = :account or phone = :account) and deleted = 0 limit 1")
-    public suspend fun findOneByAccount(context: QueryExecutor, account: String): Result<SysUserEntity?>
+    suspend fun findOneByAccount(context: QueryExecutor, account: String): Result<SysUserEntity?>
 
     /** 关键字模糊搜索（用户名 / 真名 / 手机 / 邮箱），供「新建用户查重」与「搜索用户」共用。 */
     @Query(
         "select * from sys_user where deleted = 0 and (user_name like :keys or real_name like :keys " +
             "or phone like :keys or email like :keys) order by id asc limit :limit"
     )
-    public suspend fun findAllByKeys(context: QueryExecutor, keys: String, limit: Int): Result<List<SysUserEntity>>
+    suspend fun findAllByKeys(context: QueryExecutor, keys: String, limit: Int): Result<List<SysUserEntity>>
 
     /**
      * 用户名 / 手机 / 邮箱是否已被占用（三者 OR）。
@@ -45,7 +45,7 @@ public interface SysUserRepository : CrudRepository<SysUserEntity> {
         "select count(*) from sys_user where deleted = 0 and (user_name = :userName " +
             "or (:phone is not null and phone = :phone) or (:email is not null and email = :email))"
     )
-    public suspend fun countByUserNameOrPhoneOrEmail(
+    suspend fun countByUserNameOrPhoneOrEmail(
         context: QueryExecutor,
         userName: String,
         phone: String?,
@@ -61,7 +61,7 @@ public interface SysUserRepository : CrudRepository<SysUserEntity> {
             "created_at, created_by, updated_at, updated_by, deleted) values (:id, :userName, :password, " +
             ":realName, :phone, :email, :avatar, :isUse, :createdAt, :createdBy, :updatedAt, :updatedBy, 0)"
     )
-    public suspend fun executeInsert(
+    suspend fun executeInsert(
         context: QueryExecutor,
         id: String,
         userName: String,
@@ -78,7 +78,7 @@ public interface SysUserRepository : CrudRepository<SysUserEntity> {
     ): Result<Long>
 
     @Query("update sys_user set avatar = :avatar, updated_at = :updatedAt, updated_by = :updatedBy where id = :id")
-    public suspend fun executeUpdateAvatarById(
+    suspend fun executeUpdateAvatarById(
         context: QueryExecutor,
         id: String,
         avatar: String?,
@@ -98,7 +98,7 @@ public interface SysUserRepository : CrudRepository<SysUserEntity> {
             "phone = :phone, email = :email, avatar = :avatar, is_use = :isUse, " +
             "updated_at = :updatedAt, updated_by = :updatedBy where id = :id and deleted = 0"
     )
-    public suspend fun executeUpdateById(
+    suspend fun executeUpdateById(
         context: QueryExecutor,
         id: String,
         userName: String,
@@ -114,7 +114,7 @@ public interface SysUserRepository : CrudRepository<SysUserEntity> {
 
     /** 软删除用户（`@Query` 不支持批量，多 id 请在服务层循环）。 */
     @Query("update sys_user set deleted = 1, updated_at = :updatedAt, updated_by = :updatedBy where id = :id and deleted = 0")
-    public suspend fun executeSoftDeleteById(
+    suspend fun executeSoftDeleteById(
         context: QueryExecutor,
         id: String,
         updatedAt: Instant,

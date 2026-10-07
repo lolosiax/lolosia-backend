@@ -7,4 +7,4 @@ package moe.lolosia.web.util.platform
  *
  * @author 洛洛希雅Lolosia
  */
-public expect fun envOrNull(name: String): String?
+expect fun envOrNull(name: String): String?

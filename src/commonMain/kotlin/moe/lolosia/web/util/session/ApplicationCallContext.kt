@@ -3,8 +3,8 @@ package moe.lolosia.web.util.session
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.Transaction
 import io.github.smyrgeorge.sqlx4k.mysql.IMySQL
-import io.ktor.server.application.ApplicationCall
-import io.ktor.util.Attributes
+import io.ktor.server.application.*
+import io.ktor.util.*
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
 

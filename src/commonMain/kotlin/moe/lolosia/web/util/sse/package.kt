@@ -1,6 +1,6 @@
 package moe.lolosia.web.util.sse
 
-import io.ktor.util.AttributeKey
+import io.ktor.util.*
 
 /**
  * 当前请求的 SSE 事件源在 `call.attributes` 里的键。
@@ -10,13 +10,13 @@ import io.ktor.util.AttributeKey
  *
  * @author 洛洛希雅Lolosia
  */
-public val SseSourceKey: AttributeKey<KtorEventSource> = AttributeKey("sse-source")
+val SseSourceKey: AttributeKey<KtorEventSource> = AttributeKey("sse-source")
 
 /** 握手用的自定义请求头：前端 `POST /api/sse` 带上它换连接标识。 */
-public const val SSE_UPGRADE_HEADER: String = "x-upgrade"
+const val SSE_UPGRADE_HEADER: String = "x-upgrade"
 
 /** [SSE_UPGRADE_HEADER] 的取值。 */
-public const val SSE_UPGRADE_VALUE: String = "event-source"
+const val SSE_UPGRADE_VALUE: String = "event-source"
 
 /** 建流时携带连接标识的查询参数名。 */
-public const val SSE_ID_PARAM: String = "eventSourceId"
+const val SSE_ID_PARAM: String = "eventSourceId"

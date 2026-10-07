@@ -5,20 +5,20 @@ package moe.lolosia.web.util.classpath
  *
  * @author 洛洛希雅Lolosia
  */
-public object ClasspathHolder {
+object ClasspathHolder {
     private var current: Classpath? = null
 
-    public val installed: Boolean get() = current != null
+    val installed: Boolean get() = current != null
 
-    public fun install(cp: Classpath) {
+    fun install(cp: Classpath) {
         current = cp
     }
 
-    public fun clear() {
+    fun clear() {
         current = null
     }
 
-    public val instance: Classpath
+    val instance: Classpath
         get() = current ?: error(
             "classpath 尚未初始化：请在启动服务前调用 ClasspathHolder.install(...)（main 启动时会按平台自动安装）"
         )

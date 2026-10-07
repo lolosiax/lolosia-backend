@@ -12,11 +12,11 @@ import moe.lolosia.web.util.router.Injectable
  * @author 洛洛希雅Lolosia
  */
 @Injectable
-public interface FileStore {
+interface FileStore {
 
     /** 相对路径（以 `/` 分隔，根为存储根目录）。 */
-    public fun read(path: String): ByteArray?
+    fun read(path: String): ByteArray?
 
     /** 覆盖写入；父目录不存在时逐级创建。写入失败返回 `false`。 */
-    public fun write(path: String, bytes: ByteArray): Boolean
+    fun write(path: String, bytes: ByteArray): Boolean
 }

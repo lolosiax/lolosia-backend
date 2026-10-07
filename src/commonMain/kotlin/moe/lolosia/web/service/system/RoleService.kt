@@ -1,16 +1,12 @@
 package moe.lolosia.web.service.system
 
-import kotlin.time.Clock
 import moe.lolosia.web.database.repository.SysRoleRepository
 import moe.lolosia.web.database.repository.SysUserRoleRepository
-import moe.lolosia.web.dto.RoleCreateReq
-import moe.lolosia.web.dto.RolePageResult
-import moe.lolosia.web.dto.RoleRow
-import moe.lolosia.web.dto.RoleUpdateReq
-import moe.lolosia.web.dto.toRow
+import moe.lolosia.web.dto.*
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
+import kotlin.time.Clock
 
 /**
  * 角色服务（迁移自旧 JVM 版的 `RoleService`，返回值由 `Bundle` 改为强类型 DTO）。
@@ -30,17 +26,17 @@ import moe.lolosia.web.util.session.Context
  */
 @Injectable
 @Service
-public class RoleService(
+class RoleService(
     private val roles: SysRoleRepository,
     private val bindings: SysUserRoleRepository,
 ) {
 
     /** 全部未删除角色，按 id 升序（前端下拉用）。 */
-    public suspend fun list(ctx: Context): List<RoleRow> =
+    suspend fun list(ctx: Context): List<RoleRow> =
         roles.findAllByDeletedFalse(ctx.db).getOrThrow().map { it.toRow() }
 
     /** 分页查询（角色名 / 类型模糊匹配；菜单字段已弃用，只给空数组保持前端兼容）。 */
-    public suspend fun page(ctx: Context, pageNo: Int = 1, pageSize: Int = 10, roleName: String? = null): RolePageResult {
+    suspend fun page(ctx: Context, pageNo: Int = 1, pageSize: Int = 10, roleName: String? = null): RolePageResult {
         val pattern = likePattern(roleName)
         val total = roles.countByKeys(ctx.db, pattern).getOrThrow()
         val rows = roles.findAllByKeys(ctx.db, pattern, pageSize, (pageNo - 1) * pageSize).getOrThrow()
@@ -48,7 +44,7 @@ public class RoleService(
     }
 
     /** 新建角色（`roleName` / `type` 必填，与旧版报错信息一致），返回整行（含自增 id）。 */
-    public suspend fun create(ctx: Context, req: RoleCreateReq, operatorId: String? = null): RoleRow {
+    suspend fun create(ctx: Context, req: RoleCreateReq, operatorId: String? = null): RoleRow {
         val roleName = req.roleName ?: throw IllegalArgumentException("必须填写roleName")
         val type = req.type ?: throw IllegalArgumentException("必须填写type")
 
@@ -63,7 +59,7 @@ public class RoleService(
     }
 
     /** 修改角色：`null` 的字段保持原值。 */
-    public suspend fun update(ctx: Context, req: RoleUpdateReq, operatorId: String? = null) {
+    suspend fun update(ctx: Context, req: RoleUpdateReq, operatorId: String? = null) {
         val current = roles.findOneById(ctx.db, req.id).getOrThrow() ?: throw NoSuchElementException("角色不存在")
         roles.executeUpdateById(
             context = ctx.db,
@@ -76,7 +72,7 @@ public class RoleService(
     }
 
     /** 删除角色：不存在直接返回（旧版同此）；超级管理员与使用中的角色不许删。 */
-    public suspend fun destroy(ctx: Context, id: Long, operatorId: String? = null) {
+    suspend fun destroy(ctx: Context, id: Long, operatorId: String? = null) {
         val role = roles.findOneById(ctx.db, id).getOrThrow() ?: return
         if (role.type == SUPER_ADMIN) throw IllegalStateException("不能删除超级管理员角色")
         if (bindings.countByRoleId(ctx.db, id).getOrThrow() > 0) throw IllegalStateException("该角色正在使用")

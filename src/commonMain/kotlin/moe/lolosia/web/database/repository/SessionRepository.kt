@@ -16,10 +16,10 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Repository
-public interface SessionRepository : CrudRepository<SessionEntity> {
+interface SessionRepository : CrudRepository<SessionEntity> {
 
     @Query("insert into sys_sessions(id, data, created_at, updated_at, deleted) values (:id, :data, :createdAt, :updatedAt, 0)")
-    public suspend fun executeInsert(
+    suspend fun executeInsert(
         context: QueryExecutor,
         id: String,
         data: String,
@@ -28,7 +28,7 @@ public interface SessionRepository : CrudRepository<SessionEntity> {
     ): Result<Long>
 
     @Query("update sys_sessions set data = :data, updated_at = :updatedAt where id = :id")
-    public suspend fun executeUpdateDataById(
+    suspend fun executeUpdateDataById(
         context: QueryExecutor,
         id: String,
         data: String,
@@ -37,9 +37,9 @@ public interface SessionRepository : CrudRepository<SessionEntity> {
 
     /** 取一条未删除的会话。 */
     @Query("select * from sys_sessions where id = :id and deleted = 0")
-    public suspend fun findOneById(context: QueryExecutor, id: String): Result<SessionEntity?>
+    suspend fun findOneById(context: QueryExecutor, id: String): Result<SessionEntity?>
 
     /** 物理删除一条会话。 */
     @Query("delete from sys_sessions where id = :id")
-    public suspend fun executeDeleteById(context: QueryExecutor, id: String): Result<Long>
+    suspend fun executeDeleteById(context: QueryExecutor, id: String): Result<Long>
 }

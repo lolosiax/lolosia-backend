@@ -3,14 +3,7 @@ package moe.lolosia.web.util.fs
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
-import platform.posix.SEEK_END
-import platform.posix.fclose
-import platform.posix.fopen
-import platform.posix.fread
-import platform.posix.fseek
-import platform.posix.ftell
-import platform.posix.fwrite
-import platform.posix.rewind
+import platform.posix.*
 
 /**
  * 读取整个文件（posix）；文件不存在或读不全返回 `null`。
@@ -19,7 +12,7 @@ import platform.posix.rewind
  */
 @OptIn(UnsafeNumber::class)
 @Suppress("REDUNDANT_CALL_OF_CONVERSION_METHOD")
-public fun readFileBytes(absPath: String): ByteArray? {
+fun readFileBytes(absPath: String): ByteArray? {
     val file = fopen(absPath, "rb") ?: return null
     try {
         if (fseek(file, 0, SEEK_END) != 0) return null
@@ -36,7 +29,7 @@ public fun readFileBytes(absPath: String): ByteArray? {
 
 /** 覆盖写入整个文件（posix）；父目录不存在时逐级创建。 */
 @OptIn(UnsafeNumber::class)
-public fun writeFileBytes(absPath: String, bytes: ByteArray): Boolean {
+fun writeFileBytes(absPath: String, bytes: ByteArray): Boolean {
     makeDirectories(absPath.substringBeforeLast('/', ""))
     val file = fopen(absPath, "wb") ?: return false
     try {
@@ -51,7 +44,7 @@ public fun writeFileBytes(absPath: String, bytes: ByteArray): Boolean {
 }
 
 /** 逐级创建目录；已存在时创建失败，忽略即可（真正的失败留给随后的写入去暴露）。 */
-public fun makeDirectories(dir: String) {
+fun makeDirectories(dir: String) {
     if (dir.isEmpty()) return
     val from = if (dir.startsWith("/")) 1 else 0
     for (index in from until dir.length) {

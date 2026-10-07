@@ -1,14 +1,14 @@
 package moe.lolosia.web.service
 
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
+import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.model.SysCacheEntity
+import moe.lolosia.web.database.repository.SysCacheRepository
+import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
-import moe.lolosia.web.database.Database
-import moe.lolosia.web.database.repository.SysCacheRepository
-import moe.lolosia.web.database.model.SysCacheEntity
-import moe.lolosia.web.util.router.Injectable
-import moe.lolosia.web.util.router.Service
 
 /**
  * 缓存管理器：以 `path` 分组、`tag` 定位，存在 `sys_cache`。
@@ -21,27 +21,27 @@ import moe.lolosia.web.util.router.Service
  */
 @Injectable
 @Service
-public class CacheManager(private val db: Database, private val repo: SysCacheRepository) {
+class CacheManager(private val db: Database, private val repo: SysCacheRepository) {
 
-    public fun accessor(path: String): Accessor = Accessor(path)
+    fun accessor(path: String): Accessor = Accessor(path)
 
-    public operator fun get(path: String): Accessor = accessor(path)
+    operator fun get(path: String): Accessor = accessor(path)
 
-    public inner class Accessor(public val path: String) {
+    inner class Accessor(val path: String) {
 
         private val ctx: QueryExecutor get() = db.driver
 
         /** 该 path 下全部未过期缓存（新的在前）。 */
-        public suspend fun getAll(): List<SysCacheEntity> = repo.findAllByPath(ctx, path).getOrThrow()
+        suspend fun getAll(): List<SysCacheEntity> = repo.findAllByPath(ctx, path).getOrThrow()
 
         /** 取该 tag 的未过期缓存行（`null` = 不存在或已过期）。 */
-        public suspend fun find(tag: String): SysCacheEntity? =
+        suspend fun find(tag: String): SysCacheEntity? =
             repo.findOneByPathAndTag(ctx, path, tag).getOrThrow()
 
-        public suspend fun get(tag: String): String? = find(tag)?.value
+        suspend fun get(tag: String): String? = find(tag)?.value
 
         /** 写入缓存并返回写入值；[ttl] 默认 1 天。 */
-        public suspend fun put(tag: String, value: String, ttl: Duration = DEFAULT_TTL): String {
+        suspend fun put(tag: String, value: String, ttl: Duration = DEFAULT_TTL): String {
             val expiresAt = Clock.System.now() + ttl
             val existing = repo.findOneByPathAndTag(ctx, path, tag).getOrThrow()
             if (existing != null) {
@@ -54,19 +54,19 @@ public class CacheManager(private val db: Database, private val repo: SysCacheRe
         }
 
         /** 删掉该 tag 的缓存，返回被删掉的值（没有则返回 `null`）。 */
-        public suspend fun remove(tag: String): String? {
+        suspend fun remove(tag: String): String? {
             val old = get(tag)
             repo.executeDeleteByPathAndTag(ctx, path, tag).getOrThrow()
             return old
         }
 
         /** 清空该 path 下的全部缓存，返回删除条数。 */
-        public suspend fun clear(): Long = repo.executeDeleteByPath(ctx, path).getOrThrow()
+        suspend fun clear(): Long = repo.executeDeleteByPath(ctx, path).getOrThrow()
 
-        public suspend fun keys(): List<String> = getAll().mapNotNull { it.tag }.distinct()
+        suspend fun keys(): List<String> = getAll().mapNotNull { it.tag }.distinct()
     }
 
-    public companion object {
-        public val DEFAULT_TTL: Duration = 1.days
+    companion object {
+        val DEFAULT_TTL: Duration = 1.days
     }
 }

@@ -1,18 +1,11 @@
 package moe.lolosia.web.service.ddns
 
-import io.ktor.http.HttpMethod
+import io.ktor.http.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.*
 import moe.lolosia.web.api.get
 import moe.lolosia.web.api.post
 import moe.lolosia.web.api.put
@@ -32,14 +25,14 @@ import okio.Path.Companion.toPath
  * 不一致时才写入。地址取自 `/proc/net/if_inet6`，请求经 [moe.lolosia.web.api.request] 发出。
  */
 @Service
-public class DdnsService(setting: AppSettings) {
+class DdnsService(setting: AppSettings) {
 
     val config = setting.ddns
 
     private val log = Log.of("DDNS")
 
     /** 挂到应用作用域上按间隔轮询；配置不全或未启用时只记一条日志。 */
-    public fun start(scope: CoroutineScope) {
+    fun start(scope: CoroutineScope) {
         if (!config.enabled) {
             log.info { "未启用（ddns.enabled=false）" }
             return

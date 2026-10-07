@@ -23,7 +23,7 @@ import moe.lolosia.web.util.platform.envOrNull
  * @author 洛洛希雅Lolosia
  * @since 2026-10-07 13:28
  */
-public fun main(args: Array<String>) {
+fun main(args: Array<String>) {
     val portOverride = args.firstOrNull()?.toIntOrNull()
     val log = Log.of("Main")
 

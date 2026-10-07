@@ -13,7 +13,7 @@ import moe.lolosia.web.util.router.Injectable
  */
 @Serializable
 @Injectable
-public data class AppSettings(
+data class AppSettings(
     val server: ServerConfig = ServerConfig(),
     val datasource: DatasourceConfig = DatasourceConfig(),
     val ddns: DdnsConfig = DdnsConfig(),
@@ -21,13 +21,13 @@ public data class AppSettings(
     val logLevel: String = "INFO",
 ) {
     @Serializable
-    public data class ServerConfig(
+    data class ServerConfig(
         val host: String = "0.0.0.0",
         val port: Int = 7129,
     )
 
     @Serializable
-    public data class DatasourceConfig(
+    data class DatasourceConfig(
         val url: String = "mysql://127.0.0.1:3306/ktor-template",
         val username: String = "root",
         val password: String = "123456",
@@ -41,7 +41,7 @@ public data class AppSettings(
      * 故按 [intervalSeconds] 周期检查、变化即更新。
      */
     @Serializable
-    public data class DdnsConfig(
+    data class DdnsConfig(
         /** 是否启用自动更新。 */
         val enabled: Boolean = false,
         /** Cloudflare 区域 ID（zone_id）。 */

@@ -2,9 +2,8 @@ package moe.lolosia.web.util.session
 
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.Transaction
-import io.ktor.server.application.ApplicationCall
-import io.ktor.util.AttributeKey
-import io.ktor.util.Attributes
+import io.ktor.server.application.*
+import io.ktor.util.*
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.service.SessionMap
 import moe.lolosia.web.util.router.Injectable
@@ -29,35 +28,35 @@ import moe.lolosia.web.util.router.Injectable
  * @author 洛洛希雅Lolosia
  */
 @Injectable(requestScoped = true)
-public interface Context {
+interface Context {
     /** 请求面：HTTP 原始上下文（仅控制器可用，服务层禁止使用）。 */
-    public val call: ApplicationCall
+    val call: ApplicationCall
 
     /** 请求期共享数据：跨层传临时数据用，请求结束即释放。 */
-    public val data: Attributes
+    val data: Attributes
 
     /** 用户面：当前会话；未携带有效 `Authorization` 时为 `null`。 */
-    public val session: SessionMap? get() = call.attributes.getOrNull(SessionKey)
+    val session: SessionMap? get() = call.attributes.getOrNull(SessionKey)
 
     /** 用户面：会话 id（前端拿它当 token）。 */
-    public val sessionId: String? get() = session?.id
+    val sessionId: String? get() = session?.id
 
     /** 用户面：当前登录用户 id；会话里没写用户时（如匿名的 `/api/session/new`）为 `null`。 */
-    public val userId: String? get() = session?.userId
+    val userId: String? get() = session?.userId
 
     /** 用户面：取登录用户 id，取不到按「未登录」处理（401）。 */
-    public fun requireUserId(): String =
+    fun requireUserId(): String =
         userId ?: throw ApiException(401, "身份认证失败，请重新登录")
 
     /** 用户面：当前用户；实体与角色在**一次请求内只查一次**（见 [UserInfo]）。 */
-    public val user: UserInfo
+    val user: UserInfo
 
     /** 执行面：语句执行句柄（连接池）。调仓库方法时传它。 */
-    public val db: QueryExecutor
+    val db: QueryExecutor
 
     /** 执行面：把 [block] 内的语句放进同一事务，抛异常则回滚。 */
-    public suspend fun <T> transaction(block: suspend (Transaction) -> T): T
+    suspend fun <T> transaction(block: suspend (Transaction) -> T): T
 }
 
 /** 已解析会话在 `call.attributes` 中的键（由鉴权拦截器写入）。 */
-public val SessionKey: AttributeKey<SessionMap> = AttributeKey("session")
+val SessionKey: AttributeKey<SessionMap> = AttributeKey("session")

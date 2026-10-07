@@ -13,7 +13,7 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Table("sys_sessions")
-public data class SessionEntity(
+data class SessionEntity(
     @Id(insert = true)
     val id: String,
     val data: String = "{}",

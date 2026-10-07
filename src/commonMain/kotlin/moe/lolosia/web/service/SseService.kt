@@ -7,12 +7,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
-import kotlin.uuid.Uuid
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.sse.EventSource
 import moe.lolosia.web.util.sse.KtorEventSource
+import kotlin.uuid.Uuid
 
 /**
  * SSE 连接注册表 + 连接生命周期。
@@ -30,7 +30,7 @@ import moe.lolosia.web.util.sse.KtorEventSource
  */
 @Injectable
 @Service
-public class SseService {
+class SseService {
 
     private val log = Log.of("Sse")
     private val mutex = Mutex()
@@ -45,14 +45,14 @@ public class SseService {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** 分配一个新的连接标识。 */
-    public fun createId(): String = Uuid.random().toString()
+    fun createId(): String = Uuid.random().toString()
 
     /**
      * 建立连接：注册到表里、推一帧 `status` 首帧，并在后台等它关闭后注销。
      *
      * 立即返回事件源，供调用方放进 `call.attributes`（见 `SseSourceKey`）交给发送管道。
      */
-    public fun open(id: String): KtorEventSource {
+    fun open(id: String): KtorEventSource {
         val source = KtorEventSource(id)
         scope.launch {
             mutex.withLock { sources[id] = source }
@@ -73,7 +73,7 @@ public class SseService {
      *
      * 标识对不上（连接已断开）时静默忽略 —— 前端在登录页也会调它，那里本来就没有登录态。
      */
-    public suspend fun bind(id: String, userId: String) {
+    suspend fun bind(id: String, userId: String) {
         mutex.withLock { if (sources.containsKey(id)) owners[id] = userId }
     }
 }

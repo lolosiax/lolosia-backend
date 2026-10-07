@@ -1,12 +1,10 @@
 package moe.lolosia.web.interceptor
 
-import io.ktor.http.ContentType
-import io.ktor.http.content.OutgoingContent
-import io.ktor.http.content.TextContent
-import io.ktor.server.application.Application
-import io.ktor.server.application.call
-import io.ktor.server.request.path
-import io.ktor.server.response.ApplicationSendPipeline
+import io.ktor.http.*
+import io.ktor.http.content.*
+import io.ktor.server.application.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -38,7 +36,7 @@ private val ENVELOPE_KEYS = setOf("code", "msg", "data")
  * @author 洛洛希雅Lolosia
  */
 @Interceptor(-2)
-public fun Application.installEnvelopeInterceptor() {
+fun Application.installEnvelopeInterceptor() {
     sendPipeline.intercept(ApplicationSendPipeline.Transform) { subject ->
         val path = call.request.path()
         if (!path.startsWith("/api/") || call.attributes.contains(EnvelopeSkipKey)) {

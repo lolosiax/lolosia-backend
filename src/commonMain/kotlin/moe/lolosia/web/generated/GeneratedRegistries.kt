@@ -1,7 +1,7 @@
 package moe.lolosia.web.generated
 
-import io.ktor.server.application.Application
-import io.ktor.server.routing.Routing
+import io.ktor.server.application.*
+import io.ktor.server.routing.*
 import org.koin.core.Koin
 import org.koin.core.module.Module
 
@@ -19,16 +19,16 @@ import org.koin.core.module.Module
  */
 
 /** 各 `@Repository` 接口 → sqlx4k 生成实现的 Koin 绑定。 */
-public expect fun repositoryModules(): List<Module>
+expect fun repositoryModules(): List<Module>
 
 /** 各 `@Service` 类型的 Koin 单例绑定（构造器注入）。 */
-public expect fun serviceModule(): Module
+expect fun serviceModule(): Module
 
 /** 把容器实例接进路由的按类型注入。 */
-public expect fun Koin.registerInjectables()
+expect fun Koin.registerInjectables()
 
 /** 批量注册全部注解式控制器的路由。 */
-public expect fun Routing.generatedRoutes()
+expect fun Routing.generatedRoutes()
 
 /** 按 `@Interceptor(order)` 升序注册全部中间件。 */
-public expect fun Application.configureInterceptors(koin: Koin)
+expect fun Application.configureInterceptors(koin: Koin)

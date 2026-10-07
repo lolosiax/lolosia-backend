@@ -3,8 +3,7 @@ package moe.lolosia.web.interceptor
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
-import io.ktor.server.request.httpMethod
-import io.ktor.server.request.uri
+import io.ktor.server.request.*
 import moe.lolosia.web.util.log.Log
 import kotlin.time.TimeSource
 
@@ -21,7 +20,7 @@ private val log = Log.of("Traffic")
  * @author 洛洛希雅Lolosia
  */
 @Interceptor(-9)
-public fun Application.installTrafficInterceptor() {
+fun Application.installTrafficInterceptor() {
     intercept(ApplicationCallPipeline.Monitoring) {
         val start = TimeSource.Monotonic.markNow()
         try {

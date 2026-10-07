@@ -1,9 +1,7 @@
 package moe.lolosia.web.interceptor
 
-import io.ktor.server.application.Application
-import io.ktor.server.application.ApplicationCallPipeline
-import io.ktor.server.application.call
-import io.ktor.server.request.path
+import io.ktor.server.application.*
+import io.ktor.server.request.*
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.util.session.SessionKey
@@ -20,7 +18,7 @@ import moe.lolosia.web.util.session.SessionKey
  * @author 洛洛希雅Lolosia
  */
 @Interceptor(-3)
-public fun Application.installAuthInterceptor(sessions: SessionManager) {
+fun Application.installAuthInterceptor(sessions: SessionManager) {
     intercept(ApplicationCallPipeline.Call) {
         val path = call.request.path().substringBefore('?')
         if (path.startsWith("/api/")) {

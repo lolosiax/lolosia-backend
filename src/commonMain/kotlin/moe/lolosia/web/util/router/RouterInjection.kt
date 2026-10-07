@@ -1,6 +1,6 @@
 package moe.lolosia.web.util.router
 
-import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.*
 import kotlin.reflect.KClass
 
 /**
@@ -11,16 +11,16 @@ import kotlin.reflect.KClass
  *
  * @author 洛洛希雅Lolosia
  */
-public object RouterInjection {
+object RouterInjection {
     private val factories = mutableMapOf<KClass<*>, (ApplicationCall) -> Any>()
 
-    public fun <T : Any> register(type: KClass<T>, factory: (ApplicationCall) -> T) {
+    fun <T : Any> register(type: KClass<T>, factory: (ApplicationCall) -> T) {
         factories[type] = factory
     }
 
-    public fun resolve(type: KClass<*>, call: ApplicationCall): Any =
+    fun resolve(type: KClass<*>, call: ApplicationCall): Any =
         factories[type]?.invoke(call)
             ?: error("未注册的可注入类型：${type.simpleName}；请先在启动时调用 RouterInjection.register")
 
-    public fun isRegistered(type: KClass<*>): Boolean = factories.containsKey(type)
+    fun isRegistered(type: KClass<*>): Boolean = factories.containsKey(type)
 }

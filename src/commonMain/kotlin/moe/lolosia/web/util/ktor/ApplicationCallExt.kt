@@ -1,17 +1,15 @@
 package moe.lolosia.web.util.ktor
 
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.server.application.ApplicationCall
-import io.ktor.server.request.receive
-import io.ktor.server.request.receiveParameters
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.request.*
 import moe.lolosia.web.util.router.FormData
 import moe.lolosia.web.util.router.RouterInjection
 import moe.lolosia.web.util.router.parseMultipartBody
 import moe.lolosia.web.util.router.parseMultipartBoundary
 
 /** 取按类型注册的实例（KSP 生成 `call.inject<T>()`）。 */
-public inline fun <reified T : Any> ApplicationCall.inject(): T =
+inline fun <reified T : Any> ApplicationCall.inject(): T =
     RouterInjection.resolve(T::class, this) as T
 
 /**
@@ -20,7 +18,7 @@ public inline fun <reified T : Any> ApplicationCall.inject(): T =
  * Ktor 3.4 在 Kotlin/Native 上未实现 `receiveMultipart()`，故 multipart 分支
  * 改为读原始字节后交 [parseMultipartBody] 解析。
  */
-public suspend fun ApplicationCall.readForm(): FormData {
+suspend fun ApplicationCall.readForm(): FormData {
     val contentType = request.headers[HttpHeaders.ContentType]?.trim().orEmpty()
 
     if (contentType.startsWith("multipart/", ignoreCase = true)) {
@@ -40,7 +38,7 @@ public suspend fun ApplicationCall.readForm(): FormData {
 }
 
 /** 读取 urlencoded 表单字段（不处理 multipart）。 */
-public suspend fun ApplicationCall.readFormFields(): Map<String, List<String>> {
+suspend fun ApplicationCall.readFormFields(): Map<String, List<String>> {
     val params = receiveParameters()
     return params.entries().associate { it.key to it.value }
 }

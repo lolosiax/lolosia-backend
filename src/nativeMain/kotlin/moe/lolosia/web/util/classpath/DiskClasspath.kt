@@ -1,16 +1,9 @@
 package moe.lolosia.web.util.classpath
 
-import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
-import platform.posix.SEEK_END
-import platform.posix.fclose
-import platform.posix.fopen
-import platform.posix.fread
-import platform.posix.fseek
-import platform.posix.ftell
-import platform.posix.rewind
+import platform.posix.*
 
 /**
  * 磁盘目录实现（开发期回退）：直接读 [root] 下的文件。
@@ -19,7 +12,7 @@ import platform.posix.rewind
  *
  * @author 洛洛希雅Lolosia
  */
-public class DiskClasspath(private val root: String) : Classpath {
+class DiskClasspath(private val root: String) : Classpath {
 
     override val entries: List<String> = emptyList()
 

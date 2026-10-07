@@ -1,6 +1,5 @@
 package moe.lolosia.web.service.system
 
-import kotlin.time.Clock
 import moe.lolosia.web.database.repository.SysRoleRepository
 import moe.lolosia.web.database.repository.SysUserRoleRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
@@ -10,6 +9,7 @@ import moe.lolosia.web.dto.toUserRoleRow
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
+import kotlin.time.Clock
 
 /**
  * 用户-角色服务（迁移自旧 JVM 版的 `UserRoleService`）。
@@ -26,14 +26,14 @@ import moe.lolosia.web.util.session.Context
  */
 @Injectable
 @Service
-public class UserRoleService(
+class UserRoleService(
     private val bindings: SysUserRoleRepository,
     private val roles: SysRoleRepository,
     private val view: ViewUserRoleRepository,
 ) {
 
     /** 取某用户的角色绑定视图；没有绑定时返回 `roleId = 0` 的兜底行。 */
-    public suspend fun getByUserId(ctx: Context, userId: String): UserRoleRow =
+    suspend fun getByUserId(ctx: Context, userId: String): UserRoleRow =
         view.findOneByUserId(ctx.db, userId).getOrThrow()?.toUserRoleRow()
             ?: UserRoleRow(userId = userId, roleId = ROLE_ID_UNKNOWN)
 
@@ -42,7 +42,7 @@ public class UserRoleService(
      *
      * @throws NoSuchElementException 库里连 `student` 角色都没有（数据没初始化）
      */
-    public suspend fun getRoleByUserId(ctx: Context, userId: String): UserRoleRow {
+    suspend fun getRoleByUserId(ctx: Context, userId: String): UserRoleRow {
         if (bindings.countByUserId(ctx.db, userId).getOrThrow() == 0L) {
             val student = roles.findAllByType(ctx.db, STUDENT).getOrThrow().firstOrNull()
                 ?: throw NoSuchElementException("找不到用户角色")

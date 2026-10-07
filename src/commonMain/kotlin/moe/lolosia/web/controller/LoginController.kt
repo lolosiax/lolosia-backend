@@ -1,12 +1,6 @@
 package moe.lolosia.web.controller
 
-import moe.lolosia.web.dto.CaptchaResult
-import moe.lolosia.web.dto.LoginReq
-import moe.lolosia.web.dto.LoginResult
-import moe.lolosia.web.dto.MessageResult
-import moe.lolosia.web.dto.RegisterReq
-import moe.lolosia.web.dto.UserListRow
-import moe.lolosia.web.dto.VerifyReq
+import moe.lolosia.web.dto.*
 import moe.lolosia.web.service.LoginService
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller

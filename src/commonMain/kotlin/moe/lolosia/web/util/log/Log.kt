@@ -12,16 +12,16 @@ import kotlin.time.Clock
  *
  * @author 洛洛希雅Lolosia
  */
-public object Log {
+object Log {
 
     /** 全局级别：低于该级别的调用直接丢弃。 */
-    public var level: LogLevel = LogLevel.INFO
+    var level: LogLevel = LogLevel.INFO
 
     /** 输出目的地（默认标准输出）。 */
-    public var sink: (String) -> Unit = { println(it) }
+    var sink: (String) -> Unit = { println(it) }
 
     /** 按模块取一个 logger。 */
-    public fun of(tag: String): Logger = Logger(tag)
+    fun of(tag: String): Logger = Logger(tag)
 
     internal fun write(level: LogLevel, tag: String, message: () -> String, cause: Throwable?) {
         if (level.ordinal < this.level.ordinal) return

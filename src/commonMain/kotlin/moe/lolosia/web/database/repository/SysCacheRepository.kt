@@ -20,13 +20,13 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Repository
-public interface SysCacheRepository : CrudRepository<SysCacheEntity> {
+interface SysCacheRepository : CrudRepository<SysCacheEntity> {
 
     @Query(
         "insert into sys_cache(path, tag, value, expires_at, created_at, updated_at, deleted) " +
             "values (:path, :tag, :value, :expiresAt, :createdAt, :updatedAt, 0)"
     )
-    public suspend fun executeInsert(
+    suspend fun executeInsert(
         context: QueryExecutor,
         path: String,
         tag: String,
@@ -40,16 +40,16 @@ public interface SysCacheRepository : CrudRepository<SysCacheEntity> {
         "select * from sys_cache where path = :path and (deleted is null or deleted = 0) " +
             "and (expires_at is null or expires_at > now()) order by id desc"
     )
-    public suspend fun findAllByPath(context: QueryExecutor, path: String): Result<List<SysCacheEntity>>
+    suspend fun findAllByPath(context: QueryExecutor, path: String): Result<List<SysCacheEntity>>
 
     @Query(
         "select * from sys_cache where path = :path and tag = :tag and (deleted is null or deleted = 0) " +
             "and (expires_at is null or expires_at > now()) order by id desc limit 1"
     )
-    public suspend fun findOneByPathAndTag(context: QueryExecutor, path: String, tag: String): Result<SysCacheEntity?>
+    suspend fun findOneByPathAndTag(context: QueryExecutor, path: String, tag: String): Result<SysCacheEntity?>
 
     @Query("update sys_cache set value = :value, expires_at = :expiresAt, updated_at = now() where id = :id")
-    public suspend fun executeUpdateValueById(
+    suspend fun executeUpdateValueById(
         context: QueryExecutor,
         id: Long,
         value: String,
@@ -57,8 +57,8 @@ public interface SysCacheRepository : CrudRepository<SysCacheEntity> {
     ): Result<Long>
 
     @Query("delete from sys_cache where path = :path and tag = :tag")
-    public suspend fun executeDeleteByPathAndTag(context: QueryExecutor, path: String, tag: String): Result<Long>
+    suspend fun executeDeleteByPathAndTag(context: QueryExecutor, path: String, tag: String): Result<Long>
 
     @Query("delete from sys_cache where path = :path")
-    public suspend fun executeDeleteByPath(context: QueryExecutor, path: String): Result<Long>
+    suspend fun executeDeleteByPath(context: QueryExecutor, path: String): Result<Long>
 }

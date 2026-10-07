@@ -5,11 +5,7 @@ import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.dto.RawJson
 import moe.lolosia.web.service.SseService
-import moe.lolosia.web.util.router.Body
-import moe.lolosia.web.util.router.Controller
-import moe.lolosia.web.util.router.GET
-import moe.lolosia.web.util.router.POST
-import moe.lolosia.web.util.router.Query
+import moe.lolosia.web.util.router.*
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.sse.SSE_ID_PARAM
 import moe.lolosia.web.util.sse.SseSourceKey
@@ -25,14 +21,14 @@ import moe.lolosia.web.util.sse.SseSourceKey
  * @author 洛洛希雅Lolosia
  */
 @Controller("/api")
-public object SseController {
+object SseController {
 
     @Serializable
-    public data class RegistryReq(val sseId: String)
+    data class RegistryReq(val sseId: String)
 
     /** 建流：把事件源放进 `call.attributes` 后立即返回，响应体由发送管道换成流（见 [SseInterceptor]）。 */
     @GET("/sse")
-    public suspend fun connect(ctx: Context, @Query eventSourceId: String?, sse: SseService): RawJson {
+    suspend fun connect(ctx: Context, @Query eventSourceId: String?, sse: SseService): RawJson {
         val id = eventSourceId ?: throw ApiException(400, "缺少查询参数 $SSE_ID_PARAM")
         ctx.call.attributes.put(SseSourceKey, sse.open(id))
         return RawJson("""{"code":200}""")
@@ -40,7 +36,7 @@ public object SseController {
 
     /** 登录后补绑登录态；未登录（登录页）时什么都没绑，但同样返回成功。 */
     @POST("/sse/registry")
-    public suspend fun registry(ctx: Context, sse: SseService, @Body req: RegistryReq): MessageResult {
+    suspend fun registry(ctx: Context, sse: SseService, @Body req: RegistryReq): MessageResult {
         ctx.userId?.let { sse.bind(req.sseId, it) }
         return MessageResult("success")
     }

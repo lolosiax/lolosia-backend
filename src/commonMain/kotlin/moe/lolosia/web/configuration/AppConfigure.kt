@@ -1,21 +1,14 @@
 package moe.lolosia.web.configuration
 
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
-import io.ktor.http.HttpStatusCode
-import io.ktor.serialization.kotlinx.json.json
-import io.ktor.server.application.Application
-import io.ktor.server.application.install
-import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
-import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.plugins.cors.routing.CORS
-import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
-import io.ktor.server.response.respondRedirect
-import io.ktor.server.routing.get
-import io.ktor.server.routing.routing
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.application.*
+import io.ktor.server.plugins.conditionalheaders.*
+import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.server.plugins.cors.routing.*
+import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
 import moe.lolosia.web.VITE_DEFAULT
 import moe.lolosia.web.dto.ApiException
@@ -43,7 +36,7 @@ import org.koin.core.Koin
  * @author 洛洛希雅Lolosia
  * @since 2026-10-07 14:04
  */
-public fun Application.configureApplication(koin: Koin) {
+fun Application.configureApplication(koin: Koin) {
     val log = Log.of("Application")
 
     // 路由的「按类型注入」分两半：

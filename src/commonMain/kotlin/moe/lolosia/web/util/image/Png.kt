@@ -16,28 +16,28 @@ import kotlin.math.abs
  *
  * @author 洛洛希雅Lolosia
  */
-public class RgbCanvas(public val width: Int, public val height: Int) {
+class RgbCanvas(val width: Int, val height: Int) {
 
     /** 逐像素的颜色，`0xRRGGBB`。 */
     private val pixels: IntArray = IntArray(width * height)
 
     /** 整幅填色（通常用来刷背景）。 */
-    public fun fill(color: Int) {
+    fun fill(color: Int) {
         pixels.fill(color and RGB_MASK)
     }
 
     /** 画一个像素；越界坐标直接忽略（干扰线会画出界）。 */
-    public fun set(x: Int, y: Int, color: Int) {
+    fun set(x: Int, y: Int, color: Int) {
         if (x < 0 || y < 0 || x >= width || y >= height) return
         pixels[y * width + x] = color and RGB_MASK
     }
 
-    public fun fillRect(x: Int, y: Int, w: Int, h: Int, color: Int) {
+    fun fillRect(x: Int, y: Int, w: Int, h: Int, color: Int) {
         for (dy in 0 until h) for (dx in 0 until w) set(x + dx, y + dy, color)
     }
 
     /** Bresenham 直线；与 AWT 的 `drawLine` 一样**含两个端点**。 */
-    public fun drawLine(x0: Int, y0: Int, x1: Int, y1: Int, color: Int) {
+    fun drawLine(x0: Int, y0: Int, x1: Int, y1: Int, color: Int) {
         var x = x0
         var y = y0
         val dx = abs(x1 - x0)
@@ -61,7 +61,7 @@ public class RgbCanvas(public val width: Int, public val height: Int) {
     }
 
     /** 编码成 PNG 字节（签名 + IHDR + IDAT + IEND）。 */
-    public fun toPng(): ByteArray {
+    fun toPng(): ByteArray {
         val raw = encodeScanlines()
         val idat = zlibStored(raw)
         val ihdr = ByteArray(13)
@@ -99,9 +99,9 @@ public class RgbCanvas(public val width: Int, public val height: Int) {
         return raw
     }
 
-    public companion object {
+    companion object {
         /** 打包 `0xRRGGBB`。 */
-        public fun rgb(r: Int, g: Int, b: Int): Int = ((r and 0xFF) shl 16) or ((g and 0xFF) shl 8) or (b and 0xFF)
+        fun rgb(r: Int, g: Int, b: Int): Int = ((r and 0xFF) shl 16) or ((g and 0xFF) shl 8) or (b and 0xFF)
 
         private const val RGB_MASK: Int = 0xFFFFFF
         private const val CHUNK_HEAD: Int = 8

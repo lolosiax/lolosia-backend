@@ -1,11 +1,8 @@
 package moe.lolosia.web.interceptor
 
-import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.Application
-import io.ktor.server.application.ApplicationCallPipeline
-import io.ktor.server.application.call
-import io.ktor.server.response.ApplicationSendPipeline
-import io.ktor.server.response.respond
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.response.*
 import moe.lolosia.web.dto.RawJson
 import moe.lolosia.web.service.SseService
 import moe.lolosia.web.util.sse.SSE_UPGRADE_HEADER
@@ -28,7 +25,7 @@ import moe.lolosia.web.util.sse.SseSourceKey
  * @author 洛洛希雅Lolosia
  */
 @Interceptor(-4)
-public fun Application.installSseInterceptor(sse: SseService) {
+fun Application.installSseInterceptor(sse: SseService) {
 
     sendPipeline.intercept(ApplicationSendPipeline.After) { _ ->
         val source = call.attributes.getOrNull(SseSourceKey)

@@ -10,7 +10,7 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Table("sys_user_roles")
-public data class SysUserRolesEntity(
+data class SysUserRolesEntity(
     @Id
     val id: Long = 0L,
     val userId: String,

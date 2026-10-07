@@ -1,15 +1,9 @@
 package moe.lolosia.web.util.ktor
 
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpStatusCode
-import io.ktor.http.defaultForFilePath
-import io.ktor.server.application.ApplicationCall
-import io.ktor.server.response.header
-import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
-import io.ktor.server.routing.Route
-import io.ktor.server.routing.get
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
 import moe.lolosia.web.util.classpath.Classpath
 import moe.lolosia.web.util.classpath.ClasspathHolder
 import moe.lolosia.web.util.classpath.StaticClasspathConfig
@@ -30,7 +24,7 @@ import moe.lolosia.web.util.classpath.normalizeClasspathPath
  * }
  * ```
  */
-public fun Route.staticClasspath(
+fun Route.staticClasspath(
     remotePath: String,
     zipPrefix: String = "",
     cp: Classpath = ClasspathHolder.instance,

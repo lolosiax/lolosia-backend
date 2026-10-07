@@ -13,7 +13,7 @@ import kotlin.time.Instant
  * @author 洛洛希雅Lolosia
  */
 @Table("sys_user")
-public data class SysUserEntity(
+data class SysUserEntity(
     @Id(insert = true)
     val id: String,
     val userName: String,

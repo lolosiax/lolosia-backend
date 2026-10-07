@@ -17,10 +17,10 @@ private val json = Json
  * @param sseId 握手阶段分配的连接标识
  * @author 洛洛希雅Lolosia
  */
-public class KtorEventSource(override val sseId: String) : EventSource {
+class KtorEventSource(override val sseId: String) : EventSource {
 
     /** 一帧 SSE 数据（`data` 已是 JSON 文本）。 */
-    public data class Frame(val event: String, val data: String, val retry: Int)
+    data class Frame(val event: String, val data: String, val retry: Int)
 
     private val channel = Channel<Frame>(capacity = QUEUE_CAPACITY)
     private val closedSignal = CompletableDeferred<Unit>()
@@ -47,7 +47,7 @@ public class KtorEventSource(override val sseId: String) : EventSource {
      * @param onHeartbeat 心跳回调（写注释帧，避免中间设备掐掉空闲连接）
      * @param block 帧处理器；抛异常即结束消费（由调用方收尾）
      */
-    public suspend fun consume(
+    suspend fun consume(
         heartbeatIntervalMs: Long,
         onHeartbeat: suspend () -> Unit,
         block: suspend (Frame) -> Unit,
@@ -63,7 +63,7 @@ public class KtorEventSource(override val sseId: String) : EventSource {
         }
     }
 
-    public companion object {
+    companion object {
         /** 帧队列容量：满了就丢帧，不反压业务协程。 */
         private const val QUEUE_CAPACITY: Int = 64
     }

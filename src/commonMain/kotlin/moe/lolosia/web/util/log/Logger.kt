@@ -7,14 +7,14 @@ package moe.lolosia.web.util.log
  *
  * @author 洛洛希雅Lolosia
  */
-public class Logger internal constructor(private val tag: String) {
-    public fun trace(message: () -> String): Unit = Log.write(LogLevel.TRACE, tag, message, null)
-    public fun debug(message: () -> String): Unit = Log.write(LogLevel.DEBUG, tag, message, null)
-    public fun info(message: () -> String): Unit = Log.write(LogLevel.INFO, tag, message, null)
+class Logger internal constructor(private val tag: String) {
+    fun trace(message: () -> String): Unit = Log.write(LogLevel.TRACE, tag, message, null)
+    fun debug(message: () -> String): Unit = Log.write(LogLevel.DEBUG, tag, message, null)
+    fun info(message: () -> String): Unit = Log.write(LogLevel.INFO, tag, message, null)
 
-    public fun warn(cause: Throwable? = null, message: () -> String): Unit =
+    fun warn(cause: Throwable? = null, message: () -> String): Unit =
         Log.write(LogLevel.WARN, tag, message, cause)
 
-    public fun error(cause: Throwable? = null, message: () -> String): Unit =
+    fun error(cause: Throwable? = null, message: () -> String): Unit =
         Log.write(LogLevel.ERROR, tag, message, cause)
 }

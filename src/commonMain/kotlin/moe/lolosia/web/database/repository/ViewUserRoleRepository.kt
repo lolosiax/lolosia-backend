@@ -16,13 +16,13 @@ import moe.lolosia.web.util.router.Injectable
  */
 @Repository
 @Injectable
-public interface ViewUserRoleRepository : CrudRepository<ViewUserRoleEntity> {
+interface ViewUserRoleRepository : CrudRepository<ViewUserRoleEntity> {
 
     @Query("select * from view_user_role where user_id = :userId and deleted = 0 order by role_id asc")
-    public suspend fun findAllByUserId(context: QueryExecutor, userId: String): Result<List<ViewUserRoleEntity>>
+    suspend fun findAllByUserId(context: QueryExecutor, userId: String): Result<List<ViewUserRoleEntity>>
 
     @Query("select * from view_user_role where user_id = :userId and deleted = 0 order by role_id asc limit 1")
-    public suspend fun findOneByUserId(context: QueryExecutor, userId: String): Result<ViewUserRoleEntity?>
+    suspend fun findOneByUserId(context: QueryExecutor, userId: String): Result<ViewUserRoleEntity?>
 
     /**
      * 分页列表：`keys` 匹配用户名 / 真名 / 手机 / 邮箱 / 角色名（传空串即不过滤）。
@@ -34,7 +34,7 @@ public interface ViewUserRoleRepository : CrudRepository<ViewUserRoleEntity> {
             "or phone like :keys or email like :keys or role_name like :keys) " +
             "order by role_id asc, user_name asc limit :limit offset :offset"
     )
-    public suspend fun findAllByKeys(
+    suspend fun findAllByKeys(
         context: QueryExecutor,
         keys: String,
         limit: Int,
@@ -45,5 +45,5 @@ public interface ViewUserRoleRepository : CrudRepository<ViewUserRoleEntity> {
         "select count(*) from view_user_role where deleted = 0 and (user_name like :keys or real_name like :keys " +
             "or phone like :keys or email like :keys or role_name like :keys)"
     )
-    public suspend fun countByKeys(context: QueryExecutor, keys: String): Result<Long>
+    suspend fun countByKeys(context: QueryExecutor, keys: String): Result<Long>
 }

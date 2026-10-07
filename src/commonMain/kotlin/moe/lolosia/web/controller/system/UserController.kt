@@ -1,32 +1,11 @@
 package moe.lolosia.web.controller.system
 
-import io.ktor.http.ContentType
-import io.ktor.http.content.ByteArrayContent
-import io.ktor.http.content.OutgoingContent
-import moe.lolosia.web.dto.EmptyResult
-import moe.lolosia.web.dto.IdListReq
-import moe.lolosia.web.dto.IdRow
-import moe.lolosia.web.dto.IdsReq
-import moe.lolosia.web.dto.SearchReq
-import moe.lolosia.web.dto.UpdatePasswordReq
-import moe.lolosia.web.dto.UserCreateReq
-import moe.lolosia.web.dto.UserInfoRow
-import moe.lolosia.web.dto.UserListReq
-import moe.lolosia.web.dto.UserListResult
-import moe.lolosia.web.dto.UserRoleRow
-import moe.lolosia.web.dto.UserRow
-import moe.lolosia.web.dto.UserUpdateReq
+import io.ktor.http.*
+import io.ktor.http.content.*
+import moe.lolosia.web.dto.*
 import moe.lolosia.web.service.system.UserRoleService
 import moe.lolosia.web.service.system.UserService
-import moe.lolosia.web.util.router.Body
-import moe.lolosia.web.util.router.Controller
-import moe.lolosia.web.util.router.FilePart
-import moe.lolosia.web.util.router.GET
-import moe.lolosia.web.util.router.POST
-import moe.lolosia.web.util.router.PUT
-import moe.lolosia.web.util.router.Path
-import moe.lolosia.web.util.router.Query
-import moe.lolosia.web.util.router.UploadedFile
+import moe.lolosia.web.util.router.*
 import moe.lolosia.web.util.session.Context
 
 /**

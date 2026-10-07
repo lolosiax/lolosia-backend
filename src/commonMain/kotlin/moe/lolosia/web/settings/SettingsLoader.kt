@@ -1,21 +1,7 @@
 package moe.lolosia.web.settings
 
-import com.charleskorn.kaml.Yaml
-import com.charleskorn.kaml.YamlList
-import com.charleskorn.kaml.YamlMap
-import com.charleskorn.kaml.YamlNode
-import com.charleskorn.kaml.YamlNull
-import com.charleskorn.kaml.YamlScalar
-import com.charleskorn.kaml.YamlTaggedNode
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
+import com.charleskorn.kaml.*
+import kotlinx.serialization.json.*
 import moe.lolosia.web.util.classpath.Classpath
 import moe.lolosia.web.util.classpath.readText
 import moe.lolosia.web.util.json.overlay
@@ -24,10 +10,10 @@ import okio.FileSystem
 import okio.Path.Companion.toPath
 
 /** 磁盘设置文件候选名（相对启动目录），按顺序取第一个存在的。 */
-public val SETTINGS_FILES: List<String> = listOf("application.yaml", "application.yml", "application.json")
+val SETTINGS_FILES: List<String> = listOf("application.yaml", "application.yml", "application.json")
 
 /** 覆盖磁盘设置文件路径的环境变量。 */
-public const val ENV_SETTINGS_FILE: String = "KTOR_CONFIG"
+const val ENV_SETTINGS_FILE: String = "KTOR_CONFIG"
 
 /** classpath 内嵌的默认设置文件名。 */
 private const val SETTINGS_RESOURCE: String = "application.json"
@@ -62,7 +48,7 @@ private val settingsYaml: Yaml = Yaml.default
  * @param diskPath 磁盘设置文件路径；为 `null` 时依次尝试 [SETTINGS_FILES]
  * @param env 环境变量读取函数，未设置须返回 `null`
  */
-public fun loadAppSettings(classpath: Classpath, diskPath: String?, env: (String) -> String?): AppSettings {
+fun loadAppSettings(classpath: Classpath, diskPath: String?, env: (String) -> String?): AppSettings {
     val defaults: JsonObject = settingsJson.encodeToJsonElement(AppSettings.serializer(), AppSettings()).jsonObject
     val embedded = classpath.readText(SETTINGS_RESOURCE)?.let { parseSettings(it, SETTINGS_RESOURCE) }
     val disk = findDiskSettings(diskPath)?.let { (path, text) -> parseSettings(text, path) }

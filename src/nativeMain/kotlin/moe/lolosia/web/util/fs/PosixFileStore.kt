@@ -8,7 +8,7 @@ package moe.lolosia.web.util.fs
  * @param root 根目录，相对启动目录（如 `work`）
  * @author 洛洛希雅Lolosia
  */
-public class PosixFileStore(private val root: String) : FileStore {
+class PosixFileStore(private val root: String) : FileStore {
 
     override fun read(path: String): ByteArray? = resolve(path)?.let(::readFileBytes)
 

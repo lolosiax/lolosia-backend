@@ -1,12 +1,6 @@
 package moe.lolosia.web.controller.system
 
-import moe.lolosia.web.dto.EmptyResult
-import moe.lolosia.web.dto.RoleCreateReq
-import moe.lolosia.web.dto.RoleDestroyReq
-import moe.lolosia.web.dto.RolePageReq
-import moe.lolosia.web.dto.RolePageResult
-import moe.lolosia.web.dto.RoleRow
-import moe.lolosia.web.dto.RoleUpdateReq
+import moe.lolosia.web.dto.*
 import moe.lolosia.web.service.system.RoleService
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller
