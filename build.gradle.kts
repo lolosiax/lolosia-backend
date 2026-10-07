@@ -1,4 +1,5 @@
 import com.fasterxml.jackson.databind.json.JsonMapper
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
     // KGP 由 buildSrc 提供（classpath 上已存在），故不写版本，避免重复加载
@@ -16,6 +17,10 @@ version = "1.0.0-SNAPSHOT"
 // 这里把 klib 内的 libcrypto.a 解到构建目录，在链接参数末尾再追加一次。
 val curlStaticLibDir = layout.buildDirectory.dir("curl-static-libs")
 
+// 第三方 C 库：产物（thirdparty/<目标>/*.a）与公共头文件随仓库提交，见 thirdparty/build-libs.ps1
+val thirdpartyDir = layout.projectDirectory.dir("thirdparty")
+val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif")
+
 kotlin {
     // Windows：本地开发调试用
     mingwX64 {
@@ -32,6 +37,25 @@ kotlin {
             executable {
                 entryPoint = "moe.lolosia.web.main"
                 linkerOpts(curlStaticLibDir.get().asFile.resolve("libcrypto.a").absolutePath)
+            }
+        }
+    }
+
+    // ===== 第三方 C 库的 cinterop 绑定 =====
+    // thirdparty/<目标>/*.a 是预编译好的静态库（升级用 thirdparty/build-libs.ps1），
+    // 这里只让 cinterop 解析 .def + 头文件，构建期不需要任何 C 工具链；
+    // .def 里声明的 staticLibraries 会被打进 klib，链接期随可执行文件静态链入。
+    targets.withType<KotlinNativeTarget>().configureEach {
+        val targetName = name
+        // expect/actual class 尚处 Beta，不关会每次编译都刷一条警告；util/image/Image.kt 正是 expect class
+        compilerOptions.freeCompilerArgs.add("-Xexpect-actual-classes")
+        compilations.getByName("main").cinterops {
+            thirdpartyLibs.forEach { lib ->
+                create(lib) {
+                    definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/$lib.def"))
+                    includeDirs.allHeaders(thirdpartyDir.dir("include").asFile)
+                    extraOpts("-libraryPath", thirdpartyDir.dir(targetName).asFile.absolutePath)
+                }
             }
         }
     }

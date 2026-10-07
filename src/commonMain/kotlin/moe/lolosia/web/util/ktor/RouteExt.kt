@@ -14,6 +14,7 @@ import moe.lolosia.web.util.classpath.normalizeClasspathPath
  *
  * - 命中目录（路径为空或以 `/` 结尾）时自动追加 [StaticClasspathConfig.index]；
  * - 未命中时调用 [StaticClasspathConfig.fallback]，没有则返回 404；
+ * - 命中后可选经 [StaticClasspathConfig.transform] 改写内容与 MIME；
  * - 自动设置 `Content-Type`（按扩展名）、`Cache-Control`、`ETag`（配合 ConditionalHeaders 支持 304）。
  *
  * 用法：
@@ -48,9 +49,11 @@ fun Route.staticClasspath(
 
         for (candidate in candidates) {
             val bytes = cp.read(candidate) ?: continue
+            val transformed = config.transform?.invoke(this, bytes)
+            val body = transformed?.bytes ?: bytes
             config.cacheControl?.let { response.header(HttpHeaders.CacheControl, it) }
-            response.header(HttpHeaders.ETag, "\"${candidate.hashCode().toUInt().toString(16)}-${bytes.size}\"")
-            respondBytes(bytes, ContentType.defaultForFilePath(candidate))
+            response.header(HttpHeaders.ETag, "\"${candidate.hashCode().toUInt().toString(16)}-${body.size}\"")
+            respondBytes(body, transformed?.contentType ?: ContentType.defaultForFilePath(candidate))
             return true
         }
         return false

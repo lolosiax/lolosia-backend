@@ -17,8 +17,12 @@ import moe.lolosia.web.dto.ApiResult
 import moe.lolosia.web.generated.configureInterceptors
 import moe.lolosia.web.generated.generatedRoutes
 import moe.lolosia.web.generated.registerInjectables
+import moe.lolosia.web.service.WebpCache
 import moe.lolosia.web.service.ddns.DdnsService
+import moe.lolosia.web.util.classpath.FileStoreClasspath
+import moe.lolosia.web.util.classpath.StaticClasspathConfig
 import moe.lolosia.web.util.classpath.classpath
+import moe.lolosia.web.util.fs.FileStore
 import moe.lolosia.web.util.ktor.staticClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.RouterInjection
@@ -114,6 +118,20 @@ fun Application.configureApplication(koin: Koin) {
         }
         get("/") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
         get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
+
+        // 运行期资源目录：旧版 `/res/resources/**` → `work/resources/**`（landing 页背景图走这里）。
+        // `?webp` 时按旧版语义转 WebP 并落盘缓存（见 WebpCache）；不支持的格式或转换失败回退原图。
+        val webpCache = koin.get<WebpCache>()
+        staticClasspath("/res/resources", cp = FileStoreClasspath(koin.get<FileStore>(), "resources")) {
+            index = null
+            transform = { bytes ->
+                if (request.queryParameters.contains("webp")) {
+                    webpCache.get(bytes)?.let { StaticClasspathConfig.Transformed(it, ContentType("image", "webp")) }
+                } else {
+                    null
+                }
+            }
+        }
 
         // 自研路由插件生成：全部 @Controller
         generatedRoutes()

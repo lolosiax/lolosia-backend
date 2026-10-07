@@ -52,6 +52,58 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 - WSL 侧需要 `aarch64-linux-gnu-objcopy`（Ubuntu-24.04 已装，在 `/usr/bin`）。
 - 路径转换用 `toWslPath()` 显式转 `/mnt/<盘符>/…`。**不要依赖工作目录传递** —— 从 Windows 进程拉起的 `wsl` 未必能翻译 cwd（实测把 `F:\Develop\…` 传成了 `F:Develop…`）。
 
+### 第三方 C 静态库（`thirdparty/`）
+
+图像编解码（WebP / PNG / JPEG / GIF）用 5 个 C 库：libwebp、libpng、zlib、libjpeg-turbo、giflib。
+**源码不入库、产物入库**：`thirdparty/<目标>/` 放 7 个 `.a`（libwebp 会带出私有依赖 `libsharpyuv`），
+`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/build-libs.ps1` 是一次性重建脚本。
+
+日常 `gradlew` 构建完全不碰 C 工具链 —— `build.gradle.kts` 只把 `.def` 与 `-libraryPath` 交给 cinterop，
+`.def` 里 `staticLibraries` 声明的 `.a` 会打进 klib、在链接期随可执行文件静态链入（与 ktor 的 curl klib 同一机制）。
+
+只在换库版本 / 改编译选项时重建：
+
+```powershell
+.\thirdparty\build-libs.ps1                                # 默认重建 mingwX64 + linuxArm64
+.\thirdparty\build-libs.ps1 -Targets mingwX64 -Force       # 只重建一个目标（默认工作目录 build/thirdparty，已 gitignore）
+```
+
+- **不需要额外安装任何工具链**：脚本用 `~/.konan` 里 Kotlin/Native 自带的 **llvm-21 clang** 交叉编译，
+  sysroot 也用 konan 自带的 `msys2-mingw-w64-x86_64-2`（mingwX64）与 `aarch64-unknown-linux-gnu-…`（linuxArm64）——
+  与 `konan.properties` 的 `targetSysRoot` 完全一致，ABI / glibc 版本与链接期对齐。
+- ⚠️ 别用 konan 自带 msys2 里的 `cc1.exe` 做编译器：它缺运行库 DLL，一执行就是 `0xC0000135 STATUS_DLL_NOT_FOUND`。
+- libpng 只认 `find_package(ZLIB)`：摆一个 zlib prefix 后传 `-DZLIB_ROOT=<prefix>`（旧的 `PNG_BUILD_ZLIB` 已废弃）；
+  zlib 的真 `zconf.h` 在**构建目录**里（源码树那份被 CMake 改名成 `zconf.h.included`）。
+- libjpeg-turbo 只构建静态库目标（`jpeg-static` / `turbojpeg-static`）：`all` 会连带构建 CLI 可执行文件，Linux 目标链接不过。
+- 绑定：`.def` 在 `src/nativeInterop/cinterop/`，门面在 `src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
+  包名一律 `moe.lolosia.thirdparty.<库名>`。`gradle.properties` 开了 `kotlin.mpp.enableCInteropCommonization=true`，
+  让 cinterop 声明对 `nativeMain` 可见（`kotlinx.cinterop` 的指针 API 本身仍只在 native 源集可用）。
+- 目标相关的类型宽度要当心：`size_t` 两目标都是 64 位可以安全传递，`unsigned long` 不是（mingw 32 位 / linux 64 位），
+  跨目标代码不要写出具体宽度。
+- 对 commonMain 暴露的统一入口是 `moe.lolosia.web.util.image.Image`（`expect` 在 commonMain、`actual` 在 nativeMain）：
+  `Image(bytes)` 按文件头识别并解码，`toByteArray(ImageFormat)` 编码（PNG / JPEG / WEBP；GIF 不编码），
+  属性 `width / height / size / format / colorType`，draw 用 `0xAARRGGBB` 的 `fill / drawPoint / drawLine / drawRect / draw(source, x, y)`
+  （前四者原值覆盖，`draw` 做 source-over 合成）；companion 上 `typeOf / sizeOf / colorTypeOf` 只读文件头、不解码。
+  四个门面各提供一个 `probe(bytes): ImageInfo?`：libpng 借 `begin_read` 后的 `image.format` 读源色彩类型、
+  libjpeg-turbo 读 `TJPARAM_COLORSPACE`、libwebp 用 `WebPGetFeatures`、giflib 手解逻辑屏幕描述符。
+
+`?webp` 冒烟（本机起服务后，注意 PS 5.1 的 `curl` 是 `Invoke-WebRequest` 的别名，要写 `curl.exe`）：
+
+```powershell
+curl.exe "http://127.0.0.1:7131/res/resources/test.png?webp" -o out.webp   # 开头应是 RIFF…WEBP，响应头 Content-Type: image/webp
+# 缓存落在 work/cache/webp/{源文件内容 md5}.webp；不支持的格式或转换失败回退原图
+```
+
+实测（2026-10）：png / jpg / gif 三种源图经 `?webp` 转换后用 Pillow 独立读回，四象限颜色逐一比对通过；
+带 alpha 的 PNG 与带透明色的 GIF 转出的 WebP 保留了 alpha；`?webp` 打在 `.txt` 上回退 `text/plain` 原文；
+`If-None-Match` 命中 ETag 返回 304。
+
+`Image` 的独立实测（2026-10-07，临时探针 route + Pillow 比对，验完已删）：
+`typeOf` / `sizeOf` / `colorTypeOf` 对 PNG(RGBA/RGB/GRAY/GRAY_ALPHA/PALETTE/16bit灰) / JPEG(RGB) / GIF(调色板) / WEBP 判定全部正确，
+bmp 回 `UNKNOWN`；三种源图 → png（无损，逐像素 0 误差）/ webp / jpeg 的四象限中心颜色比对通过；
+`fill / drawPoint（含半透明原值覆盖）/ drawRect（填充·描边）/ drawLine / draw(a, x, y)`（不透明覆盖、alpha=0 跳过、半透明 source-over 定点混合）逐点比对通过；
+`/res/resources/rgb.bmp?webp` 仍回退原图字节。
+
 ### 冒烟（本机 mingw）
 
 ```powershell
@@ -286,7 +338,9 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 - **P1 进度**（以当前前端 `E:\Dev\Node\lolosia-web` 的实际调用为准）：
   - **已完成**：图形验证码 `/captcha` `/verify` `/register`；头像上传/读取 `/user/avatar`；SSE `/api/sse` + `/sse/registry`（**开发板 aarch64 实机回归通过**：握手拿 id、匿名建流、首帧 `event: status` 及时 flush）；OSS 文件服务 `/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`（本机端到端冒烟通过）；`classpath.zip` 改 **DEFLATED**（读取端 `platform.zlib` inflate，Windows 与 aarch64 均实测，`/home/` 仍 200/395B）。
   - 前端已路由页面调用的接口：**全部具备**；`/user/getStudentInfoByStudentId` 属其它工程带过来的残留、并未被调用，**不迁**。
-  - **仍未做**（当前前端未调用 / 可选）：`sys_logs` 落库、WebP 转换、菜单管理 `/menu/{list,create,update,destroy,navigate}`（`menuManagement` / `roleManagement` 视图未挂路由，已弃用）、`textAi`（P2）。
+  - **仍未做**（当前前端未调用 / 可选）：`sys_logs` 落库、菜单管理 `/menu/{list,create,update,destroy,navigate}`（`menuManagement` / `roleManagement` 视图未挂路由，已弃用）、`textAi`（P2）。
+- **WebP 转换已完成**（2026-10）：`/res/resources/**?webp` 走 `WebpCache` + `util/image/Image.kt`（原 `NativeImageTranscoder` 已并入 `Image`），见 §2「第三方 C 静态库」。
+  两点已知差异：旧 JVM 版能转的 **bmp / tiff 没有对应解码库，一律回退原图**；`moe.lolosia.thirdparty.zlib` 目前只有 cinterop 绑定、没有 Kotlin 门面（libz.a 已由 libpng 的 `.def` 链入，绑定留着备查）。
 - **前端工程**：契约以前端 `E:\Dev\Node\lolosia-web` 为准（`viteJar.contextPath` 仍是 `home`，要改得两边同时改）。
 - **bcrypt 的尾巴**：`gensalt` 的随机源是 Kotlin 默认 PRNG（`Random.Default.nextBytes`），**非密码学强度** → 若要更严，用平台 CSPRNG（Linux `getrandom` / Windows `BCryptGenRandom`）做 expect/actual 替换。
 - **`RoleService.create` 的自增 id 靠回查**（按 `type + roleName` 取最大 id）；若要更稳可考虑角色 id 改应用侧生成（需评估既有 1~5 号角色引用）。
@@ -294,7 +348,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 - **`UserInfo`（`ctx.user`）目前零调用方**：能力已备但没有接口走到它，属未验证代码。
 - **测试**：native 侧 `commonTest` 只有依赖声明、**零测试**；验证全靠临时冒烟脚本（§2）。`legacy/jvm/test/kotlin/ServerTest.kt` 未迁移。
 - **`classpath.zip` 已改 DEFLATED**（`classpath { compressed = true }`，读取端 `ZipClasspath` 用 `platform.zlib` 做 raw inflate）：本机 zip 由 ~5MB 降到 ~2.5MB，Windows 与 aarch64 均实测可读。
-- **产物体积**：mingwX64 release 约 14.5 MiB（Koin / okio / kotlinx-datetime / ktor-client 的 klib 代码）——属预期代价，暂不优化。
+- **产物体积**：mingwX64 release 约 15.7 MiB（Koin / okio / kotlinx-datetime / ktor-client 的 klib 代码 + 内嵌的图像编解码静态库 libwebp·libpng·libjpeg-turbo·giflib·libz）——属预期代价，暂不优化。
 - 前端 `vite*.ts` 会连 `vitest.config.ts` / `vitest.setup.ts` 一起匹配，改测试配置也会触发一次 vite 构建；收紧可写 `vite.config*.ts`。
 
 ## 6. 环境依赖清单
@@ -307,6 +361,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | `qemu-user-static` + `libc6-arm64-cross`（+ `libcrypt.so.1`） | 不开板子验证旧 aarch64 产物（接了 sqlx4k 后已失效，见 §2） |
 | Node 24 + pnpm 10.22 + 前端工程 `E:\Dev\Node\lolosia-web` | `viteJar` 构建前端产物 |
 | QUIC 客户端 `F:\Develop\Python\quic-socket` | SSH 隧道到开发板 |
+| （可选）`~/.konan` 自带的 clang + sysroot | 只在重建第三方 C 静态库时用（`thirdparty/build-libs.ps1`），日常构建不需要 |
 | MariaDB / MySQL | 数据库 |
 
 ## 7. 工程形态：三处位置 + Trae 工作区

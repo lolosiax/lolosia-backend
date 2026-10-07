@@ -22,7 +22,7 @@
 - **多级配置覆盖**：数据类默认值 < 内嵌 JSON < 磁盘 `application.json` < 环境变量 < 命令行端口
 - **数据访问**：sqlx4k 的 `@Repository` + `@Query` 编译期代码生成（无 ORM、无反射），实体时间列统一 `kotlin.time.Instant`
 - **自研 multipart 解析**：Ktor 3.4 在 Native 上未实现 `receiveMultipart()`，改为读原始字节自行解析
-- **自研图形验证码**（`util/captcha`）：Native 上没有 `java.awt` / `javax.imageio`，于是自写 PNG 编码器（`util/image/Png.kt`：IHDR/IDAT/IEND + zlib STORED + CRC32/Adler-32）+ 5×7 点阵字形 + 算式生成，逐字对齐 hutool `LineCaptcha` / `MathGenerator`（100×40、150 条干扰线、`a+b=` 且结果可为负），零依赖出图
+- **自研图形验证码**（`util/captcha`）：Native 上没有 `java.awt` / `javax.imageio`，于是自写 5×7 点阵字形 + 算式生成，画在 `Image`（内嵌 libpng 编码）的空白画布上出图，逐字对齐 hutool `LineCaptcha` / `MathGenerator`（100×40、150 条干扰线、`a+b=` 且结果可为负）
 - **统一响应信封** `{code,msg,data}`：由 `EnvelopeInterceptor` 在 send pipeline 上按**响应 MIME** 统一包装（只认 `/api/` 下的 JSON；`text/plain` 与文件流/SSE 原样放行，要强制包一段 JSON 文本就返回 `dto.RawJson`）
 - **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退

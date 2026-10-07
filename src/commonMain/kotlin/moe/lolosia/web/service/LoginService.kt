@@ -23,7 +23,7 @@ import kotlin.uuid.Uuid
  *   这里用强类型 [LoginResult]（字段一一对应）；
  * - 登录失败回 `400`（旧版抛 `NoSuchElementException` / `IllegalAccessException`，被兜底成 `500`）——
  *   前端只读 `msg` 展示，状态码取语义更准的那个；
- * - 验证码是**自研**的（点阵字 + 手写 PNG，见 `util/captcha/`），旧版走 hutool（依赖 JDK 的 AWT/ImageIO）；
+ * - 验证码是**自研**的（点阵字画在 `Image` 上再编码 PNG，见 `util/captcha/`），旧版走 hutool（依赖 JDK 的 AWT/ImageIO）；
  * - 旧版拿**客户端 IP** 当验证码的缓存 tag，这里用**随机 token**（用户拍板）：多端共用同一个出口 IP 时
  *   不会互相覆盖，也经得起反代；
  * - 旧版没有 `/api/verify`（只在前端与鉴权白名单里出现），这里补上：**只校验图形验证码**；

@@ -1,6 +1,7 @@
 package moe.lolosia.web.util.captcha
 
-import moe.lolosia.web.util.image.RgbCanvas
+import moe.lolosia.web.util.image.Image
+import moe.lolosia.web.util.image.ImageFormat
 import kotlin.random.Random
 
 /**
@@ -10,7 +11,7 @@ import kotlin.random.Random
  * Kotlin/Native 上都没有。这里把整条链路自研掉：
  * - 文字：**5x7 点阵字形**（只需要 `0-9 + - * =` 这几个字符），按格缩放；
  * - 干扰线：[INTERFERE_LINES] 条随机彩色短线，随机端点，画在文字**下面**（与 hutool 同序）；
- * - 出图：[RgbCanvas] 手写 PNG（见 `util/image/Png.kt`）。
+ * - 出图：画在 [Image] 上（从零绘制的空白画布），编码走内嵌的 libpng（见 `util/image/Image.kt`）。
  *
  * 与旧版的**有意差异**（观感）：hutool 用系统 SansSerif 抗锯齿渲染，这里是方块点阵，字更"像素风"；
  * 算式、干扰线数量、配色策略（每个字符单独随机色）与旧版一致。
@@ -42,11 +43,11 @@ fun createMathCaptcha(
     random: Random = Random.Default,
 ): MathCaptcha {
     val (expression, answer) = generateExpression(random)
-    val canvas = RgbCanvas(width, height)
+    val canvas = Image(width, height)
     canvas.fill(BACKGROUND)
     drawInterfereLines(canvas, interfereCount, random)
     drawExpression(canvas, expression, random)
-    return MathCaptcha(expression, answer, canvas.toPng())
+    return MathCaptcha(expression, answer, canvas.toByteArray(ImageFormat.PNG))
 }
 
 /** 宽度（旧版 100）。 */
@@ -59,7 +60,7 @@ const val DEFAULT_HEIGHT: Int = 40
 const val INTERFERE_LINES: Int = 150
 
 /** 背景色（旧版 `captcha.setBackground(Color.BLACK)`）。 */
-private const val BACKGROUND: Int = 0x000000
+private const val BACKGROUND: Int = 0xFF000000.toInt()
 
 /** 参与计算的数字位数（hutool `MathGenerator` 默认 2）。 */
 private const val NUMBER_LENGTH: Int = 2
@@ -91,7 +92,7 @@ private fun generateExpression(random: Random): Pair<String, Int> {
 }
 
 /** 150 条随机彩色干扰线；端点范围沿用 hutool（终点最多偏移 1/8 宽高）。 */
-private fun drawInterfereLines(canvas: RgbCanvas, count: Int, random: Random) {
+private fun drawInterfereLines(canvas: Image, count: Int, random: Random) {
     val maxDx = (canvas.width / 8).coerceAtLeast(1)
     val maxDy = (canvas.height / 8).coerceAtLeast(1)
     repeat(count) {
@@ -102,7 +103,7 @@ private fun drawInterfereLines(canvas: RgbCanvas, count: Int, random: Random) {
 }
 
 /** 逐字符画点阵，每个字符单独随机颜色，整行垂直居中、字符在各自等分格内水平居中。 */
-private fun drawExpression(canvas: RgbCanvas, expression: String, random: Random) {
+private fun drawExpression(canvas: Image, expression: String, random: Random) {
     if (expression.isEmpty()) return
     val cellWidth = canvas.width / expression.length
     val scale = minOf(cellWidth / GLYPH_WIDTH, canvas.height / GLYPH_HEIGHT).coerceAtLeast(1)
@@ -115,15 +116,21 @@ private fun drawExpression(canvas: RgbCanvas, expression: String, random: Random
         glyph.forEachIndexed { row, line ->
             line.forEachIndexed { col, dot ->
                 // 每格多画 1px：点阵笔画由 scale px 加粗成 scale+1 px，字更实、更像 hutool 的字重
-                if (dot == '1') canvas.fillRect(left + col * scale, top + row * scale, scale + 1, scale + 1, color)
+                if (dot == '1') canvas.drawRect(left + col * scale, top + row * scale, scale + 1, scale + 1, color, filled = true)
             }
         }
     }
 }
 
-/** 随机彩色（`0..255` 各分量，与 hutool `ImgUtil.randomColor()` 一致）。 */
+/** 随机不透明彩色（`0..255` 各分量，与 hutool `ImgUtil.randomColor()` 一致）。 */
 private fun randomColor(random: Random): Int =
-    RgbCanvas.rgb(random.nextInt(256), random.nextInt(256), random.nextInt(256))
+    OPAQUE or rgb(random.nextInt(256), random.nextInt(256), random.nextInt(256))
+
+/** 打包不透明色的 `0xAARRGGBB`。 */
+private fun rgb(r: Int, g: Int, b: Int): Int = ((r and 0xFF) shl 16) or ((g and 0xFF) shl 8) or (b and 0xFF)
+
+/** 不透明 alpha。 */
+private const val OPAQUE: Int = 0xFF000000.toInt()
 
 /** 点阵字形宽（列数）。 */
 private const val GLYPH_WIDTH: Int = 5

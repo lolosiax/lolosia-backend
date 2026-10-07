@@ -11,6 +11,7 @@
 - **Kotlin/Native 全栈模板**：Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB。
 - 目标平台只有 **`mingwX64`**（Windows 本地开发）与 **`linuxArm64`**（部署到开发板）；**没有 JVM 目标**。
 - 产物是**单个原生可执行文件**：前端产物、SQL、默认配置都以 `classpath.zip` 形式内嵌，无 fat jar、无外部资源目录。
+- 图像编解码（WebP / PNG / JPEG / GIF）走**预编译的 C 静态库**，随可执行文件静态链入；库产物随仓库提交，日常构建不需要 C 工具链（`thirdparty/`，见 §7 / §10）。
 - 根包 **`moe.lolosia.web`**；唯一的独立 Gradle 模块是 `:router-ksp`（插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。
 - `legacy/jvm/` 是旧 JVM 实现，**不参与编译**，只作移植参考。
 
@@ -41,7 +42,7 @@
 - Ktor 的 `Application` 装配在 `configuration/AppConfigure.kt` 的 `Application.configureApplication(koin)`。
 - **各目标源集不再有 `main`，也不再有 `startServer`**：不要新增「由各目标入口传入 lambda」的写法。
 
-**平台差异只有三处 `expect/actual`**：`installPlatformClasspath()`、`envOrNull()`、`platformModule()`。
+**平台差异只有四处 `expect/actual`**：`installPlatformClasspath()`、`envOrNull()`、`platformModule()`，以及图像能力 [`Image`](src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt)（编解码要绑 C 静态库，`actual` 只能落在 nativeMain）。
 
 **KSP 生成的注册表跨源集可见**
 
@@ -127,6 +128,14 @@ generatedRoutes()                      // @Controller 路由批量注册
 - **资源一律走 `classpath` 中间层**，不要用文件系统路径：`src/<源集>/resources/**` 就是 classpath 根，运行时 `classpath.read("static/home/index.html")`。
   - `Classpath` 的来源标识：`scheme`（`file` / `classpath` / `empty`）与 `origin`（供日志展示）。
   - 内嵌 `classpath.zip` 默认 **DEFLATED**（`classpath { compressed = true }`），读取端 `ZipClasspath` 用 `platform.zlib` 做 inflate；STORED 也支持。
+- **运行期资源目录**（不在二进制内）：`/res/resources/**` → `work/resources/**`，用 `FileStoreClasspath` 把 `FileStore` 的子目录挂给 `staticClasspath`（前端 landing 页背景图走这条）。
+  带 `?webp` 时按旧版语义转 WebP 并落盘缓存 `work/cache/webp/{源文件内容md5}.webp`；不支持解码的格式（bmp / tiff）或转换失败一律回退原图（`service/WebpCache.kt` 落盘，转码走 `util/image/Image.kt`）。
+- **第三方 C 库**（图像编解码）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `src/nativeInterop/cinterop/*.def`。
+  - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/build-libs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
+  - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` 收发，不把 C 指针泄漏给调用方。
+  - 一律选**不依赖 `setjmp/longjmp` 的接口**（libpng 用 `png_image` 简化接口、libjpeg-turbo 用 `tj3*`、libwebp / giflib 本身回错误码），坏图只回 `null`，不会把进程带走。
+  - ⚠️ C 库只保留调用期间有效的裸指针（libpng 的 `png_image_begin_read_from_memory` 就是典型）：`usePinned` 必须覆盖到真正的解码调用为止，中途解 pin 只会得到「不报错但像素全错」。
+  - ⚠️ `size_t` 两目标都是 64 位可安全传递；`unsigned long` 不是（mingw 32 位 / linux 64 位），跨目标代码别写出具体宽度。
 - **前端路径不许写死**：用 `generateConstants` 产出的 `VITE_DEFAULT`（值 = viteJar 的 `contextPath`）拼路由。
 - **配置只有一个入口** [`settings/AppSettings.kt`](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable`）。
   优先级（低→高，**按字段深合并**）：数据类默认值 < 内嵌 `application.json` < 磁盘 `application.json` < 环境变量 < 命令行端口。
@@ -134,7 +143,8 @@ generatedRoutes()                      // @Controller 路由批量注册
 - **日志一律 `Log.of("tag")`**，不要 `println`；级别由配置 `logLevel` 控制。
 - **密码用自研 bcrypt**（`util/crypto/BCrypt.kt`，移植 jBCrypt 0.4）：保持 `$2a$` 与 cost=10 语义，能直接校验库里既有的哈希；
   改动算法后**先跑 jBCrypt 官方测试向量**。
-- **Native 上没有 `java.awt` / `javax.imageio`**，图像需求一律自研，不要去 Maven 找库：PNG 编码器在 `util/image/Png.kt`（8bit RGB、无隔行、zlib STORED），验证码在 `util/captcha/`（5×7 点阵字，无字体依赖）。
+- **Native 上没有 `java.awt` / `javax.imageio`**：通用图像编解码走内嵌的 C 静态库（见上一条），commonMain 的统一入口是 [`util/image/Image.kt`](src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt)（`expect class Image`：bytes ↔ 像素、探测格式/尺寸/色彩类型、基础 draw）；
+  纯自研的只剩验证码那条链路 —— `util/captcha/`（5×7 点阵字，无字体依赖）直接画在 `Image` 的空白画布上再编码 PNG。不要去 Maven 找图像库。
 
 ## 8. 接口契约
 
@@ -151,6 +161,7 @@ gradlew compileKotlinMingwX64 compileKotlinLinuxArm64
 
 - 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64`；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`，见 [doc/development-notes.md](doc/development-notes.md)）。
+- **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（Windows 上借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链）；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
 - **没有自动化测试**（`commonTest` 只有依赖声明）；行为验证目前靠临时冒烟脚本（命令清单见 `doc/development-notes.md`）。
 - KSP 聚合输出**必须带源文件**：`Dependencies(aggregating = true, *sourceFiles)`。只写 `aggregating = true` 会漏扫未改动文件，症状是「**编译通过但接口全 404**」。
 - ⚠️ KSP 处理器**不要在首轮 `deferred`**（会让 KSP 重跑同一轮，而 sqlx4k 的 processor 没有去重标志，重复 `createNewFile` 直接抛 `FileAlreadyExistsException`）。
@@ -171,14 +182,14 @@ src/commonMain/kotlin/moe/lolosia/web/
   database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
   dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos
   interceptor/                   Traffic → Ctx → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
-  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / ddns/ / oss/
+  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/
   service/system/                UserService / RoleService / UserRoleService / QuerySupport
   settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
   util/captcha/                 自研图形验证码（点阵字 + 算式）
-  util/classpath/               Classpath 接口 / ClasspathExt / ClasspathHolder / StaticClasspathConfig / package.kt
+  util/classpath/               Classpath 接口 / ClasspathExt / ClasspathHolder / StaticClasspathConfig / FileStoreClasspath / package.kt
   util/crypto/BCrypt.kt         自研 bcrypt
   util/fs/FileStore.kt          文件存储抽象（native 实现 PosixFileStore）
-  util/image/Png.kt             自研 PNG 编码器
+  util/image/                   Image.kt（expect：bytes ↔ 像素、格式/尺寸/色彩类型探测、draw）+ ImageFormat / ImageColorType / ImageSize / ImageCodecException
   util/json/ koin/ ktor/        外部库类型扩展（JsonObject / Koin / Route·ApplicationCall）
   util/log/                     Log / LogLevel / Logger（自研）
   util/platform/Env.kt          envOrNull（expect）
@@ -189,9 +200,12 @@ src/commonMain/kotlin/moe/lolosia/web/
   util/time/Time.kt             nowLocal（仅日志）/ nowEpochMs
 src/commonMain/resources/       application.json（内嵌默认配置）/ static/home/ / hello.txt
 src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspath(Image) / EmptyClasspath、
-                                installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*
+                                installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*、
+                                util/image/Image.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
+src/nativeInterop/cinterop/     第三方 C 库的绑定定义（zlib / png / webp / jpeg / gif 各一个 .def）
 src/mingwX64Main|linuxArm64Main/kotlin/…/
                                 api/ApiClient.* / classpath/EmbeddedClasspath.* / fs/Mkdir.* / proc/Shell.*（无入口）
+thirdparty/                     预编译 C 静态库与头文件（入库产物）+ build-libs.ps1（一次性重建脚本）
 router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller）/ InterceptorProcessor（@Interceptor）/
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、
