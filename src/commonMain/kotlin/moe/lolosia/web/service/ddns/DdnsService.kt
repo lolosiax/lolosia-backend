@@ -1,10 +1,12 @@
 package moe.lolosia.web.service.ddns
 
+import io.ktor.http.HttpMethod
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -65,7 +67,7 @@ public class DdnsService(private val config: AppSettings.DdnsConfig) {
 
         val record = fetchRecord()
         if (record == null) {
-            post(recordsUrl(), recordBody(ip), authHeaders()).requireSuccess()
+            cloudflare(HttpMethod.Post, recordsPath(), recordBody(ip))
             log.info { "已创建 AAAA ${config.recordName} -> $ip" }
             return
         }
@@ -79,7 +81,7 @@ public class DdnsService(private val config: AppSettings.DdnsConfig) {
             return
         }
 
-        put("${recordsUrl()}/$id", recordBody(ip), authHeaders()).requireSuccess()
+        cloudflare(HttpMethod.Put, "${recordsPath()}/$id", recordBody(ip))
         log.info { "已更新 AAAA ${config.recordName}：$old -> $ip（proxied=$proxied）" }
     }
 
@@ -129,8 +131,8 @@ public class DdnsService(private val config: AppSettings.DdnsConfig) {
 
     /** 查 AAAA 记录；查不到记录（`result` 为空）返回 `null`，请求失败则抛异常。 */
     private suspend fun fetchRecord(): JsonObject? {
-        val url = "${recordsUrl()}?type=AAAA&name=${config.recordName}"
-        val result = get(url, authHeaders()).requireSuccess()["result"] as? JsonArray ?: return null
+        val path = "${recordsPath()}?type=AAAA&name=${config.recordName}"
+        val result = cloudflare(HttpMethod.Get, path)["result"] as? JsonArray ?: return null
         return result.firstOrNull() as? JsonObject
     }
 
@@ -143,7 +145,22 @@ public class DdnsService(private val config: AppSettings.DdnsConfig) {
         put("proxied", config.proxied)
     }
 
-    private fun recordsUrl(): String = "$API_BASE/zones/${config.zoneId}/dns_records"
+    /**
+     * 调一次 Cloudflare API，并校验其 `success` 信封。
+     *
+     * CF 的响应不是本项目 [moe.lolosia.web.dto.ApiResult] 那一套，故一律以 `rawResponse = true` 取原始 JSON。
+     */
+    private suspend fun cloudflare(method: HttpMethod, path: String, body: JsonElement? = null): JsonObject {
+        val headers = authHeaders()
+        return when (method) {
+            HttpMethod.Get -> get<JsonElement>(API_BASE, path, rawResponse = true, headers = headers)
+            HttpMethod.Post -> post<JsonElement>(API_BASE, path, body, rawResponse = true, headers = headers)
+            HttpMethod.Put -> put<JsonElement>(API_BASE, path, body, rawResponse = true, headers = headers)
+            else -> throw IllegalArgumentException("Cloudflare 接口不支持 $method")
+        }.requireSuccess()
+    }
+
+    private fun recordsPath(): String = "/zones/${config.zoneId}/dns_records"
 
     /** 鉴权请求头。 */
     private fun authHeaders(): Map<String, String> = mapOf("Authorization" to "Bearer ${config.apiToken}")

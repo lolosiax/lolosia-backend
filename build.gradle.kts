@@ -11,6 +11,11 @@ plugins {
 group = "moe.lolosia.web"
 version = "1.0.0-SNAPSHOT"
 
+// Curl 引擎（Linux 目标的 HTTP 客户端底层）以静态库形式链入 libcurl / libssl / libcrypto，
+// 而链接器扫描归档的顺序里 libcrypto 排在依赖它的 libssl 之前，OpenSSL 符号因此解析不到。
+// 这里把 klib 内的 libcrypto.a 解到构建目录，在链接参数末尾再追加一次。
+val curlStaticLibDir = layout.buildDirectory.dir("curl-static-libs")
+
 kotlin {
     // Windows：本地开发调试用
     mingwX64 {
@@ -26,6 +31,7 @@ kotlin {
         binaries {
             executable {
                 entryPoint = "moe.lolosia.web.main"
+                linkerOpts(curlStaticLibDir.get().asFile.resolve("libcrypto.a").absolutePath)
             }
         }
     }
@@ -50,6 +56,16 @@ kotlin {
             implementation(ktorLibs.server.conditionalHeaders)
             implementation(ktorLibs.serialization.kotlinx.json)
             implementation(libs.kotlinx.serialization.json)
+
+            // 对外请求（api 包）：引擎按目标平台选择，见各平台源集
+            implementation(ktorLibs.client.core)
+            implementation(ktorLibs.client.websockets)
+        }
+        linuxArm64Main.dependencies {
+            implementation(ktorLibs.client.curl)
+        }
+        mingwX64Main.dependencies {
+            implementation(ktorLibs.client.winhttp)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -57,6 +73,28 @@ kotlin {
         }
     }
 }
+
+// ===== Curl 引擎的 libcrypto 静态库补齐（见文件顶部说明）=====
+val unpackCurlStaticLibs = tasks.register("unpackCurlStaticLibs") {
+    val klibs = configurations.named("linuxArm64CompileKlibraries")
+    val outDir = curlStaticLibDir
+    inputs.files(klibs)
+    outputs.dir(outDir)
+    doLast {
+        val out = outDir.get().asFile
+        out.mkdirs()
+        klibs.get()
+            .filter { it.name.startsWith("ktor-client-curl") && it.name.endsWith(".klib") }
+            .forEach { klib ->
+                project.zipTree(klib)
+                    .matching { include("**/libcrypto.a") }
+                    .forEach { it.copyTo(out.resolve("libcrypto.a"), overwrite = true) }
+            }
+    }
+}
+
+tasks.matching { it.name.startsWith("link") && it.name.endsWith("LinuxArm64") }
+    .configureEach { dependsOn(unpackCurlStaticLibs) }
 
 // ===== 自研路由插件：KSP 需按目标声明处理器 =====
 // 注意：KSP2 没有 common/metadata 编译单元，生成代码落在各目标源集；
