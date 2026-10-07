@@ -6,6 +6,7 @@ import moe.lolosia.web.service.CacheManager
 import moe.lolosia.web.service.LoginService
 import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.SseService
+import moe.lolosia.web.service.ddns.DdnsService
 import moe.lolosia.web.service.system.RoleService
 import moe.lolosia.web.service.system.UserRoleService
 import moe.lolosia.web.service.system.UserService
@@ -40,6 +41,7 @@ public fun serviceModule(): Module = module {
     single { UserService(get(), get(), get(), get()) }
     single { RoleService(get(), get()) }
     single { UserRoleService(get(), get(), get()) }
+    single { DdnsService(get<AppSettings>().ddns) }
 }
 
 /** 启动容器。[platformModules] 由各目标 `main()` 传入（含 sqlx4k 生成的仓库实现）。 */

@@ -25,6 +25,7 @@ import moe.lolosia.web.settings.loadAppSettings
 import moe.lolosia.web.configuration.startAppKoin
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.ApiResult
+import moe.lolosia.web.service.ddns.DdnsService
 import moe.lolosia.web.util.classpath.DiskClasspath
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
@@ -171,4 +172,7 @@ private fun Application.configureApplication(
         // 自研路由插件生成：全部 @Controller
         installRoutes()
     }
+
+    // DDNS：挂到应用作用域按配置间隔轮询，未启用时只记一条日志
+    koin.get<DdnsService>().start(this)
 }
