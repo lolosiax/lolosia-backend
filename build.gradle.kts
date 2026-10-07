@@ -9,7 +9,7 @@ plugins {
     id("moe.lolosia")
 }
 
-group = "moe.lolosia.web"
+group = "moe.lolosia"
 version = "1.0.0-SNAPSHOT"
 
 // Curl 引擎（Linux 目标的 HTTP 客户端底层）以静态库形式链入 libcurl / libssl / libcrypto，
@@ -170,7 +170,7 @@ ksp {
 // classpath.zip 的合并与嵌入（windres / objcopy / 链接参数）由 buildSrc 的 LolosiaPlugin 实现。
 lolosia {
     packageName = "moe.lolosia.web"
-    projectName = "洛洛希雅的Ktor后端"
+    projectName = "洛洛希雅的小网站"
 
     // 从根目录 platforms.json 读取前端工程路径（webPath）与部署服务器列表（deploy）
     val platformsFile = rootDir.resolve("platforms.json")

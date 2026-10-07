@@ -29,7 +29,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ktor-template"
+rootProject.name = "lolosia-backend"
 
 // 自研路由插件的 KSP 处理器（必须跑在 JVM 上，独立模块）
 include(":router-ksp")

@@ -1,0 +1,15 @@
+[Unit]
+Description=洛洛希雅的小网站 (Kotlin/Native)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/lolosia-backend
+# 由部署插件在推送时整行替换为当前版本的可执行文件路径（无 java -jar 前缀）
+ExecStart=/srv/lolosia-backend/lolosia-backend
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
