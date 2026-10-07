@@ -121,6 +121,8 @@ generatedRoutes()                      // @Controller 路由批量注册
   `application/json` / `text/json` / `*+json` 包成 `{code,msg,data}`；`text/plain` **不包**；文件流 / SSE 不处理；
   顶层已含 `code`/`msg`/`data` 三键的响应（`ApiResult`、StatusPages 的错误响应）**跳过**，避免双重包裹；
   必须原样的响应（如 SSE 握手）给 call 打 `EnvelopeSkipKey`。
+- **WebDAV 挂在 `/api` 之外**（默认 `/dav`，见 `util/ktor/WebDavRouting.kt`）：既不经会话鉴权、也不套信封，鉴权走 HTTP Basic ——
+  WebDAV 客户端（Windows「映射网络驱动器」）要的是原样状态码与 207 多状态 XML。**不要**把它挪进 `/api`，也不要给它套信封。
 
 ## 7. 资源、配置、日志、密码、图像
 
@@ -129,6 +131,8 @@ generatedRoutes()                      // @Controller 路由批量注册
   - 内嵌 `classpath.zip` 默认 **DEFLATED**（`classpath { compressed = true }`），读取端 `ZipClasspath` 用 `platform.zlib` 做 inflate；STORED 也支持。
 - **运行期资源目录**（不在二进制内）：`/res/resources/**` → `work/resources/**`，用 `FileStoreClasspath` 把 `FileStore` 的子目录挂给 `staticClasspath`（前端 landing 页背景图走这条）。
   带 `?webp` 时按旧版语义转 WebP 并落盘缓存 `work/cache/webp/{源文件内容md5}.webp`；不支持解码的格式（bmp / tiff）或转换失败一律回退原图（`service/WebpCache.kt` 落盘，转码走 `util/image/Image.kt`）。
+- **WebDAV**：`AppSettings.webdav`（`enabled` / `path` / `root` / `username` / `password` / `realm`）把 `root` 目录（如挂载的机械盘 `/mnt/hdd1`）挂到 `path` 下；
+  协议层在 `util/ktor/WebDavRouting.kt`、存储层在 `service/dav/`。挂载点在 `/api` 之外（规则见 §6），鉴权用 HTTP Basic。
 - **第三方 C 库**（图像编解码）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `src/nativeInterop/cinterop/*.def`。
   - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/build-libs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
   - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` 收发，不把 C 指针泄漏给调用方。
@@ -182,7 +186,7 @@ src/commonMain/kotlin/moe/lolosia/web/
   database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
   dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos
   interceptor/                   Traffic → Ctx → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
-  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/
+  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）
   service/system/                UserService / RoleService / UserRoleService / QuerySupport
   settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
   util/captcha/                 自研图形验证码（点阵字 + 算式）
@@ -190,7 +194,7 @@ src/commonMain/kotlin/moe/lolosia/web/
   util/crypto/BCrypt.kt         自研 bcrypt
   util/fs/FileStore.kt          文件存储抽象（native 实现 PosixFileStore）
   util/image/                   Image.kt（expect：bytes ↔ 像素、格式/尺寸/色彩类型探测、draw）+ ImageFormat / ImageColorType / ImageSize / ImageCodecException
-  util/json/ koin/ ktor/        外部库类型扩展（JsonObject / Koin / Route·ApplicationCall）
+  util/json/ koin/ ktor/        外部库类型扩展（JsonObject / Koin / Route·ApplicationCall；WebDAV 路由 `webDav` 在 ktor/）
   util/log/                     Log / LogLevel / Logger（自研）
   util/platform/Env.kt          envOrNull（expect）
   util/proc/Shell.kt            子进程
@@ -218,5 +222,6 @@ sql/                            建表脚本（7 表 + view_user_role 视图）
 
 | 文档 | 内容 |
 | --- | --- |
+| [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) | **本派生项目**自身的差异与运行事实（更名 / WebDAV / 部署 / 网络实测）；上游模板那份 md 不动，差异都记在这里 |
 | [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 / 工程形态（运行层面） |
 | [doc/native-migration-plan.md](doc/native-migration-plan.md) | JVM → Kotlin/Native 迁移详设与实测记录（历史） |

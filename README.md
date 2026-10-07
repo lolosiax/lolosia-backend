@@ -1,10 +1,10 @@
-# ktor-template
+# lolosia-backend
 
-洛洛希雅（Lolosia）的 Ktor 后端模板：**Kotlin + Ktor 3 服务端脚手架**，已从 JVM 单体迁移为 **Kotlin/Native 原生可执行文件**——没有 JVM、没有 fat jar，一个二进制就是全部（前端产物、SQL 脚本、配置文件都嵌在里面）。
+洛洛希雅（Lolosia）的小网站后端：**Kotlin + Ktor 3 服务端**，已从 JVM 单体迁移为 **Kotlin/Native 原生可执行文件**——没有 JVM、没有 fat jar，一个二进制就是全部（前端产物、SQL 脚本、配置文件都嵌在里面）。
 
 - 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB**
 - 目标平台：**`mingwX64`**（Windows 本地开发调试）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**不保留 JVM 目标**
-- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）
+- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）、**WebDAV 服务**（手写协议层，把机械盘挂到 `/dav`，见 `service/dav`、`util/ktor/WebDavRouting.kt`）
 
 > 项目风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 冒烟 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
 > JVM → Kotlin/Native 的迁移详设与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)。
@@ -25,6 +25,7 @@
 - **统一响应信封** `{code,msg,data}`：由 `EnvelopeInterceptor` 在 send pipeline 上按**响应 MIME** 统一包装（只认 `/api/` 下的 JSON；`text/plain` 与文件流/SSE 原样放行，要强制包一段 JSON 文本就返回 `dto.RawJson`）
 - **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
+- **WebDAV 服务**：把 `webdav.root`（如挂载的机械盘 `/mnt/hdd1`）以 WebDAV 挂在 `webdav.path`（默认 `/dav`）下，覆盖 `OPTIONS / PROPFIND / PROPPATCH / GET(含 Range) / PUT / DELETE / MKCOL / COPY / MOVE / LOCK / UNLOCK`，HTTP Basic 鉴权。挂载点在 `/api` 之外，**不套 `{code,msg,data}` 信封、也不走会话鉴权** —— Windows「映射网络驱动器」这类客户端要的是原样状态码与 207 多状态 XML
 - **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件、或挂进基础镜像由 docker 托管（两种都自动留 `.previous` 回滚文件）
 
 ## 🧱 技术栈
@@ -61,7 +62,7 @@
 │   │   ├── dto/                  # ApiResult（{code,msg,data} 信封）/ RawJson / SystemDtos / LoginDtos
 │   │   ├── generated/            # GeneratedRegistries.kt（5 个 expect 签名；actual 由 router-ksp 生成到各目标）
 │   │   ├── interceptor/          # Traffic / Ctx / Auth / Envelope 四层（顺序由 @Interceptor 经 KSP 生成）
-│   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService
+│   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService / WebpCache / oss / dav（WebDAV）
 │   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
 │   │   ├── settings/             # AppSettings（@Serializable）+ 多级覆盖 SettingsLoader
 │   │   └── util/                 # captcha / classpath / crypto(BCrypt) / image(Image) / json / koin / ktor / log / router / session / time
@@ -71,7 +72,7 @@
 │   └── linuxMain/kotlin/…/       # 两个 linux 目标共享的 ApiClient / EmbeddedClasspath / Mkdir / Shell 实现（无入口）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── sql/                          # 建表脚本（7 张表 + view_user_role 视图）
-├── ktor-template.service         # systemd 单元模板（部署插件据此改写 ExecStart）
+├── lolosia-backend-native.service # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```
 
@@ -94,20 +95,20 @@
 ### 1. 建库导表
 
 ```sql
-CREATE DATABASE `ktor-template` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+CREATE DATABASE `lolosia-backend` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 ```
 
 导入 `sql/` 下的脚本（**`view_user_role.sql` 依赖前面的表，必须最后导**）：
 
 ```bash
-mysql -u root -p -D ktor-template < sql/sys_user.sql
-mysql -u root -p -D ktor-template < sql/sys_role.sql
-mysql -u root -p -D ktor-template < sql/sys_sessions.sql
-mysql -u root -p -D ktor-template < sql/sys_cache.sql
-mysql -u root -p -D ktor-template < sql/sys_user_roles.sql
-mysql -u root -p -D ktor-template < sql/sys_logs.sql
-mysql -u root -p -D ktor-template < sql/oss_user_file.sql
-mysql -u root -p -D ktor-template < sql/view_user_role.sql   # 视图放最后
+mysql -u root -p -D lolosia-backend < sql/sys_user.sql
+mysql -u root -p -D lolosia-backend < sql/sys_role.sql
+mysql -u root -p -D lolosia-backend < sql/sys_sessions.sql
+mysql -u root -p -D lolosia-backend < sql/sys_cache.sql
+mysql -u root -p -D lolosia-backend < sql/sys_user_roles.sql
+mysql -u root -p -D lolosia-backend < sql/sys_logs.sql
+mysql -u root -p -D lolosia-backend < sql/oss_user_file.sql
+mysql -u root -p -D lolosia-backend < sql/view_user_role.sql   # 视图放最后
 ```
 
 ### 2. 本地配置（不入库）
@@ -118,8 +119,8 @@ mysql -u root -p -D ktor-template < sql/view_user_role.sql   # 视图放最后
 ### 3. 构建与启动（本机 mingwX64）
 
 ```powershell
-gradlew linkReleaseExecutableMingwX64                       # 产物：build\bin\mingwX64\releaseExecutable\ktor-template.exe
-build\bin\mingwX64\releaseExecutable\ktor-template.exe 7129  # 首参覆盖端口（可选）
+gradlew linkReleaseExecutableMingwX64                       # 产物：build\bin\mingwX64\releaseExecutable\lolosia-backend.exe
+build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129  # 首参覆盖端口（可选）
 ```
 
 服务默认监听 `0.0.0.0:7129`，静态首页在 `http://127.0.0.1:7129/home/`。冒烟：
@@ -204,6 +205,8 @@ object ExampleController {
 
 模板另留一个资源探针 `/api/classpath/{list,read}`（列出/读取内嵌资源，需鉴权），用于运维排障。
 
+WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权与响应信封影响，鉴权走 HTTP Basic —— 配置与对外暴露见「配置」一节与 [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md)。
+
 ## ⚙️ 配置
 
 配置只有一个入口：[AppSettings](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable` 数据类）。
@@ -211,22 +214,34 @@ object ExampleController {
 
 1. 数据类里的默认值
 2. classpath 内嵌的 [application.json](src/commonMain/resources/application.json)（随二进制分发）
-3. 磁盘 `application.json`（相对启动目录；systemd 下即 `/srv/ktor-template/`，可用 `KTOR_CONFIG` 指定其它路径）
+3. 磁盘 `application.json`（相对启动目录；systemd 下即 `/srv/lolosia-backend/`，可用 `KTOR_CONFIG` 指定其它路径）
 4. 环境变量：`KTOR_HOST` / `KTOR_PORT` / `KTOR_LOG_LEVEL` / `KTOR_DB_URL` / `KTOR_DB_USERNAME` / `KTOR_DB_PASSWORD`
-5. 命令行第一个参数（仅端口，如 `ktor-template.exe 8080`）
+5. 命令行第一个参数（仅端口，如 `lolosia-backend.exe 8080`）
 
 ```json
 {
   "server": { "host": "0.0.0.0", "port": 7129 },
   "datasource": {
-    "url": "mysql://127.0.0.1:3306/ktor-template",
+    "url": "mysql://127.0.0.1:3306/lolosia-backend",
     "username": "root",
     "password": "123456",
     "maxConnections": 10
   },
+  "webdav": {
+    "enabled": true,
+    "path": "/dav",
+    "root": "/mnt/hdd1",
+    "username": "lolosia",
+    "password": "",
+    "realm": "lolosia-webdav"
+  },
   "logLevel": "INFO"
 }
 ```
+
+> `webdav.password` 为空时**拒绝一切请求**（服务端不会退化到匿名），启动日志会打一条 WARN。
+> WebDAV 的鉴权是 **HTTP Basic**：Windows 内置客户端只在 HTTPS 上才肯发 Basic，所以对外要经 TLS 反代（如 Caddy）；
+> 局域网里直接用 `http://<主机>:<端口>/dav` 即可（手机等第三方客户端不受这条限制）。
 
 > 其它环境变量：`KTOR_CLASSPATH_DIR` 指向磁盘资源目录，开发期改前端/资源不必重编二进制。
 > 加配置项 = 改 `AppSettings`（+ 必要时改 `envOverrides`），不要另起一套读取逻辑；磁盘 JSON 带 BOM 也能解析（解析失败会记 WARN 而不是静默忽略）。
@@ -254,11 +269,11 @@ object ExampleController {
 **`mode: "docker"`**：不构建镜像，产物以挂载方式注入基础镜像运行（JVM 项目另有那套 Dockerfile 流程，原生不用）。
 
 - 基础镜像配在 `build.gradle.kts` 的 `binary { dockerImage }`，加速源配在 `docker { image("ubuntu:24.04") { mirror } }`；国内直连 docker.io 拉不动，模板默认走华为云 SWR 的 docker.io 代理
-- 挂载：`/srv/ktor-template` → `/app`（可执行文件、配置、`work/` 都在其中），另挂宿主 `/etc/localtime` `/etc/timezone` `/usr/share/zoneinfo`（基础镜像不带 tzdata，少挂一个日志就整片落在 UTC）
+- 挂载：`/srv/lolosia-backend` → `/app`（可执行文件、配置、`work/` 都在其中），另挂宿主 `/etc/localtime` `/etc/timezone` `/usr/share/zoneinfo`（基础镜像不带 tzdata，少挂一个日志就整片落在 UTC）
 - 网络用 `--network host`：应用直接绑宿主端口，容器里的 `127.0.0.1` 就是宿主（库地址按这个配）
 - 回滚：旧容器**先停**再改名成 `<名字>-old`，新版确认活着才删；失败会打印容器日志并删掉新容器
 
-部署目录约定为 `/srv/ktor-template/`（磁盘 `application.json` / `application.yaml` 也放这里）。CIO 引擎无 HTTPS 与压缩，这两件事交给前置 Nginx。
+部署目录约定为 `/srv/lolosia-backend/`（磁盘 `application.json` / `application.yaml` 也放这里）。CIO 引擎无 HTTPS 与压缩，这两件事交给前置 Nginx（WebDAV 的 Basic 鉴权另需一条 TLS 反代，见 `doc/lolosia-backend-notes.md`）。
 
 ## 🗺 迁移进度与路线图
 
@@ -277,7 +292,7 @@ object ExampleController {
 
 > P0 已收尾（临时探针 `DemoController` / `DEV_PROBES` 已删），进入 P1。
 
-- **P1（进行中）**：✅ 图形验证码 · ✅ 头像上传/读取 · ✅ SSE 事件总线（含开发板实机回归）· ✅ OSS 文件服务（`/api/oss/{list,getMetas,fileCheck,upload,get}`）· ✅ `classpath.zip` 改 DEFLATED；待办：WebP 转换（前端当前未用）、gzip/br 压缩交给 Nginx、前端工程与契约副本对齐
+- **P1（进行中）**：✅ 图形验证码 · ✅ 头像上传/读取 · ✅ SSE 事件总线（含开发板实机回归）· ✅ OSS 文件服务（`/api/oss/{list,getMetas,fileCheck,upload,get}`）· ✅ WebDAV（机械盘挂载到 `/dav`）· ✅ `classpath.zip` 改 DEFLATED；待办：WebP 转换（前端当前未用）、gzip/br 压缩交给 Nginx、前端工程与契约副本对齐
 - **P2**：AI 相关按需改为纯 Ktor Client 直连 LLM HTTP API（不引入 AI 框架）
 
 ## 📜 License
