@@ -13,6 +13,9 @@ import moe.lolosia.web.util.session.ContextKey
  * 形参即依赖：生成器会把它们按类型从容器取出来（`koin.get(...)`），所以这里声明容器里的类型
  * （`Database`）而不是驱动类型。
  *
+ * 只把 [Database] 本体交给上下文、**不提前取驱动**：数据库未就绪时由真正读库的处理路径抛 503，
+ * 静态资源、SSE 这类不碰库的请求不受影响。
+ *
  * @author 洛洛希雅Lolosia
  */
 @Interceptor(-5)
@@ -22,7 +25,7 @@ fun Application.installCtxInterceptor(
     bindings: ViewUserRoleRepository,
 ) {
     intercept(ApplicationCallPipeline.Call) {
-        call.attributes.put(ContextKey, ApplicationCallContext(call, db.driver, users, bindings))
+        call.attributes.put(ContextKey, ApplicationCallContext(call, db, users, bindings))
         proceed()
     }
 }

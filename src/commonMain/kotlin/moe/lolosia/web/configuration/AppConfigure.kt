@@ -11,6 +11,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
 import moe.lolosia.web.VITE_DEFAULT
+import moe.lolosia.web.database.Database
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.ApiResult
 import moe.lolosia.web.generated.configureInterceptors
@@ -120,4 +121,7 @@ fun Application.configureApplication(koin: Koin) {
 
     // DDNS：挂到应用作用域按配置间隔轮询，未启用时只记一条日志
     koin.get<DdnsService>().start(this)
+
+    // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用
+    koin.get<Database>().startReconnectLoop(this)
 }
