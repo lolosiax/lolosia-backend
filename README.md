@@ -3,7 +3,7 @@
 洛洛希雅（Lolosia）的 Ktor 后端模板：**Kotlin + Ktor 3 服务端脚手架**，已从 JVM 单体迁移为 **Kotlin/Native 原生可执行文件**——没有 JVM、没有 fat jar，一个二进制就是全部（前端产物、SQL 脚本、配置文件都嵌在里面）。
 
 - 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB**
-- 目标平台：**`mingwX64`**（Windows 本地开发调试）与 **`linuxArm64`**（部署到开发板）；**不保留 JVM 目标**
+- 目标平台：**`mingwX64`**（Windows 本地开发调试）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**不保留 JVM 目标**
 - 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）
 
 > 项目风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 冒烟 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
@@ -68,7 +68,7 @@
 │   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
 │   ├── nativeMain/kotlin/…/      # ZipClasspath / DiskClasspath 等实现 + installPlatformClasspath / 平台 Env / platformModule（expect/actual）
 │   ├── mingwX64Main/kotlin/…/    # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
-│   └── linuxArm64Main/kotlin/…/  # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
+│   └── linuxMain/kotlin/…/       # 两个 linux 目标共享的 ApiClient / EmbeddedClasspath / Mkdir / Shell 实现（无入口）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── sql/                          # 建表脚本（7 张表 + view_user_role 视图）
 ├── ktor-template.service         # systemd 单元模板（部署插件据此改写 ExecStart）
@@ -88,7 +88,7 @@
 - JDK 21（Gradle 与 KSP 处理器运行用；产物本身不需要 JVM）
 - MariaDB / MySQL
 - 首次构建自动下载 Kotlin/Native 工具链到 `~/.konan`（约 2.1GB）
-- 构建 `linuxArm64` 且宿主是 Windows 时：WSL2 + Ubuntu 24.04（只需 `aarch64-linux-gnu-objcopy`；编译与链接仍在 Windows 上跑）
+- 构建 linux 目标且宿主是 Windows 时：WSL2 + Ubuntu 24.04（`aarch64-linux-gnu-objcopy` 与 `x86_64-linux-gnu-objcopy`；编译与链接仍在 Windows 上跑）
 - （可选）Node + vite 前端工程；`platforms.json` 里配 `webPath` 后由 `viteJar` 构建并并入
 
 ### 1. 建库导表
@@ -149,6 +149,7 @@ curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: applicati
 | --- | --- |
 | `gradlew linkReleaseExecutableMingwX64` | Windows 本机可执行文件 |
 | `gradlew linkReleaseExecutableLinuxArm64` | 开发板（aarch64）可执行文件 |
+| `gradlew linkReleaseExecutableLinuxX64` | x64 云主机可执行文件 |
 | `gradlew viteJar` | 构建 vite 前端工程（路径取自 `platforms.json` 的 `webPath`） |
 | `gradlew generateConstants` | 依 vite 平台生成 `VITE_DEFAULT` 常量（值 = `contextPath`，避免把 `/home` 写死） |
 | `gradlew classpathZip<目标>` | 把各源集 `resources` + vite 产物合并成 `classpath.zip`（link 任务自动依赖） |
@@ -245,7 +246,7 @@ object ExampleController {
 
 ## 🚢 部署（systemd）
 
-1. `platforms.json` 里给目标服务器配 `mode: "systemd"` 与 `abi: "arm64"`（`abi` 决定部署原生二进制，不配则走 `bootJar`）
+1. `platforms.json` 里给目标服务器配 `mode: "systemd"` 与 `abi`（`arm64`/`aarch64` → linuxArm64，`x64`/`amd64`/`x86_64` → linuxX64；决定部署原生二进制，不配则走 `bootJar`）
 2. `gradlew deploy<服务器名>`（或 `deploy`）→ 上传可执行文件 → `mv old old.previous` 再替换（避免覆盖运行中的文件报 `ETXTBSY`）→ 改写远端 `<名字>-native.service` 的 `ExecStart` 为可执行文件路径 → 重启服务
 3. 首次部署会由脚本生成单元文件；想自定义 `User=` / 资源限制，就在**服务器上**改，插件不会覆盖已有单元
 
@@ -255,7 +256,7 @@ object ExampleController {
 
 | P0 项 | 状态 |
 | --- | --- |
-| 0.1 KMP 双目标骨架 + KSP2 多目标接线 | ✅ |
+| 0.1 KMP 多目标骨架 + KSP2 多目标接线 | ✅ |
 | 0.2 最小 CIO 服务（JSON + 信封 + StatusPages） | ✅ |
 | 0.3 自研路由插件（注解 + KSP + 运行时 + multipart） | ✅ |
 | 0.4 `classpath.zip` 中间层 | ✅ |

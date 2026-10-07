@@ -9,7 +9,7 @@
 
 | P0 项 | 状态 | 备注 |
 | --- | --- | --- |
-| 0.1 KMP 双目标骨架 + KSP2 多目标 | ✅ | `kspMingwX64` / `kspLinuxArm64` |
+| 0.1 KMP 多目标骨架 + KSP2 多目标 | ✅ | `kspMingwX64` / `kspLinuxArm64` / `kspLinuxX64` |
 | 0.2 最小 CIO 服务（JSON + 信封 + StatusPages） | ✅ | |
 | 0.3 自研路由插件（注解 + KSP + 运行时） | ✅ | 含 multipart 自研解析 |
 | 0.4 `classpath.zip` 中间层 | ✅ | 构建期嵌入，双平台实测 |
@@ -33,7 +33,8 @@ DI 注册表（仓库 / 服务 / 注入 / 中间件 / 路由）改由 KSP 生成
 ```powershell
 gradlew linkReleaseExecutableMingwX64     # Windows 本地产物
 gradlew linkReleaseExecutableLinuxArm64   # 开发板产物（aarch64）
-gradlew deploy<服务器名>                   # 构建 + 部署到开发板（见 §3）
+gradlew linkReleaseExecutableLinuxX64     # x64 云主机产物
+gradlew deploy<服务器名>                   # 构建 + 部署到开发板 / 云主机（见 §3）
 ```
 
 **提交前自检**（防「文件在磁盘上但被 `.gitignore` 吃掉」）：
@@ -48,15 +49,15 @@ $disk | Where-Object { $tracked -notcontains $_ }
 git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sql|json|ts|vue)$"
 ```
 
-- **Windows 上编译与链接 linuxArm64 都能直接跑**，不需要整包丢给 WSL。唯一缺位的是 `objcopy`（konan 自带的 aarch64 objcopy 是 ELF 二进制、mingw 的 objcopy 不支持 `elf64-littleaarch64`、essentials 版 LLVM 无 `llvm-objcopy`），所以 `objcopyClasspath<目标>` 在 Windows 上**只把这一步借道 WSL**。可用 `classpath { wslDistro / wslUser }` 指定发行版与用户，留空用默认值。
-- WSL 侧需要 `aarch64-linux-gnu-objcopy`（Ubuntu-24.04 已装，在 `/usr/bin`）。
+- **Windows 上编译与链接 linuxArm64 / linuxX64 都能直接跑**，不需要整包丢给 WSL。唯一缺位的是 `objcopy`（konan 自带的 aarch64/x86_64 objcopy 是 ELF 二进制、mingw 的 objcopy 不支持 `elf64-littleaarch64` / `elf64-x86-64`、essentials 版 LLVM 无 `llvm-objcopy`），所以 `objcopyClasspath<目标>` 在 Windows 上**只把这一步借道 WSL**。可用 `classpath { wslDistro / wslUser }` 指定发行版与用户，留空用默认值。
+- WSL 侧需要 `aarch64-linux-gnu-objcopy` 与 `x86_64-linux-gnu-objcopy`（Ubuntu-24.04 已装，在 `/usr/bin`）。
 - 路径转换用 `toWslPath()` 显式转 `/mnt/<盘符>/…`。**不要依赖工作目录传递** —— 从 Windows 进程拉起的 `wsl` 未必能翻译 cwd（实测把 `F:\Develop\…` 传成了 `F:Develop…`）。
 
 ### 第三方 C 静态库（`thirdparty/`）
 
 图像编解码（WebP / PNG / JPEG / GIF）用 5 个 C 库：libwebp、libpng、zlib、libjpeg-turbo、giflib。
-**源码不入库、产物入库**：`thirdparty/<目标>/` 放 7 个 `.a`（libwebp 会带出私有依赖 `libsharpyuv`），
-`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/build-libs.ps1` 是一次性重建脚本。
+**源码不入库、产物入库**：`thirdparty/<目标>/` 放 6 个 `.a`（`libwebp.a` 已并入编码侧的私有依赖 SharpYuv，见下），
+`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/build-libs.ps1` 是一次性重建脚本。目标有 `mingwX64` / `linuxArm64` / `linuxX64` 三份。
 
 日常 `gradlew` 构建完全不碰 C 工具链 —— `build.gradle.kts` 只把 `.def` 与 `-libraryPath` 交给 cinterop，
 `.def` 里 `staticLibraries` 声明的 `.a` 会打进 klib、在链接期随可执行文件静态链入（与 ktor 的 curl klib 同一机制）。
@@ -64,21 +65,22 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 只在换库版本 / 改编译选项时重建：
 
 ```powershell
-.\thirdparty\build-libs.ps1                                # 默认重建 mingwX64 + linuxArm64
+.\thirdparty\build-libs.ps1                                # 默认重建 mingwX64 + linuxArm64 + linuxX64
 .\thirdparty\build-libs.ps1 -Targets mingwX64 -Force       # 只重建一个目标（默认工作目录 build/thirdparty，已 gitignore）
 ```
 
 - **不需要额外安装任何工具链**：脚本用 `~/.konan` 里 Kotlin/Native 自带的 **llvm-21 clang** 交叉编译，
-  sysroot 也用 konan 自带的 `msys2-mingw-w64-x86_64-2`（mingwX64）与 `aarch64-unknown-linux-gnu-…`（linuxArm64）——
+  sysroot 也用 konan 自带的 `msys2-mingw-w64-x86_64-2`（mingwX64）、`aarch64-unknown-linux-gnu-…`（linuxArm64）与 `x86_64-unknown-linux-gnu-…`（linuxX64）——
   与 `konan.properties` 的 `targetSysRoot` 完全一致，ABI / glibc 版本与链接期对齐。
 - ⚠️ 别用 konan 自带 msys2 里的 `cc1.exe` 做编译器：它缺运行库 DLL，一执行就是 `0xC0000135 STATUS_DLL_NOT_FOUND`。
 - libpng 只认 `find_package(ZLIB)`：摆一个 zlib prefix 后传 `-DZLIB_ROOT=<prefix>`（旧的 `PNG_BUILD_ZLIB` 已废弃）；
   zlib 的真 `zconf.h` 在**构建目录**里（源码树那份被 CMake 改名成 `zconf.h.included`）。
 - libjpeg-turbo 只构建静态库目标（`jpeg-static` / `turbojpeg-static`）：`all` 会连带构建 CLI 可执行文件，Linux 目标链接不过。
+- ⚠️ **libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档 `libsharpyuv.a`，脚本会把它合并回单个 `libwebp.a`**（`.def` 里只声明 `libwebp.a`）。分成两个归档时，K/N 的 ELF 链接（ld.gold）按归档逐个解析，顺序被重排后 `libwebp.a` 里对 `SharpYuv*` 的引用会解析不到 —— arm64 与 x64 都会 `linkReleaseExecutable<目标>` 失败（mingw 的 PE 链接器宽容，才没暴露）。
 - 绑定：`.def` 在 `src/nativeInterop/cinterop/`，门面在 `src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
   包名一律 `moe.lolosia.thirdparty.<库名>`。`gradle.properties` 开了 `kotlin.mpp.enableCInteropCommonization=true`，
   让 cinterop 声明对 `nativeMain` 可见（`kotlinx.cinterop` 的指针 API 本身仍只在 native 源集可用）。
-- 目标相关的类型宽度要当心：`size_t` 两目标都是 64 位可以安全传递，`unsigned long` 不是（mingw 32 位 / linux 64 位），
+- 目标相关的类型宽度要当心：`size_t` 三个目标都是 64 位可以安全传递，`unsigned long` 不是（mingw 32 位 / linux 64 位），
   跨目标代码不要写出具体宽度。
 - 对 commonMain 暴露的统一入口是 `moe.lolosia.web.util.image.Image`（`expect` 在 commonMain、`actual` 在 nativeMain）：
   `Image(bytes)` 按文件头识别并解码，`toByteArray(ImageFormat)` 编码（PNG / JPEG / WEBP；GIF 不编码），
@@ -242,7 +244,7 @@ kill -9 <pid>; rm -f /tmp/ktor-test.kexe; rm -rf /tmp/ktortest
   | JVM（现网） | `ktor-template.service` | 7129 | `ktor-template-1.0.0-SNAPSHOT-fat.jar` |
   | 原生（新） | `ktor-template-native.service` | 7130 | `ktor-template`（+ `.previous` 回滚文件） |
 
-- `platforms.json`（**已 gitignore，不提交**）配 `webPath` 与服务器；原生部署靠服务器上的 `"abi": "arm64"` 开启（不配 = 走 JVM fat jar）。
+- `platforms.json`（**已 gitignore，不提交**）配 `webPath` 与服务器；原生部署靠服务器上的 `"abi"` 开启（`arm64`/`aarch64` → linuxArm64，`x64`/`amd64`/`x86_64` → linuxX64；不配 = 走 JVM fat jar）。x64 云主机同样只需在其 server 项里配 `"abi": "x64"`。
 - **`host` 必须写 `127.0.0.1`，不要写 `localhost`**：Windows 上 `localhost` 会先解析到 `::1`，而隧道只绑 IPv4。
   > 原生服务的 `host = "0.0.0.0"` 只绑 IPv4，从外部用板子的 **IPv6** 探 7130 会失败（JVM/Netty 默认双栈，所以 7129 探得通）。要 IPv6 直连就把监听地址改成 `::`。
 
@@ -287,7 +289,8 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | Gradle 报 `input file does not exist` | Gradle 9 对缺失的 `inputs.dir/file` 直接校验失败 → 改 `inputs.files(fileTree(...))` |
 | 阿里云镜像缺 Ktor / sqlx4k 产物 | `settings.gradle.kts` 里 `excludeGroupByRegex("io\\.ktor")` / `io\\.github\\.smyrgeorge` 强制走 mavenCentral |
 | `Failed SFTP MKDIR: …/releaseExecutable` | link 任务的 `outputs.files` 是**输出目录**不是文件 → 用 `KotlinNativeLink.outputFile` |
-| `A problem occurred starting process 'aarch64-linux-gnu-objcopy'` | Windows 上没有可用的 aarch64 objcopy → 借道 WSL（§2） |
+| `A problem occurred starting process 'aarch64-linux-gnu-objcopy'` | Windows 上没有可用的 aarch64/x86_64 objcopy → 借道 WSL（§2） |
+| `linkReleaseExecutable<linux目标>` 报 `libwebp.a(…picture_csp_enc.c.o): … SharpYuv* 未定义` | libwebp 1.6 把 SharpYuv 拆成 `libsharpyuv.a`，两个归档的解析顺序被重排 → 用 `thirdparty/build-libs.ps1` 重建（已合并回单个 `libwebp.a`，§2） |
 | `The plugin is already on the classpath with an unknown version` | buildSrc 引了 KGP 后，主工程必须**无版本**应用 Kotlin 插件 |
 | buildSrc 看不到版本目录 | `buildSrc/settings.gradle.kts` 里 `create("libs").from(files("../gradle/libs.versions.toml"))` |
 | classpath 里混进垃圾条目 | `ViteJarTask` 产出多一个根目录 `MANIFEST.MF`，并入时排除 |
@@ -359,7 +362,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | --- | --- |
 | JDK 21 + Gradle Wrapper | 构建（Gradle 9.5.1；Gradle 与 KSP 处理器运行用，产物本身不需要 JVM） |
 | Kotlin/Native 工具链 | 首次构建自动下载到 `~/.konan`（约 2.1GB） |
-| WSL2 + Ubuntu-24.04（含 `aarch64-linux-gnu-objcopy`） | Windows 上构建 linux 目标时的 objcopy 步骤 |
+| WSL2 + Ubuntu-24.04（含 `aarch64-linux-gnu-objcopy` 与 `x86_64-linux-gnu-objcopy`） | Windows 上构建 linux 目标时的 objcopy 步骤 |
 | `qemu-user-static` + `libc6-arm64-cross`（+ `libcrypt.so.1`） | 不开板子验证旧 aarch64 产物（接了 sqlx4k 后已失效，见 §2） |
 | Node 24 + pnpm 10.22 + 前端工程 `E:\Dev\Node\lolosia-web` | `viteJar` 构建前端产物 |
 | QUIC 客户端 `F:\Develop\Python\quic-socket` | SSH 隧道到开发板 |

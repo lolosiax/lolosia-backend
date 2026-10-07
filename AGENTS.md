@@ -9,7 +9,7 @@
 ## 0. 项目定位
 
 - **Kotlin/Native 全栈模板**：Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB。
-- 目标平台只有 **`mingwX64`**（Windows 本地开发）与 **`linuxArm64`**（部署到开发板）；**没有 JVM 目标**。
+- 目标平台有 **`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**没有 JVM 目标**。两个 linux 目标共享 `src/linuxMain/` 下的平台实现。
 - 产物是**单个原生可执行文件**：前端产物、SQL、默认配置都以 `classpath.zip` 形式内嵌，无 fat jar、无外部资源目录。
 - 图像编解码（WebP / PNG / JPEG / GIF）走**预编译的 C 静态库**，随可执行文件静态链入；库产物随仓库提交，日常构建不需要 C 工具链（`thirdparty/`，见 §7 / §10）。
 - 根包 **`moe.lolosia.web`**；唯一的独立 Gradle 模块是 `:router-ksp`（插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。
@@ -134,7 +134,8 @@ generatedRoutes()                      // @Controller 路由批量注册
   - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` 收发，不把 C 指针泄漏给调用方。
   - 一律选**不依赖 `setjmp/longjmp` 的接口**（libpng 用 `png_image` 简化接口、libjpeg-turbo 用 `tj3*`、libwebp / giflib 本身回错误码），坏图只回 `null`，不会把进程带走。
   - ⚠️ C 库只保留调用期间有效的裸指针（libpng 的 `png_image_begin_read_from_memory` 就是典型）：`usePinned` 必须覆盖到真正的解码调用为止，中途解 pin 只会得到「不报错但像素全错」。
-  - ⚠️ `size_t` 两目标都是 64 位可安全传递；`unsigned long` 不是（mingw 32 位 / linux 64 位），跨目标代码别写出具体宽度。
+  - ⚠️ `size_t` 三个目标都是 64 位可安全传递；`unsigned long` 不是（mingw 32 位 / linux 64 位），跨目标代码别写出具体宽度。
+  - ⚠️ libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档，`build-libs.ps1` 已把它合并回单个 `libwebp.a`：K/N 的 ELF 链接（ld.gold）按归档逐个解析，分成两个归档时 `SharpYuv*` 会解析不到（arm64 / x64 都失败）。
 - **前端路径不许写死**：用 `generateConstants` 产出的 `VITE_DEFAULT`（值 = viteJar 的 `contextPath`）拼路由。
 - **配置只有一个入口** [`settings/AppSettings.kt`](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable`）。
   优先级（低→高，**按字段深合并**）：数据类默认值 < 内嵌 `application.json` < 磁盘 `application.json` < 环境变量 < 命令行端口。
@@ -155,10 +156,10 @@ generatedRoutes()                      // @Controller 路由批量注册
 - **编译自检**（改了代码至少跑这个）：
 
 ```powershell
-gradlew compileKotlinMingwX64 compileKotlinLinuxArm64
+gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
 ```
 
-- 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64`；
+- 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64` / `linkReleaseExecutableLinuxX64`；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`，见 [doc/development-notes.md](doc/development-notes.md)）。
 - **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（Windows 上借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链）；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
 - **没有自动化测试**（`commonTest` 只有依赖声明）；行为验证目前靠临时冒烟脚本（命令清单见 `doc/development-notes.md`）。
@@ -202,9 +203,10 @@ src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspa
                                 installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*、
                                 util/image/Image.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
 src/nativeInterop/cinterop/     第三方 C 库的绑定定义（zlib / png / webp / jpeg / gif 各一个 .def）
-src/mingwX64Main|linuxArm64Main/kotlin/…/
-                                api/ApiClient.* / classpath/EmbeddedClasspath.* / fs/Mkdir.* / proc/Shell.*（无入口）
-thirdparty/                     预编译 C 静态库与头文件（入库产物）+ build-libs.ps1（一次性重建脚本）
+src/linuxMain/kotlin/…/          两个 linux 目标共享的平台实现（.linux.kt）：
+                                api/ApiClient / classpath/EmbeddedClasspath / fs/Mkdir / proc/Shell
+src/mingwX64Main/kotlin/…/      Windows 平台实现（.mingw.kt）：ApiClient / EmbeddedClasspath / Mkdir / Shell（无入口）
+thirdparty/                     预编译 C 静态库与头文件（入库产物，按 mingwX64 / linuxArm64 / linuxX64 三份）+ build-libs.ps1（一次性重建脚本）
 router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller）/ InterceptorProcessor（@Interceptor）/
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、

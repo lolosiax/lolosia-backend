@@ -15,7 +15,14 @@ version = "1.0.0-SNAPSHOT"
 // Curl 引擎（Linux 目标的 HTTP 客户端底层）以静态库形式链入 libcurl / libssl / libcrypto，
 // 而链接器扫描归档的顺序里 libcrypto 排在依赖它的 libssl 之前，OpenSSL 符号因此解析不到。
 // 这里把 klib 内的 libcrypto.a 解到构建目录，在链接参数末尾再追加一次。
+//
+// 每个 linux 目标解自己那一份（`build/curl-static-libs/<目标>/`）：libcrypto.a 是分架构的，
+// 共用一个文件会让后构建的目标覆盖掉先构建的那份。
 val curlStaticLibDir = layout.buildDirectory.dir("curl-static-libs")
+
+/** linux 目标的 libcrypto.a 路径；由下文的 `unpackCurlStaticLibs<Target>` 产出。 */
+fun curlCryptoLib(target: String): String =
+    curlStaticLibDir.get().dir(target).file("libcrypto.a").asFile.absolutePath
 
 // 第三方 C 库：产物（thirdparty/<目标>/*.a）与公共头文件随仓库提交，见 thirdparty/build-libs.ps1
 val thirdpartyDir = layout.projectDirectory.dir("thirdparty")
@@ -31,12 +38,22 @@ kotlin {
         }
     }
 
-    // Linux ARM64：部署到开发板（lckfb / RK3566 级）；需在 WSL 中构建
+    // Linux ARM64：部署到开发板（lckfb / RK3566 级）
     linuxArm64 {
         binaries {
             executable {
                 entryPoint = "moe.lolosia.web.main"
-                linkerOpts(curlStaticLibDir.get().asFile.resolve("libcrypto.a").absolutePath)
+                linkerOpts(curlCryptoLib("linuxArm64"))
+            }
+        }
+    }
+
+    // Linux X64：部署到 x64 云主机；与 linuxArm64 共享 src/linuxMain 下的平台实现
+    linuxX64 {
+        binaries {
+            executable {
+                entryPoint = "moe.lolosia.web.main"
+                linkerOpts(curlCryptoLib("linuxX64"))
             }
         }
     }
@@ -87,7 +104,8 @@ kotlin {
             // 裸 TCP：数据库连通性/鉴权预检（见 Database 的 MySqlAuthProbe）
             implementation(ktorLibs.network)
         }
-        linuxArm64Main.dependencies {
+        // 两个 linux 目标共享 src/linuxMain 下的平台实现
+        linuxMain.dependencies {
             implementation(ktorLibs.client.curl)
         }
         mingwX64Main.dependencies {
@@ -101,36 +119,45 @@ kotlin {
 }
 
 // ===== Curl 引擎的 libcrypto 静态库补齐（见文件顶部说明）=====
-val unpackCurlStaticLibs = tasks.register("unpackCurlStaticLibs") {
-    val klibs = configurations.named("linuxArm64CompileKlibraries")
-    val outDir = curlStaticLibDir
-    inputs.files(klibs)
-    outputs.dir(outDir)
-    doLast {
-        val out = outDir.get().asFile
-        out.mkdirs()
-        klibs.get()
-            .filter { it.name.startsWith("ktor-client-curl") && it.name.endsWith(".klib") }
-            .forEach { klib ->
-                project.zipTree(klib)
-                    .matching { include("**/libcrypto.a") }
-                    .forEach { it.copyTo(out.resolve("libcrypto.a"), overwrite = true) }
-            }
+val curlTargets = listOf("linuxArm64", "linuxX64")
+
+val unpackCurlStaticLibs = curlTargets.associateWith { target ->
+    val suffix = target.replaceFirstChar { it.uppercase() }
+    tasks.register("unpackCurlStaticLibs$suffix") {
+        val klibs = configurations.named("${target}CompileKlibraries")
+        val outDir = curlStaticLibDir.map { it.dir(target) }
+        inputs.files(klibs)
+        outputs.dir(outDir)
+        doLast {
+            val out = outDir.get().asFile
+            out.mkdirs()
+            klibs.get()
+                .filter { it.name.startsWith("ktor-client-curl") && it.name.endsWith(".klib") }
+                .forEach { klib ->
+                    project.zipTree(klib)
+                        .matching { include("**/libcrypto.a") }
+                        .forEach { it.copyTo(out.resolve("libcrypto.a"), overwrite = true) }
+                }
+        }
     }
 }
 
-tasks.matching { it.name.startsWith("link") && it.name.endsWith("LinuxArm64") }
-    .configureEach { dependsOn(unpackCurlStaticLibs) }
+curlTargets.forEach { target ->
+    val suffix = target.replaceFirstChar { it.uppercase() }
+    tasks.matching { it.name.startsWith("link") && it.name.endsWith(suffix) }
+        .configureEach { dependsOn(unpackCurlStaticLibs.getValue(target)) }
+}
 
 // ===== 自研路由插件：KSP 需按目标声明处理器 =====
 // 注意：KSP2 没有 common/metadata 编译单元，生成代码落在各目标源集；
 // 而 Kotlin 编译模型下 common 代码看不到 platform 声明，故入口 main() 必须放各目标源集。
 // sqlx4k 的 @Repository/@Query 代码生成也走 KSP（处理器是 JVM 件，产出 klib 侧的 native 代码）。
 dependencies {
-    add("kspMingwX64", project(":router-ksp"))
-    add("kspLinuxArm64", project(":router-ksp"))
-    add("kspMingwX64", libs.sqlx4k.codegen)
-    add("kspLinuxArm64", libs.sqlx4k.codegen)
+    // ksp<目标名> 是 KSP 为每个编译单元建的配置，处理器按目标各挂一份
+    listOf("MingwX64", "LinuxArm64", "LinuxX64").forEach { target ->
+        add("ksp$target", project(":router-ksp"))
+        add("ksp$target", libs.sqlx4k.codegen)
+    }
 }
 
 ksp {

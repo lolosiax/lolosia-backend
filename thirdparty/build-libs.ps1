@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 thirdparty/ 下的第三方原生静态库（zlib / libpng / libwebp / libjpeg-turbo / giflib）。
@@ -10,15 +10,16 @@
     编译器直接用 Kotlin/Native 自带的那一套，不依赖本机 MSYS2/Visual Studio：
       - 解析 gradle/libs.versions.toml 里的 kotlin 版本，找到 ~/.konan/kotlin-native-prebuilt-*-<ver>；
       - clang 与 llvm-ar 取自 ~/.konan/dependencies/llvm-*-windows-essentials-*/bin；
-      - mingwX64  sysroot = ~/.konan/dependencies/msys2-mingw-w64-x86_64-*
+      - mingwX64   sysroot = ~/.konan/dependencies/msys2-mingw-w64-x86_64-*
       - linuxArm64 sysroot = ~/.konan/dependencies/aarch64-unknown-linux-gnu-gcc-*/aarch64-unknown-linux-gnu/sysroot
-    这两个 sysroot 与 Kotlin/Native 链接期的完全一致，因此产物的 ABI/glibc 版本天然对齐。
+      - linuxX64   sysroot = ~/.konan/dependencies/x86_64-unknown-linux-gnu-gcc-*/x86_64-unknown-linux-gnu/sysroot
+    这些 sysroot 与 Kotlin/Native 链接期的完全一致，因此产物的 ABI/glibc 版本天然对齐。
 
     zlib / libpng / libwebp / libjpeg-turbo 用各自上游的 CMake 构建（避免手工维护 config.h 与
     SIMD 源文件清单）；giflib 只有 autotools，按其 Makefile 的 SOURCES 直接编译归档。
 
 .PARAMETER Targets
-    要构建的目标，默认两个都构建。
+    要构建的目标，默认三个都构建。
 
 .PARAMETER WorkDir
     源码下载/解压/CMake 构建目录，默认 <repo>/build/thirdparty（已被 .gitignore 忽略）。
@@ -31,8 +32,8 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('mingwX64', 'linuxArm64')]
-    [string[]]$Targets = @('mingwX64', 'linuxArm64'),
+    [ValidateSet('mingwX64', 'linuxArm64', 'linuxX64')]
+    [string[]]$Targets = @('mingwX64', 'linuxArm64', 'linuxX64'),
     [string]$WorkDir,
     [switch]$Force
 )
@@ -77,24 +78,28 @@ $llvmHome = Get-ChildItem $deps -Directory -Filter 'llvm-*-windows-essentials-*'
     Sort-Object Name -Descending | Select-Object -First 1
 $msysHome = Get-ChildItem $deps -Directory -Filter 'msys2-mingw-w64-x86_64-*' | Select-Object -First 1
 $aaHome = Get-ChildItem $deps -Directory -Filter 'aarch64-unknown-linux-gnu-gcc-*' | Select-Object -First 1
-foreach ($d in @($llvmHome, $msysHome, $aaHome)) {
-    if (-not $d) { Fail "Kotlin/Native 依赖不完整（llvm / msys2-mingw / aarch64-gcc 至少缺一个），请先执行一次 Gradle 构建" }
+$x64Home = Get-ChildItem $deps -Directory -Filter 'x86_64-unknown-linux-gnu-gcc-*' | Select-Object -First 1
+foreach ($d in @($llvmHome, $msysHome, $aaHome, $x64Home)) {
+    if (-not $d) { Fail "Kotlin/Native 依赖不完整（llvm / msys2-mingw / aarch64-gcc / x86_64-gcc 至少缺一个），请先执行一次 Gradle 构建" }
 }
 
 $clang = Join-Path $llvmHome.FullName 'bin/clang.exe'
 $llvmAr = Join-Path $llvmHome.FullName 'bin/llvm-ar.exe'
 $msysSysroot = $msysHome.FullName
 $aaSysroot = Join-Path $aaHome.FullName 'aarch64-unknown-linux-gnu/sysroot'
-foreach ($p in @($clang, $llvmAr, $msysSysroot, $aaSysroot)) {
+$x64Sysroot = Join-Path $x64Home.FullName 'x86_64-unknown-linux-gnu/sysroot'
+foreach ($p in @($clang, $llvmAr, $msysSysroot, $aaSysroot, $x64Sysroot)) {
     if (-not (Test-Path $p)) { Fail "缺文件：$p" }
 }
 Write-Host "    clang   : $clang"
 Write-Host "    mingw   : $msysSysroot"
 Write-Host "    aarch64 : $aaSysroot"
+Write-Host "    x86_64  : $x64Sysroot"
 
 $targetDefs = @{
     mingwX64   = @{ SystemName = 'Windows'; Processor = 'x86_64'; Triple = 'x86_64-w64-mingw32'; Sysroot = $msysSysroot }
     linuxArm64 = @{ SystemName = 'Linux'; Processor = 'aarch64'; Triple = 'aarch64-linux-gnu'; Sysroot = $aaSysroot }
+    linuxX64   = @{ SystemName = 'Linux'; Processor = 'x86_64'; Triple = 'x86_64-linux-gnu'; Sysroot = $x64Sysroot }
 }
 
 # ---------------------------------------------------------------- 2. 下载解压
@@ -245,7 +250,9 @@ foreach ($target in $Targets) {
         Sort-Object Length -Descending | Select-Object -First 1
     Copy-Artifact $pngLib.FullName $outDir 'libpng.a'
 
-    # ---- libwebp（libwebp 依赖 libsharpyuv，两个都要）----
+    # ---- libwebp（1.6 起编码侧的 SharpYuv 拆成独立归档 libsharpyuv.a，这里合并回单个 libwebp.a）----
+    # 保留两个归档时，K/N 的 ELF 链接（ld.gold）按归档逐个解析，顺序被重排后
+    # libwebp.a 里对 SharpYuv* 的引用会解析不到（arm64 / x64 都会失败）；合并成一劳永逸。
     $webpBuild = Join-Path $cmakeDir "$target/libwebp"
     Invoke-CMakeBuild -Label 'libwebp' -SourceDir $webpTree -BuildDir $webpBuild -Target $target -Options @(
         '-DWEBP_BUILD_ANIM_UTILS=OFF',
@@ -260,10 +267,21 @@ foreach ($target in $Targets) {
         '-DWEBP_BUILD_EXTRAS=OFF'
     ) -BuildTarget 'webp'
     $webpLib = Get-ChildItem $webpBuild -Filter 'libwebp.a' -Recurse | Select-Object -First 1
-    Copy-Artifact $webpLib.FullName $outDir 'libwebp.a'
     $sharpLib = Get-ChildItem $webpBuild -Filter 'libsharpyuv.a' -Recurse | Select-Object -First 1
-    if ($sharpLib) { Copy-Artifact $sharpLib.FullName $outDir 'libsharpyuv.a' }
-    else { Warn 'libsharpyuv.a 未生成，若链接期报 SharpYuv* 未定义需回来处理' }
+    if (-not $sharpLib) { Fail "libsharpyuv.a 未生成（libwebp 版本变化？）[$target]" }
+    $webpMergeDir = Join-Path $cmakeDir "$target/webp-merge"
+    if (Test-Path $webpMergeDir) { Remove-Item $webpMergeDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $webpMergeDir | Out-Null
+    Push-Location $webpMergeDir
+    & $llvmAr x $webpLib.FullName
+    & $llvmAr x $sharpLib.FullName
+    # 成员后缀随目标而异（mingw 是 .obj，linux 是 .o），这里取解出来的全部文件
+    $webpMembers = Get-ChildItem $webpMergeDir -File | Select-Object -ExpandProperty Name
+    & $llvmAr rcs (Join-Path $outDir 'libwebp.a') $webpMembers
+    $mergeExit = $LASTEXITCODE
+    Pop-Location
+    if ($mergeExit -ne 0) { Fail "libwebp.a 合并归档失败 [$target]" }
+    Write-Host "    -> libwebp.a ($([math]::Round((Get-Item (Join-Path $outDir 'libwebp.a')).Length / 1KB)) KB，含 SharpYuv)"
 
     # ---- libjpeg-turbo（不用 turbojpeg 的 longjmp 语义，见 docs；SIMD 关闭免装 nasm）----
     $jpegBuild = Join-Path $cmakeDir "$target/libjpeg-turbo"
@@ -319,6 +337,6 @@ foreach ($h in $headerMap) {
 
 Write-Host ''
 Info '完成。产物：'
-Get-ChildItem (Join-Path $PSScriptRoot 'mingwX64'), (Join-Path $PSScriptRoot 'linuxArm64') -Filter '*.a' -ErrorAction SilentlyContinue |
+Get-ChildItem ($Targets | ForEach-Object { Join-Path $PSScriptRoot $_ }) -Filter '*.a' -ErrorAction SilentlyContinue |
     Select-Object @{ n = 'Target'; e = { Split-Path $_.DirectoryName -Leaf } }, Name, @{ n = 'KB'; e = { [math]::Round($_.Length / 1KB) } } |
     Format-Table -AutoSize | Out-String | Write-Host
