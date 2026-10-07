@@ -17,6 +17,7 @@ data class AppSettings(
     val server: ServerConfig = ServerConfig(),
     val datasource: DatasourceConfig = DatasourceConfig(),
     val ddns: DdnsConfig = DdnsConfig(),
+    val webdav: WebdavConfig = WebdavConfig(),
     /** 日志级别：TRACE / DEBUG / INFO / WARN / ERROR / OFF */
     val logLevel: String = "INFO",
 ) {
@@ -58,5 +59,28 @@ data class AppSettings(
         val interfaceName: String = "eth0",
         /** 检查间隔（秒），下限 30。 */
         val intervalSeconds: Int = 300,
+    )
+
+    /**
+     * WebDAV：把 [root] 目录（如挂载的机械盘 `/mnt/hdd1`）以 WebDAV 协议挂在 [path] 下，
+     * 供 Windows「映射网络驱动器」之类的客户端直接读写，无需先下载到本地临时目录。
+     *
+     * 用 HTTP Basic 鉴权（Windows 默认只允许在 HTTPS 上发 Basic，故对外必须经 Caddy 的 TLS 端口）。
+     * 挂载路径不走 `/api`，因此不受会话鉴权与响应信封影响（见 `configureApplication`）。
+     */
+    @Serializable
+    data class WebdavConfig(
+        /** 是否启用。 */
+        val enabled: Boolean = false,
+        /** 对外挂载的路径前缀，需与客户端使用的 URL 一致。 */
+        val path: String = "/dav",
+        /** 本地根目录（绝对路径）。所有请求都被限制在该目录内。 */
+        val root: String = "/mnt/hdd1",
+        /** Basic 鉴权用户名。 */
+        val username: String = "lolosia",
+        /** Basic 鉴权密码；为空时拒绝一切请求。 */
+        val password: String = "",
+        /** 401 挑战里显示的 realm。 */
+        val realm: String = "lolosia-webdav",
     )
 }

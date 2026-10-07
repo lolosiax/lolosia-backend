@@ -4,7 +4,7 @@
     "port": 7129
   },
   "datasource": {
-    "url": "mysql://127.0.0.1:3306/ktor-template",
+    "url": "mysql://127.0.0.1:3306/lolosia-backend",
     "username": "root",
     "password": "123456",
     "maxConnections": 10
@@ -13,11 +13,19 @@
     "enabled": false,
     "zoneId": "",
     "apiToken": "",
-    "recordName": "exmple.lolosia.moe",
+    "recordName": "",
     "ttl": 120,
     "proxied": false,
     "interfaceName": "eth0",
     "intervalSeconds": 300
+  },
+  "webdav": {
+    "enabled": false,
+    "path": "/dav",
+    "root": "/mnt/hdd1",
+    "username": "lolosia",
+    "password": "",
+    "realm": "lolosia-webdav"
   },
   "logLevel": "INFO"
 }

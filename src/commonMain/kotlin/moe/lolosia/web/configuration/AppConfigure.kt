@@ -18,12 +18,16 @@ import moe.lolosia.web.generated.configureInterceptors
 import moe.lolosia.web.generated.generatedRoutes
 import moe.lolosia.web.generated.registerInjectables
 import moe.lolosia.web.service.WebpCache
+import moe.lolosia.web.service.dav.DavLockManager
+import moe.lolosia.web.service.dav.DavStore
 import moe.lolosia.web.service.ddns.DdnsService
+import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.classpath.FileStoreClasspath
 import moe.lolosia.web.util.classpath.StaticClasspathConfig
 import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.fs.FileStore
 import moe.lolosia.web.util.ktor.staticClasspath
+import moe.lolosia.web.util.ktor.webDav
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.RouterInjection
 import moe.lolosia.web.util.router.RouterParamException
@@ -131,6 +135,12 @@ fun Application.configureApplication(koin: Koin) {
                     null
                 }
             }
+        }
+
+        // WebDAV：把机械盘挂到配置的路径下（可选）。不走 `/api`，因此既不被会话鉴权拦截，
+        // 响应也不会被 JSON 信封包装 —— Windows 的 WebDAV 客户端要的是原样状态码与 207 多状态 XML。
+        koin.get<AppSettings>().webdav.takeIf { it.enabled }?.let { cfg ->
+            webDav(cfg, DavStore(cfg.root), DavLockManager())
         }
 
         // 自研路由插件生成：全部 @Controller
