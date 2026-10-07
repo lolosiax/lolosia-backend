@@ -56,7 +56,7 @@ private val settingsYaml: Yaml = Yaml.default
  *
  * **每层内部按 JSON 对象深合并**（对象递归合并、标量整体替换）；磁盘文件允许 YAML 或 JSON，
  * 由扩展名（`.yaml` / `.yml` / `.json`）判定，解析后统一转成 JSON 对象再合并。
- * 命令行参数只覆盖端口，由 `startServer` 处理。
+ * 命令行参数只覆盖端口，由 [moe.lolosia.web.main] 处理。
  *
  * @param classpath 资源来源
  * @param diskPath 磁盘设置文件路径；为 `null` 时依次尝试 [SETTINGS_FILES]

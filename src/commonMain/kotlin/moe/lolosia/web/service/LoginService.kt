@@ -16,6 +16,7 @@ import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.captcha.createMathCaptcha
 import moe.lolosia.web.util.crypto.BCrypt
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.time.toDisplayString
 
@@ -42,6 +43,7 @@ import moe.lolosia.web.util.time.toDisplayString
  * @author 洛洛希雅Lolosia
  */
 @Injectable
+@Service
 public class LoginService(
     private val users: SysUserRepository,
     private val sessions: SessionManager,

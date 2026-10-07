@@ -90,7 +90,7 @@ class RouterProcessor(
             appendLine("import $KTOR_FQ.readForm")
             appendLine()
             appendLine("/** 批量注册全部注解式控制器的路由。 */")
-            appendLine("fun Routing.generatedRoutes() {")
+            appendLine("actual fun Routing.generatedRoutes() {")
             controllers.forEach { c -> appendController(c) }
             appendLine("}")
         }

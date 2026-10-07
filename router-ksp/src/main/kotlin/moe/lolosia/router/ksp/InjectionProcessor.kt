@@ -17,6 +17,9 @@ private const val REPOSITORY_FQ = "io.github.smyrgeorge.sqlx4k.annotation.Reposi
 /** 自研路由「按类型注入」的标记注解。 */
 private const val INJECTABLE_FQ = "moe.lolosia.web.util.router.Injectable"
 
+/** 自研 DI「Koin 单例」的标记注解：据此生成 `serviceModule()` 的构造器注入绑定。 */
+private const val SERVICE_FQ = "moe.lolosia.web.util.router.Service"
+
 /**
  * sqlx4k codegen 给实现类起的后缀。
  *
@@ -39,8 +42,9 @@ class InjectionProcessorProvider : SymbolProcessorProvider {
 /**
  * 目标源集 DI 绑定的 KSP 处理器。
  *
- * 生成两个函数供各目标 `main()` 使用（生成物落在目标源集，因为 sqlx4k 的仓库实现只在那里可见）：
+ * 生成三个函数供各目标 `main()` 使用（生成物落在目标源集，因为 sqlx4k 的仓库实现只在那里可见）：
  * - `repositoryModules()`：把每个 `@Repository` 接口绑到 sqlx4k 生成的 `<接口名>Impl`（无参 object）；
+ * - `serviceModule()`：把标了 `@Service` 的类型绑成 Koin 单例（构造器注入，参数按类型从容器取）；
  * - `Koin.registerInjectables()`：把标了 `@Injectable` 的容器实例接进路由的按类型注入；
  *   标了 `requestScoped = true` 的**不**生成（它们由 `call.attributes` 逐请求提供，见 `Bootstrap`）。
  *
@@ -83,6 +87,9 @@ class InjectionProcessor(
         val injectables = resolver.getSymbolsWithAnnotation(INJECTABLE_FQ)
             .filterIsInstance<KSClassDeclaration>()
             .toList()
+        val services = resolver.getSymbolsWithAnnotation(SERVICE_FQ)
+            .filterIsInstance<KSClassDeclaration>()
+            .toList()
 
         val implPackage = options[OUTPUT_PACKAGE_OPTION]
         if (implPackage == null) {
@@ -100,28 +107,50 @@ class InjectionProcessor(
             RepoRef(iface, "$implPackage.${decl.simpleName.asString()}$IMPL_SUFFIX")
         }.sortedBy { it.iface }
 
+        val serviceRefs = services.mapNotNull { decl ->
+            val fqn = decl.qualifiedName?.asString()
+            val ctor = decl.primaryConstructor
+            when {
+                fqn == null -> {
+                    logger.error("`@Service` 类型 `${decl.simpleName.asString()}` 没有全限定名，无法生成绑定")
+                    null
+                }
+
+                ctor == null -> {
+                    logger.error("`@Service` 类型 `$fqn` 没有主构造器，无法生成构造器注入绑定")
+                    null
+                }
+
+                else -> ServiceRef(fqn, ctor.parameters.size)
+            }
+        }.sortedBy { it.fqn }
+
         val injectableFqns = injectables
             .filterNot { it.isRequestScoped() }
             .mapNotNull { it.qualifiedName?.asString() }
             .sorted()
 
-        val sourceFiles = (repositories + injectables).mapNotNull { it.containingFile }.toTypedArray()
+        val sourceFiles = (repositories + injectables + services).mapNotNull { it.containingFile }.toTypedArray()
         codeGenerator.createNewFile(
             dependencies = Dependencies(aggregating = true, *sourceFiles),
             packageName = GENERATED_PACKAGE,
             fileName = GENERATED_FILE,
-        ).bufferedWriter().use { it.write(buildContent(repoRefs, injectableFqns)) }
+        ).bufferedWriter().use { it.write(buildContent(repoRefs, serviceRefs, injectableFqns)) }
 
         written = true
         toCheck = repoRefs
         logger.info(
             "[router] 已生成 DI 绑定：${repoRefs.size} 个仓库 → repositoryModules()，" +
+                "${serviceRefs.size} 个服务 → serviceModule()，" +
                 "${injectableFqns.size} 个可注入类型 → Koin.registerInjectables()"
         )
         return emptyList()
     }
 
     private data class RepoRef(val iface: String, val impl: String)
+
+    /** `@Service` 类型：[fqn] 为全限定名，[arity] 为主构造器参数个数（每个参数生成一个 `get()`）。 */
+    private data class ServiceRef(val fqn: String, val arity: Int)
 
     private fun Resolver.findImpl(fqn: String): KSClassDeclaration? =
         getClassDeclarationByName(getKSNameFromString(fqn))
@@ -134,14 +163,18 @@ class InjectionProcessor(
     private fun KSAnnotation.booleanArg(name: String): Boolean =
         arguments.firstOrNull { it.name?.asString() == name }?.value == true
 
-    private fun buildContent(repositories: List<RepoRef>, injectables: List<String>): String = buildString {
+    private fun buildContent(
+        repositories: List<RepoRef>,
+        services: List<ServiceRef>,
+        injectables: List<String>,
+    ): String = buildString {
         appendLine("// 由自研路由插件（router-ksp）生成，请勿手动修改")
-        appendLine("// 生成内容：@Repository 接口 → sqlx4k 实现的 Koin 绑定；@Injectable 类型 → 路由按类型注入的注册")
+        appendLine("// 生成内容：@Repository 接口 → sqlx4k 实现的 Koin 绑定；@Service 类型 → Koin 单例绑定；@Injectable 类型 → 路由按类型注入的注册")
         appendLine("@file:Suppress(\"unused\", \"RedundantVisibilityModifier\")")
         appendLine()
         appendLine("package $GENERATED_PACKAGE")
         appendLine()
-        (repositories.flatMap { listOf(it.iface, it.impl) } + injectables)
+        (repositories.flatMap { listOf(it.iface, it.impl) } + services.map { it.fqn } + injectables)
             .distinct()
             .sorted()
             .forEach { appendLine("import $it") }
@@ -151,7 +184,7 @@ class InjectionProcessor(
         appendLine("import org.koin.dsl.module")
         appendLine()
         appendLine("/** 各 `@Repository` 接口 → sqlx4k 生成的实现（无参 object）的绑定。 */")
-        appendLine("fun repositoryModules(): List<Module> = listOf(")
+        appendLine("actual fun repositoryModules(): List<Module> = listOf(")
         appendLine("    module {")
         repositories.forEach {
             appendLine("        single<${it.iface.substringAfterLast('.')}> { ${it.impl.substringAfterLast('.')} }")
@@ -159,8 +192,16 @@ class InjectionProcessor(
         appendLine("    }")
         appendLine(")")
         appendLine()
+        appendLine("/** 各 `@Service` 类型的 Koin 单例绑定（构造器注入，参数按类型从容器取）。 */")
+        appendLine("actual fun serviceModule(): Module = module {")
+        services.forEach {
+            val simple = it.fqn.substringAfterLast('.')
+            appendLine("    single { $simple(${List(it.arity) { "get()" }.joinToString(", ")}) }")
+        }
+        appendLine("}")
+        appendLine()
         appendLine("/** 把容器里的实例接进路由的按类型注入（控制器形参声明该类型即自动注入）。 */")
-        appendLine("fun Koin.registerInjectables() {")
+        appendLine("actual fun Koin.registerInjectables() {")
         injectables.forEach { appendLine("    registerInjectable<${it.substringAfterLast('.')}>()") }
         appendLine("}")
     }

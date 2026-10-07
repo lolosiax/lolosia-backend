@@ -8,6 +8,7 @@ import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysCacheRepository
 import moe.lolosia.web.database.model.SysCacheEntity
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
 
 /**
  * 缓存管理器：以 `path` 分组、`tag` 定位，存在 `sys_cache`。
@@ -19,6 +20,7 @@ import moe.lolosia.web.util.router.Injectable
  * @author 洛洛希雅Lolosia
  */
 @Injectable
+@Service
 public class CacheManager(private val db: Database, private val repo: SysCacheRepository) {
 
     public fun accessor(path: String): Accessor = Accessor(path)

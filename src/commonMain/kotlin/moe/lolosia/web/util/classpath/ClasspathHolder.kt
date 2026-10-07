@@ -1,7 +1,7 @@
 package moe.lolosia.web.util.classpath
 
 /**
- * 全局 classpath 持有者，由启动流程安装（`startServer` 内自动完成）。
+ * 全局 classpath 持有者，由启动流程安装（[moe.lolosia.web.main] 内自动完成）。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -20,6 +20,6 @@ public object ClasspathHolder {
 
     public val instance: Classpath
         get() = current ?: error(
-            "classpath 尚未初始化：请在启动服务前调用 ClasspathHolder.install(...)（startServer 会按平台自动安装）"
+            "classpath 尚未初始化：请在启动服务前调用 ClasspathHolder.install(...)（main 启动时会按平台自动安装）"
         )
 }

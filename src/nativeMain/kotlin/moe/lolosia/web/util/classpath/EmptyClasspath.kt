@@ -6,4 +6,5 @@ internal object EmptyClasspath : Classpath {
     override fun read(path: String): ByteArray? = null
     override fun list(prefix: String): List<String> = emptyList()
     override fun exists(path: String): Boolean = false
+    override val scheme: String = "empty"
 }

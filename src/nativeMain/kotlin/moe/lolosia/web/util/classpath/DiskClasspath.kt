@@ -30,6 +30,10 @@ public class DiskClasspath(private val root: String) : Classpath {
     }
 
     override fun list(prefix: String): List<String> = emptyList()
+
+    override val scheme: String = "file"
+
+    override val origin: String get() = "$scheme://$root"
 }
 
 /**

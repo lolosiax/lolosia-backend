@@ -19,6 +19,7 @@ import moe.lolosia.web.api.put
 import moe.lolosia.web.api.requireSuccess
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.log.Log
+import moe.lolosia.web.util.router.Service
 import okio.FileSystem
 import okio.Path.Companion.toPath
 
@@ -30,7 +31,10 @@ import okio.Path.Companion.toPath
  * 上游变化，因此按 [AppSettings.DdnsConfig.intervalSeconds] 轮询，仅在本机地址与线上记录
  * 不一致时才写入。地址取自 `/proc/net/if_inet6`，请求经 [moe.lolosia.web.api.request] 发出。
  */
-public class DdnsService(private val config: AppSettings.DdnsConfig) {
+@Service
+public class DdnsService(setting: AppSettings) {
+
+    val config = setting.ddns
 
     private val log = Log.of("DDNS")
 

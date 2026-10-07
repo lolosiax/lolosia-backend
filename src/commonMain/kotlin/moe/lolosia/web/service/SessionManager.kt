@@ -17,6 +17,7 @@ import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SessionRepository
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.time.nowEpochMs
 
 /**
@@ -29,6 +30,7 @@ import moe.lolosia.web.util.time.nowEpochMs
  * @author 洛洛希雅Lolosia
  */
 @Injectable
+@Service
 public class SessionManager(private val db: Database, private val repo: SessionRepository) {
 
     private val log = Log.of("Session")

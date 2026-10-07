@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlin.uuid.Uuid
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.sse.EventSource
 import moe.lolosia.web.util.sse.KtorEventSource
 
@@ -28,6 +29,7 @@ import moe.lolosia.web.util.sse.KtorEventSource
  * @author 洛洛希雅Lolosia
  */
 @Injectable
+@Service
 public class SseService {
 
     private val log = Log.of("Sse")

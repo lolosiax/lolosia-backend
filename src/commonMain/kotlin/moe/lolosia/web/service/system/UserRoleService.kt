@@ -8,6 +8,7 @@ import moe.lolosia.web.dto.ROLE_ID_UNKNOWN
 import moe.lolosia.web.dto.UserRoleRow
 import moe.lolosia.web.dto.toUserRoleRow
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
 
 /**
@@ -24,6 +25,7 @@ import moe.lolosia.web.util.session.Context
  * @author 洛洛希雅Lolosia
  */
 @Injectable
+@Service
 public class UserRoleService(
     private val bindings: SysUserRoleRepository,
     private val roles: SysRoleRepository,

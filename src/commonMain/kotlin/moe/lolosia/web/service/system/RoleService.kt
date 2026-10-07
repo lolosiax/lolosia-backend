@@ -9,6 +9,7 @@ import moe.lolosia.web.dto.RoleRow
 import moe.lolosia.web.dto.RoleUpdateReq
 import moe.lolosia.web.dto.toRow
 import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
 
 /**
@@ -28,6 +29,7 @@ import moe.lolosia.web.util.session.Context
  * @author 洛洛希雅Lolosia
  */
 @Injectable
+@Service
 public class RoleService(
     private val roles: SysRoleRepository,
     private val bindings: SysUserRoleRepository,

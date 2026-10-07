@@ -14,6 +14,8 @@
 
 - **注解式控制器**：`@Controller("/api") object XxxController` + `@GET/@POST/@PUT/@DELETE/@PATCH`，KSP 编译期生成路由注册（`generatedRoutes()`），不依赖任何反射（Native 也没有反射）
 - **按类型自动注入**（Spring 风格）：形参类型标了 `@Injectable` 就**无需注解**直接注入，如 `fun whoami(ctx: Context)`、`fun config(config: AppSettings)`
+- **服务自动装配**：业务服务标 `@Service`，`router-ksp` 生成 `serviceModule()`（`single { X(get(), …) }` 构造器注入），不用手写 Koin 绑定；`@Service` 管容器绑定、`@Injectable` 管路由形参注入，两者都需要时都标
+- **生成注册表跨源集可见**：KSP 生成物只能落在各目标源集，故签名以 `expect` 写在 commonMain 的 `GeneratedRegistries.kt`、各目标生成 `actual`（编译器强制配对，签名对不上直接编译报错）；于是 `main` / `startServer` 全在 commonMain，平台差异只剩 `installPlatformClasspath` / `envOrNull` / `platformModule` 三处 expect/actual
 - **请求上下文 `ctx`**：一次请求一个（挂在 `call.attributes` 上，请求结束随 `call` 释放），分三面 —— 请求面 `ctx.call`（仅控制器用；IP / UA / 请求头由控制器抽成普通参数往下传）、用户面 `ctx.session` / `ctx.userId` / `ctx.user`（当前用户与角色懒查一次并缓存）、执行面 `ctx.db` / `ctx.transaction { }`；另有 `ctx.data` 作请求期共享数据区。**服务层方法首参透传 `ctx`**（与旧 JVM 族同位置）
 - **参数注解名称可省略**：`@Path` / `@Query` / `@Header` / `@Form` / `@FilePart` 不写名字默认取形参名；`@Body` 直接反序列化 `@Serializable` 请求体
 - **`classpath.zip` 中间层**：源集下的 `resources/**` 就是 classpath 根，构建期嵌入可执行文件，运行时 `classpath.read("static/home/index.html")` —— 写法与 Java 打资源文件一致
@@ -53,19 +55,22 @@
 ├── router-ksp/                   # 自研路由的 KSP 处理器（JVM 件）：→ GeneratedRoutes / GeneratedInterceptors / GeneratedInjection
 ├── src/
 │   ├── commonMain/kotlin/moe/lolosia/web/
-│   │   ├── configuration/        # Koin 容器：appModule / serviceModule / startAppKoin
+│   │   ├── Bootstrap.kt          # startServer（跨平台编排：classpath / 配置 / Koin / Ktor）
+│   │   ├── Main.kt               # main（唯一入口，直接调 startServer）
+│   │   ├── configuration/        # Koin 容器：appModule / startAppKoin（serviceModule 由 @Service 生成）
 │   │   ├── controller/           # 业务（Login / User / Role / UserRole / Menu）+ Demo / Classpath（插件验证用）
 │   │   ├── database/             # Database（sqlx4k 驱动）+ repository 各 @Repository + model 实体
 │   │   ├── dto/                  # ApiResult（{code,msg,data} 信封）/ RawJson / SystemDtos / LoginDtos
+│   │   ├── generated/            # GeneratedRegistries.kt（5 个 expect 签名；actual 由 router-ksp 生成到各目标）
 │   │   ├── interceptor/          # Traffic / Ctx / Auth / Envelope 四层（顺序由 @Interceptor 经 KSP 生成）
 │   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService
 │   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
 │   │   ├── settings/             # AppSettings（@Serializable）+ 多级覆盖 SettingsLoader
 │   │   └── util/                 # captcha / classpath / crypto(BCrypt) / image(PNG) / json / koin / ktor / log / router / session / time
 │   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
-│   ├── nativeMain/kotlin/…/      # Bootstrap.kt（startServer）/ ZipClasspath / 平台 Env
-│   ├── mingwX64Main/kotlin/…/    # Main.kt（入口；DI 绑定取自生成的 GeneratedInjection）+ PE 资源读取
-│   └── linuxArm64Main/kotlin/…/  # Main.kt（入口；DI 绑定取自生成的 GeneratedInjection）+ objcopy 符号读取
+│   ├── nativeMain/kotlin/…/      # ZipClasspath / DiskClasspath 等实现 + installPlatformClasspath / 平台 Env / platformModule（expect/actual）
+│   ├── mingwX64Main/kotlin/…/    # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
+│   └── linuxArm64Main/kotlin/…/  # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── sql/                          # 建表脚本（7 张表 + view_user_role 视图）
 ├── legacy/jvm/                   # 旧 JVM 代码（不参与编译，仅参考）
@@ -241,7 +246,7 @@ object DemoController {
   - 方法名前缀白名单是精确匹配：`findAll` / `deleteAll` / `countAll`，或 `findAllBy*` / `findOneBy*` / `deleteBy*` / `countBy*` / `existsBy*` / `execute*`
   - **不支持 `IN (列表)`**（占位符在编译期固定），批量场景在服务层循环单条方法
   - MySQL 方言下**不要用生成的 `insert` / `update`**（会拼成多语句脚本，MariaDB 报 `1064`），写入用单语句 `@Query`
-- **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）。DI 绑定**不用手写**：`router-ksp` 扫 `@Repository` / `@Injectable` 生成 `GeneratedInjection.kt`（`repositoryModules()` + `Koin.registerInjectables()`），各目标 [Main.kt](src/mingwX64Main/kotlin/moe/lolosia/web/Main.kt) 直接调用；实现类名按 sqlx4k 的固定约定 `<接口名>Impl` 推导，对不上会在 KSP 阶段报错
+- **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）。DI 绑定**不用手写**：`router-ksp` 扫 `@Repository` / `@Injectable` / `@Service` 生成 `GeneratedInjection.kt`（`repositoryModules()` + `serviceModule()` + `Koin.registerInjectables()`），签名在 commonMain 的 [GeneratedRegistries.kt](src/commonMain/kotlin/moe/lolosia/web/generated/GeneratedRegistries.kt) 声明为 `expect`、生成物是 `actual`，[Bootstrap.kt](src/commonMain/kotlin/moe/lolosia/web/Bootstrap.kt) 直接调用；实现类名按 sqlx4k 的固定约定 `<接口名>Impl` 推导，对不上会在 KSP 阶段报错
 - **时间列一律 `kotlin.time.Instant`**（业务用 `Clock.System.now()`），驱动按 UTC 往返；只有日志用本地时间展示
 
 ## 🚢 部署（systemd）

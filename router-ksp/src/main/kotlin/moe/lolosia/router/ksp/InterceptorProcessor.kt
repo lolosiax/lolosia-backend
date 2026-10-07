@@ -110,7 +110,7 @@ class InterceptorProcessor(
         appendLine("import org.koin.core.Koin")
         appendLine()
         appendLine("/** 按 @Interceptor(order) 升序注册全部中间件。 */")
-        appendLine("fun Application.configureInterceptors(koin: Koin) {")
+        appendLine("actual fun Application.configureInterceptors(koin: Koin) {")
         interceptors.forEach { appendLine("    ${it.name}(${it.dependencyArgs()})") }
         appendLine("}")
     }

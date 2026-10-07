@@ -24,6 +24,18 @@ public annotation class Controller(val prefix: String = "")
 @Retention(AnnotationRetention.BINARY)
 public annotation class Injectable(val requestScoped: Boolean = false)
 
+/**
+ * 标注 Koin 单例服务：`InjectionProcessor` 据此生成 `single { 类型(get(), …) }` 绑定
+ * （构造器注入，每个构造参数按类型从容器取），无需再手写 `serviceModule()`。
+ *
+ * 与 [Injectable] 各管一件事：本注解管**容器绑定**，[Injectable] 管**路由形参按类型注入**；
+ * 既是服务又要被控制器形参注入时，两个注解都要标。构造参数带外部实例（如 `AppSettings` 用配置对象、
+ * `FileStore` 用平台实现）的类型无法由类型推导，仍留手写（见 `appModule` / `platformModule`）。
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+public annotation class Service
+
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.BINARY)
 public annotation class GET(val path: String = "")

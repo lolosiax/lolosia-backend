@@ -46,6 +46,8 @@ public class ZipClasspath private constructor(private val data: ByteArray) : Cla
         return byName.keys.filter { p.isEmpty() || it.startsWith(p) }.sorted()
     }
 
+    override val scheme: String = "classpath"
+
     private fun parseCentralDirectory(): Map<String, Entry> {
         val eocd = findEndOfCentralDirectory() ?: return emptyMap()
         val count = u16(eocd + 10)

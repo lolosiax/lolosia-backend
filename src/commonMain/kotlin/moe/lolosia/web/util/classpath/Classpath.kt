@@ -26,4 +26,10 @@ public interface Classpath {
 
     /** 是否存在该条目。 */
     public fun exists(path: String): Boolean = read(path) != null
+
+    /** 来源标识（URI scheme）：`file`（磁盘回退）/ `classpath`（内嵌 zip）/ `empty`。 */
+    public val scheme: String
+
+    /** 供日志展示的来源描述；默认 `"$scheme://"`，磁盘回退实现会带上具体目录。 */
+    public val origin: String get() = "$scheme://"
 }
