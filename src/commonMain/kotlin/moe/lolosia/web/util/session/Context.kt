@@ -41,7 +41,7 @@ interface Context {
     /** 用户面：会话 id（前端拿它当 token）。 */
     val sessionId: String? get() = session?.id
 
-    /** 用户面：当前登录用户 id；会话里没写用户时（如匿名的 `/api/session/new`）为 `null`。 */
+    /** 用户面：当前登录用户 id；会话里没写用户时（如匿名会话）为 `null`。 */
     val userId: String? get() = session?.userId
 
     /** 用户面：取登录用户 id，取不到按「未登录」处理（401）。 */

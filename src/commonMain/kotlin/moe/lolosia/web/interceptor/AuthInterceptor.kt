@@ -25,8 +25,7 @@ fun Application.installAuthInterceptor(sessions: SessionManager) {
             val session = sessions.mySession(call.request)
             if (session != null) call.attributes.put(SessionKey, session)
 
-            val anonymous = path in IGNORE || DEV_PROBES.any { path.startsWith(it) } ||
-                IGNORE_MATCHES.any { path.startsWith(it) }
+            val anonymous = path in IGNORE || IGNORE_MATCHES.any { path.startsWith(it) }
             if (!anonymous && session == null) {
                 throw ApiException(401, "身份认证失败，请重新登录")
             }
@@ -34,22 +33,6 @@ fun Application.installAuthInterceptor(sessions: SessionManager) {
         proceed()
     }
 }
-
-/**
- * ⚠️ **临时**：P0 期间的诊断探针（[moe.lolosia.web.controller.DemoController]）需要免鉴权，
- * 否则「没有账号就没法登录取 token」的鸡生蛋问题会让冒烟脚本跑不起来
- * （探针里的 `/api/svc/selftest` 会造一个临时账号并返回会话 id，供后续带 token 验证鉴权链路）。
- * P0 收尾删掉 `DemoController` 时**连同这里一起删**。
- */
-private val DEV_PROBES: List<String> = listOf(
-    "/api/ping",
-    "/api/whoami",
-    "/api/config",
-    "/api/db/",
-    "/api/cache/",
-    "/api/session/",
-    "/api/svc/",
-)
 
 /** 完全放行的路径（全路径精确匹配）。 */
 private val IGNORE: Set<String> = setOf(
