@@ -31,8 +31,8 @@ open class ClasspathExtension {
     var includeViteJar: Boolean = true
 
     /**
-     * zip 条目是否压缩。
-     * 说明：当前读取器（ZipClasspath）只实现了 STORED，改回 DEFLATED 需先补 inflate。
+     * zip 条目是否压缩（DEFLATED）。
+     * 读取端 `ZipClasspath` 两种都支持（DEFLATED 走 `platform.zlib` 的 inflate）。
      */
     @Input
     @Optional

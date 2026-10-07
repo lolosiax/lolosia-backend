@@ -191,16 +191,25 @@ class RouterProcessor(
                 p.hasAnnotation("$FQ.Form") -> {
                     val n = p.annotationName(FQ + ".Form") ?: pName
                     needsForm = true
-                    body.appendLine("        val $pName: $typeText = ${rawAs(type, "__form.fields[\"$n\"]", n)}")
+                    if (type.isStringList()) {
+                        body.appendLine("        val $pName: $typeText = __form.fieldValues(\"$n\")")
+                    } else {
+                        body.appendLine("        val $pName: $typeText = ${rawAs(type, "__form.fields[\"$n\"]", n)}")
+                    }
                 }
 
                 p.hasAnnotation("$FQ.FilePart") -> {
                     val n = p.annotationName(FQ + ".FilePart") ?: pName
                     needsForm = true
-                    if (type.isMarkedNullable) {
-                        body.appendLine("        val $pName: $typeText = __form.fileOrNull(\"$n\")")
-                    } else {
-                        body.appendLine("        val $pName: $typeText = $FQ.required(__form.fileOrNull(\"$n\"), \"$n\")")
+                    when {
+                        type.isUploadedFileList() ->
+                            body.appendLine("        val $pName: $typeText = __form.fileValues(\"$n\")")
+
+                        type.isMarkedNullable ->
+                            body.appendLine("        val $pName: $typeText = __form.fileOrNull(\"$n\")")
+
+                        else ->
+                            body.appendLine("        val $pName: $typeText = $FQ.required(__form.fileOrNull(\"$n\"), \"$n\")")
                     }
                 }
 
@@ -266,6 +275,17 @@ class RouterProcessor(
     }
 
     private fun KSType.isEnum(): Boolean = (declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
+
+    /** `List<String>`：绑定同名表单字段的全部取值（multipart / urlencoded）。 */
+    private fun KSType.isStringList(): Boolean = isListOf("kotlin.String")
+
+    /** `List<UploadedFile>`：绑定同名文件项的全部文件。 */
+    private fun KSType.isUploadedFileList(): Boolean = isListOf("$FQ.UploadedFile")
+
+    private fun KSType.isListOf(elementFqn: String): Boolean =
+        declaration.qualifiedName?.asString() == "kotlin.collections.List" &&
+            arguments.size == 1 &&
+            arguments[0].type?.resolve()?.declaration?.qualifiedName?.asString() == elementFqn
 
     /** 类型自身（或任一父类型）是否标注了 @Injectable。 */
     private fun KSType.isInjectable(visited: MutableSet<String> = mutableSetOf()): Boolean {

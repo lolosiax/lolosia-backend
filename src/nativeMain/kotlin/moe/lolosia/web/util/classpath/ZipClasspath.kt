@@ -2,8 +2,25 @@ package moe.lolosia.web.util.classpath
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.COpaquePointer
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.convert
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.sizeOf
+import kotlinx.cinterop.toKString
+import kotlinx.cinterop.usePinned
+import platform.zlib.Z_FINISH
+import platform.zlib.Z_OK
+import platform.zlib.Z_STREAM_END
+import platform.zlib.inflate
+import platform.zlib.inflateEnd
+import platform.zlib.inflateInit2_
+import platform.zlib.z_stream
+import platform.zlib.zlibVersion
 
 /**
  * 读取 zip 内容的 [Classpath] 实现。
@@ -11,7 +28,10 @@ import kotlinx.cinterop.reinterpret
  * 只解析 zip 的中央目录建索引，读取条目时才拷贝该条目，因此内存占用 ≈ zip 本体 + 单条目。
  * 打开时会把映像源数据拷入一次内存，使解析逻辑与平台无关。
  *
- * 已知边界：不支持 zip64（`classpath.zip` 不会超过 4GB）；只支持 STORED（不压缩）条目。
+ * 支持 STORED 与 DEFLATED（用 Kotlin/Native 自带的 `platform.zlib` 做 inflate，仅 raw deflate，
+ * 与 zip 条目的存储格式一致）。
+ *
+ * 已知边界：不支持 zip64（`classpath.zip` 不会超过 4GB）。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -20,6 +40,7 @@ class ZipClasspath private constructor(private val data: ByteArray) : Classpath 
     private class Entry(
         val method: Int,
         val dataOffset: Int,
+        val compressedSize: Int,
         val uncompressedSize: Int,
     )
 
@@ -29,13 +50,11 @@ class ZipClasspath private constructor(private val data: ByteArray) : Classpath 
 
     override fun read(path: String): ByteArray? {
         val entry = byName[normalizeClasspathPath(path)] ?: return null
+        val compressed = data.copyOfRange(entry.dataOffset, entry.dataOffset + entry.compressedSize)
         return when (entry.method) {
-            METHOD_STORED -> data.copyOfRange(entry.dataOffset, entry.dataOffset + entry.uncompressedSize)
+            METHOD_STORED -> compressed
 
-            METHOD_DEFLATED -> throw UnsupportedOperationException(
-                "classpath 条目 `$path` 使用了 deflate 压缩；当前仅支持 STORED —— " +
-                    "请把打包任务 classpathZip* 的压缩方式保持为 STORED"
-            )
+            METHOD_DEFLATED -> inflateRaw(compressed, entry.uncompressedSize)
 
             else -> throw UnsupportedOperationException("不支持的 zip 压缩方式 ${entry.method}：$path")
         }
@@ -59,6 +78,7 @@ class ZipClasspath private constructor(private val data: ByteArray) : Classpath 
             if (u32(offset) != SIG_CENTRAL_FILE_HEADER) break
 
             val method = u16(offset + 10)
+            val compressedSize = u32(offset + 20)
             val uncompressedSize = u32(offset + 24)
             val nameLen = u16(offset + 28)
             val extraLen = u16(offset + 30)
@@ -69,13 +89,46 @@ class ZipClasspath private constructor(private val data: ByteArray) : Classpath 
             // 数据起点以「本地头」为准：本地头的 extra 长度可能与中央目录不同
             val dataOffset = localDataOffset(localHeaderOffset)
             if (!name.endsWith("/")) {
-                result[name] = Entry(method, dataOffset, uncompressedSize)
+                result[name] = Entry(method, dataOffset, compressedSize, uncompressedSize)
             }
 
             offset += 46 + nameLen + extraLen + commentLen
             i++
         }
         return result
+    }
+
+    /**
+     * raw deflate 解压。zip 条目用的是 raw deflate（无 zlib 头），故 `windowBits = -15`。
+     *
+     * [outputSize] 取中央目录里的未压缩大小，一次性解到位（classpath 里都是小资源）。
+     */
+    @OptIn(ExperimentalForeignApi::class)
+    private fun inflateRaw(input: ByteArray, outputSize: Int): ByteArray {
+        if (outputSize == 0) return ByteArray(0)
+        return memScoped {
+            val strm = alloc<z_stream>()
+            // inflateInit2_ 只校验 version 的首字符与 stream_size，取运行时 zlib 版本最稳
+            val version = zlibVersion()?.toKString() ?: "1.2.0"
+            val init = inflateInit2_(strm.ptr, -15, version, sizeOf<z_stream>().convert())
+            check(init == Z_OK) { "inflateInit2 失败：rc=$init" }
+            try {
+                val out = ByteArray(outputSize)
+                input.usePinned { inPinned ->
+                    out.usePinned { outPinned ->
+                        strm.next_in = inPinned.addressOf(0).reinterpret()
+                        strm.avail_in = input.size.convert()
+                        strm.next_out = outPinned.addressOf(0).reinterpret()
+                        strm.avail_out = outputSize.convert()
+                        val rc = inflate(strm.ptr, Z_FINISH)
+                        check(rc == Z_STREAM_END) { "inflate 失败：rc=$rc" }
+                    }
+                }
+                out
+            } finally {
+                inflateEnd(strm.ptr)
+            }
+        }
     }
 
     private fun localDataOffset(localHeaderOffset: Int): Int {

@@ -32,11 +32,12 @@ fun parseMultipartBoundary(contentType: String): String? {
 /** 解析 multipart 请求体。 */
 fun parseMultipartBody(body: ByteArray, boundary: String): FormData {
     val fields = mutableMapOf<String, String>()
+    val multiFields = mutableMapOf<String, MutableList<String>>()
     val files = mutableListOf<UploadedFile>()
 
     val delimiter = "--$boundary".encodeToByteArray()
     var pos = body.indexOfSeq(delimiter, 0)
-    if (pos < 0) return FormData(fields, files)
+    if (pos < 0) return FormData(fields, files, multiFields)
     pos += delimiter.size
 
     while (pos <= body.size) {
@@ -80,7 +81,9 @@ fun parseMultipartBody(body: ByteArray, boundary: String): FormData {
                     bytes = content,
                 )
             } else {
-                fields[name] = content.decodeToString()
+                val value = content.decodeToString()
+                fields[name] = value
+                multiFields.getOrPut(name) { mutableListOf() } += value
             }
         }
 
@@ -89,7 +92,7 @@ fun parseMultipartBody(body: ByteArray, boundary: String): FormData {
         pos = nextBoundary + CRLF.size + delimiter.size
     }
 
-    return FormData(fields, files)
+    return FormData(fields, files, multiFields)
 }
 
 private fun ByteArray.matchesAt(start: Int, needle: ByteArray): Boolean {

@@ -60,6 +60,8 @@ kotlin {
             // 对外请求（api 包）：引擎按目标平台选择，见各平台源集
             implementation(ktorLibs.client.core)
             implementation(ktorLibs.client.websockets)
+            // 裸 TCP：数据库连通性/鉴权预检（见 Database 的 MySqlAuthProbe）
+            implementation(ktorLibs.network)
         }
         linuxArm64Main.dependencies {
             implementation(ktorLibs.client.curl)
@@ -169,5 +171,7 @@ lolosia {
         // includeViteJar 默认 true：vite 产物以 static/<contextPath>/ 前缀并入
         // 额外资源可继续用 resources("build/xxx") 注入
         // Windows 宿主构建 linux 目标时，objcopy 会自动借道 WSL（可用 wslDistro / wslUser 指定发行版与用户）
+        // compressed = true：zip 条目用 DEFLATED（读取端 ZipClasspath 已用 platform.zlib 支持 inflate）
+        compressed = true
     }
 }
