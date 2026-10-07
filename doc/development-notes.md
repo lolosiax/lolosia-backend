@@ -24,7 +24,7 @@
 各目标源集不再有入口；平台差异只剩 `installPlatformClasspath` / `envOrNull` / `platformModule` 三处 `expect/actual`；
 DI 注册表（仓库 / 服务 / 注入 / 中间件 / 路由）改由 KSP 生成 `actual`、commonMain 手写 `expect` 签名后直接调用。详见 [AGENTS.md](../AGENTS.md) §2。
 
-**下一步**：P0 收尾 —— 删掉 `DemoController` 与 `AuthInterceptor.DEV_PROBES` 这组临时探针，然后进 P1（OSS / 头像上传 / `sys_logs` 落库 / SSE 实机回归 / `classpath.zip` 改 DEFLATED）。
+**下一步**：P0 已收尾（临时探针 `DemoController` / `AuthInterceptor.DEV_PROBES` 已删，保留 `ClasspathController`），进入 P1。
 
 ## 2. 构建 / 验证工作流
 
@@ -58,41 +58,41 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 $exe = "build\bin\mingwX64\releaseExecutable\ktor-template.exe"
 $p = Start-Process $exe -ArgumentList 7160 -PassThru
 Start-Sleep 4
-# ⚠️ 0.8 起返回值**按响应 MIME**包信封：JSON 才包成 {code,msg,data}；探针返回裸 String 是 text/plain，原样输出
-curl.exe -s http://127.0.0.1:7160/api/ping          # 裸文本 pong
-curl.exe -s http://127.0.0.1:7160/api/whoami        # 裸文本 uri=/api/whoami（ctx 自动注入）
-curl.exe -s http://127.0.0.1:7160/api/config        # 裸文本 port=7160, db=..., logLevel=INFO（配置 + Koin→注入链路）
-curl.exe -s http://127.0.0.1:7160/api/db/ping       # 裸文本 db=10.11.6-MariaDB / ktor-template（sqlx4k FFI）
-curl.exe -s "http://127.0.0.1:7160/api/user/get/42?verbose=true"
-curl.exe -s -X POST http://127.0.0.1:7160/api/echo -H "Content-Type: application/json" -d '{"name":"a","times":3}'
-curl.exe -s -X POST http://127.0.0.1:7160/api/upload -F note=hello -F file=@src/commonMain/resources/hello.txt
-curl.exe -s "http://127.0.0.1:7160/api/db/roles"                              # 5 个角色
-curl.exe -s "http://127.0.0.1:7160/api/db/users"                              # view_user_role 分页
-$st = curl.exe -s http://127.0.0.1:7160/api/svc/selftest                      # 服务层自检全绿 + 末尾 token=
-$st
-$tk = ($st | Select-String -Pattern 'token=(\S+)').Matches.Groups[1].Value    # 自检留下的会话 id
+#> P0 收尾后**不再有免鉴权探针**：冒烟一律走真实链路（注册 → 登录 → 带 token）。
+# ---- 静态页 / 存活 ----
+curl.exe -s -o "$env:TEMP\home.html" -w "home=%{http_code} size=%{size_download}`n" http://127.0.0.1:7160/home/
 
-# ---- 鉴权链路（0.8 起）----
-curl.exe -s -o "$env:TEMP\a.json" -w "no-token=%{http_code}`n" -X POST http://127.0.0.1:7160/api/role/list   # 401
-curl.exe -s -X POST http://127.0.0.1:7160/api/role/list -H "Authorization: Bearer $tk"                        # 200 + 角色数组
-'{"pageNo":1,"pageSize":3,"keys":"lolosia"}' | Set-Content -Encoding ascii "$env:TEMP\q.json"
-curl.exe -s -X POST http://127.0.0.1:7160/api/user/list -H "Authorization: Bearer $tk" -H "Content-Type: application/json" -d "@$env:TEMP\q.json"
-curl.exe -s -X POST http://127.0.0.1:7160/api/menu/config -H "Authorization: Bearer $tk"                     # {"default":true}
-curl.exe -s -X POST http://127.0.0.1:7160/api/logout -H "Authorization: Bearer $tk"                           # 会话立即失效 → 再调 401
+# ---- 注册（`/api/register` 在免鉴权白名单里；本轮不吃图形验证码，可直接调）----
+$name = "smoke-$([DateTimeOffset]::Now.ToUnixTimeSeconds())"
+'{"userName":"' + $name + '","email":"' + $name + '@example.com","password":"pass-123"}' | Set-Content -Encoding utf8 "$env:TEMP\reg.json"
+curl.exe -s -X POST http://127.0.0.1:7160/api/register -H "Content-Type: application/json" -d "@$env:TEMP\reg.json"   # 200 + roleId=4（学生）
 
-# ---- 图形验证码 / 注册（0.10 起）----
-# 答案落在 sys_cache（path=/system/login/captcha、tag=id），本机查库就能拿到"标准答案"
+# ---- 图形验证码（答案落 sys_cache，本机查库取"标准答案"）----
 $mm = 'D:\Program Files\MariaDB\bin\mysql.exe'
 function CapAnswer($id) { ((& $mm --host=127.0.0.1 --port=3306 --user=root --password=123456 -D ktor-template -N -e "select value from sys_cache where path='/system/login/captcha' and tag='$id';") | Out-String).Trim() }
 $c = (curl.exe -s -X POST http://127.0.0.1:7160/api/captcha | ConvertFrom-Json).data
 $ans = CapAnswer $c.id
-'{"id":"' + $c.id + '","code":"' + $ans + '"}' | Set-Content -Encoding ascii "$env:TEMP\v.json"
+'{"id":"' + $c.id + '","code":"' + $ans + '"}' | Set-Content -Encoding utf8 "$env:TEMP\v.json"
 curl.exe -s -X POST http://127.0.0.1:7160/api/verify -H "Content-Type: application/json" -d "@$env:TEMP\v.json"   # data.message=success
 curl.exe -s -X POST http://127.0.0.1:7160/api/verify -H "Content-Type: application/json" -d "@$env:TEMP\v.json"   # 400 已过期（一次性消费）
-'{"userName":"smoke-reg","email":"smoke-reg@example.com","password":"pass-123"}' | Set-Content -Encoding ascii "$env:TEMP\v.json"
-curl.exe -s -X POST http://127.0.0.1:7160/api/register -H "Content-Type: application/json" -d "@$env:TEMP\v.json"  # 200 + roleId=4
 
-curl.exe -s -o "$env:TEMP\curl.out" -w "%{http_code} %{size_download}`n" http://127.0.0.1:7160/home/          # 200 + 前端首页
+# ---- 登录 → 拿会话 token ----
+'{"userName":"' + $name + '","password":"pass-123"}' | Set-Content -Encoding utf8 "$env:TEMP\login.json"
+$tk = (curl.exe -s -X POST http://127.0.0.1:7160/api/login -H "Content-Type: application/json" -d "@$env:TEMP\login.json" | ConvertFrom-Json).data.Authorization
+"token=$tk"
+
+# ---- 鉴权链路（无 token → 401 / 带 token → 200）----
+curl.exe -s -o "$env:TEMP\a.json" -w "no-token=%{http_code}`n" -X POST http://127.0.0.1:7160/api/user/list -H "Content-Type: application/json" -d '{"pageNo":1,"pageSize":3}'   # 401
+curl.exe -s -X POST http://127.0.0.1:7160/api/user/myInfo -H "Authorization: Bearer $tk"                         # 200 + 当前用户
+curl.exe -s -X POST http://127.0.0.1:7160/api/role/list -H "Authorization: Bearer $tk"                           # 200 + 角色数组
+curl.exe -s -X POST http://127.0.0.1:7160/api/menu/config -H "Authorization: Bearer $tk"                         # {"default":true}
+curl.exe -s "http://127.0.0.1:7160/api/classpath/read?path=hello.txt" -H "Authorization: Bearer $tk"             # 内嵌资源探针
+
+# ---- SSE（匿名建流 + 首帧 flush）----
+$up = curl.exe -s -X POST http://127.0.0.1:7160/api/sse -H "x-upgrade: event-source" | ConvertFrom-Json
+curl.exe -s -N --max-time 3 "http://127.0.0.1:7160/api/sse?eventSourceId=$($up.data)"   # 应见 id: 1 / event: status / data: "connect successful"
+
+curl.exe -s -X POST http://127.0.0.1:7160/api/logout -H "Authorization: Bearer $tk"                              # 会话立即失效 → 再调 401
 Stop-Process -Id $p.Id
 ```
 > 期望：日志首行 `classpath 已装载：<N> 个条目（来源：classpath://）`（磁盘回退时是 `file://<目录>`，空实现是 `empty://`），
@@ -106,17 +106,19 @@ Stop-Process -Id $p.Id
 $cfg = "$env:TEMP\ktor-cfg-test"; New-Item -ItemType Directory -Force $cfg | Out-Null
 # 故意用带 BOM 的写法（PS 5.1 的 -Encoding UTF8 会写 BOM），验证 BOM 容忍
 Set-Content -Path "$cfg\application.json" -Value '{"logLevel":"DEBUG","server":{"port":7161},"datasource":{"url":"mysql://127.0.0.1:3399/override-db"}}' -Encoding UTF8
+# `/api/config` 探针已随 P0 收尾删除，这里改看**监听端口**：连得上即该层配置生效
 $p = Start-Process $exe -WorkingDirectory $cfg -PassThru; Start-Sleep 4
-curl.exe -s http://127.0.0.1:7161/api/config          # 磁盘配置生效：port=7161, logLevel=DEBUG, override-db
+curl.exe -s -o "$env:TEMP\home.html" -w "disk-cfg=%{http_code}`n" http://127.0.0.1:7161/home/     # 200 → 磁盘配置的 port 生效
 Stop-Process -Id $p.Id -Force
 $env:KTOR_PORT = "7162"
 $p = Start-Process $exe -WorkingDirectory $cfg -PassThru; Start-Sleep 4
-curl.exe -s http://127.0.0.1:7162/api/config          # 环境变量赢磁盘：port=7162
+curl.exe -s -o "$env:TEMP\home.html" -w "env-wins=%{http_code}`n" http://127.0.0.1:7162/home/      # 200 → 环境变量赢磁盘
 Stop-Process -Id $p.Id -Force
 $p = Start-Process $exe -ArgumentList 7163 -WorkingDirectory $cfg -PassThru; Start-Sleep 4
-curl.exe -s http://127.0.0.1:7163/api/config          # 命令行赢环境变量：port=7163
+curl.exe -s -o "$env:TEMP\home.html" -w "cli-wins=%{http_code}`n" http://127.0.0.1:7163/home/      # 200 → 命令行赢环境变量
 Stop-Process -Id $p.Id -Force; Remove-Item Env:KTOR_PORT
 ```
+> `logLevel` / `datasource.url` 的覆盖改从**启动日志**（首行级别）与后续请求是否报库错来观察 —— 不再有 `/api/config` 可读。
 
 ### 冒烟（linuxArm64，不开板子）
 
@@ -135,32 +137,43 @@ setsid qemu-aarch64-static -L /usr/aarch64-linux-gnu "$KEXE" 7150 > /tmp/ktor.lo
 ```powershell
 $exe = 'D:\Program Files\MariaDB\bin\mysql.exe'
 & $exe --host=127.0.0.1 --port=3306 --user=root --password=123456 -e "CREATE DATABASE IF NOT EXISTS ``ktor-template`` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
-$sqlDir = 'f:\Develop\Kotlin\ktor-template\sql'
+$sqlDir = 'e:\Dev\Kotlin\ktor-template\sql'
 $files = @(Get-ChildItem $sqlDir -Filter '*.sql' | Where-Object { $_.Name -ne 'view_user_role.sql' } | Sort-Object Name)
 $files += @(Get-ChildItem $sqlDir -Filter 'view_user_role.sql')   # 视图必须最后导入
 foreach ($f in $files) { & $exe --host=127.0.0.1 --port=3306 --user=root --password=123456 --default-character-set=utf8mb4 -D ktor-template -e "source $($f.FullName -replace '\\','/')" }
 ```
 > 建完是 **8** 个表/视图（7 表 + `view_user_role`），`sys_user` 里有 `lolosia`（bcrypt `$2a$10$…`）。
 > 默认配置（`src/commonMain/resources/application.json`）指向本机 `127.0.0.1:3306/ktor-template`。
-> `/api/svc/selftest` 会留下**软删**的 `selftest-*` 用户与 `type='selftest'` 角色（视图已过滤）；要硬清：
+> `/api/svc/selftest` 探针已随 P0 收尾删除；现在 §2 冒烟会注册 `smoke-*` 用户（学生），跑多了要清理：
 >
 > ```sql
-> delete from sys_user_roles where user_id in (select id from sys_user where user_name like 'selftest-%');
-> delete from sys_user where user_name like 'selftest-%';
-> delete from sys_role where type = 'selftest';
+> delete from sys_user_roles where user_id in (select id from sys_user where user_name like 'smoke-%');
+> delete from sys_user where user_name like 'smoke-%';
 > ```
 
 ### 临时二进制验机（真机 aarch64，不动 systemd）
 
-把产物丢到板子 `/tmp` 用**另一个端口**跑，验完删掉 —— 不碰 `ktor-template-native.service`（7130）与现网 JVM（7129）：
+把产物丢到板子 `/tmp` 用**另一个端口**跑，验完删掉 —— 不碰现网 `ktor-template-native.service`（监听 7129）。
+
+> 临时实例**自带可用的配置最好**（能连库就能跑完整链路）；但就算配置里的库连不上也不会崩了 ——
+> `Database` 是懒建连接池，启动只后台重连并记日志，库没连上时读库的请求返回 `503 数据库暂不可用`。
+> 不过现网配置里 `ddns.enabled: true`，务必关掉再跑（免得起第二个 DDNS 更新器重复推 Cloudflare）。
+> 做法：把现网 `application.yaml` 拷到临时目录、把 `enabled` 改 false，再用命令行首参覆盖端口。连接信息见平台配置（`platforms.json`）。
 
 ```powershell
-Set-Content -Path "$env:TEMP\askpass.cmd" -Value "@echo <密码>" -Encoding ASCII
+Set-Content -Path "$env:TEMP\askpass.cmd" -Value "@echo <password>" -Encoding ASCII
 $env:SSH_ASKPASS = "$env:TEMP\askpass.cmd"; $env:SSH_ASKPASS_REQUIRE = "force"; $env:DISPLAY = "localhost:0"
-scp -P 6023 -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL build\bin\linuxArm64\releaseExecutable\ktor-template.kexe lolosia@127.0.0.1:/tmp/ktor-test.kexe
-ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 lolosia@127.0.0.1 "chmod +x /tmp/ktor-test.kexe; cd /tmp; (setsid ./ktor-test.kexe 7131 > /tmp/ktor-test.log 2>&1 < /dev/null &); sleep 6; curl -s http://127.0.0.1:7131/api/db/ping; echo; grep 'Caused by' /tmp/ktor-test.log | head -3; pkill -f ktor-test.kexe"
+scp -P 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL build\bin\linuxArm64\releaseExecutable\ktor-template.kexe <user>@<host>:/tmp/ktor-test.kexe
+
+$remote = 'mkdir -p /tmp/ktortest; sed "s/enabled: true/enabled: false/" /srv/ktor-template/application.yaml > /tmp/ktortest/application.yaml; chmod +x /tmp/ktor-test.kexe; cd /tmp/ktortest; (setsid /tmp/ktor-test.kexe 7131 > /tmp/ktor-test.log 2>&1 < /dev/null &); sleep 8; curl -s -o /dev/null -w "home=%{http_code}\n" http://127.0.0.1:7131/home/; tail -6 /tmp/ktor-test.log'
+ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 22 <user>@<host> $remote
 ```
-> 板子上 `root/123456` **连不上** MariaDB（`1698 Access denied`，root 的密码登录被禁），所以 `/api/db/ping` 会返回 500 + cause；能拿到这个 cause 本身就说明 **FFI 与 MySQL 握手在 aarch64 上是通的**。
+
+清理（**别用 `pkill -f ktor-test.kexe`** —— 它会把承载命令的 shell 自己也匹配上、导致后续命令不执行；按 PID kill）：
+
+```bash
+kill -9 <pid>; rm -f /tmp/ktor-test.kexe; rm -rf /tmp/ktortest
+```
 
 ### vite 前端的增量行为
 
@@ -235,10 +248,14 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | `curl -o NUL` 在 Windows 建出名为 `NUL` 的文件 | 用 `-o $null` 或交给 WSL `rm` 删 |
 | 磁盘 `application.json` 看着完全没生效 | PowerShell `Set-Content -Encoding UTF8` / 记事本会写 **BOM** → 已在解析前剥 BOM，解析失败会记 WARN（不再静默吞） |
 | Koin 4 编译报 `Unresolved reference 'GlobalContext'` / `'koinApplication'` | 这俩在 Koin 4 里**不是公开 API** → 只用 `startKoin { }.koin` 并把容器实例显式往下传 |
-| 冒烟时 `curl` 返回 7（连不上）但进程活着 | 端口优先级是「命令行 > 环境变量 > 磁盘配置 > 内嵌默认」，先用 `/api/config` 看实际生效端口 |
+| 冒烟时 `curl` 返回 7（连不上）但进程活着 | 端口优先级是「命令行 > 环境变量 > 磁盘配置 > 内嵌默认」，按各层端口逐个探测 `/home/` 判断实际生效端口 |
 | 加 sqlx4k 后 `Clock.System` / `monthNumber` 编译不过 | sqlx4k 把 kotlinx-datetime 顶到 **0.8.0**：`Clock` 迁到 stdlib `kotlin.time.Clock`、`monthNumber/dayOfMonth` 弃用（改 `month.ordinal + 1` / `day`）。用 `gradlew dependencyInsight` 确认版本 |
 | 只看到 `Could not create instance for '[Singleton: …]'`，看不到真正的错 | Koin 的 `InstanceCreationException` 把 cause 包住了，而 `Throwable.toString()` 不带 cause → 日志已改为渲染整条 cause 链（`Caused by: …`） |
 | aarch64 产物在 qemu 里启动即 `SIGSEGV` | qemu-user 模拟问题，同一二进制真机正常 → 改在真机验证（§2） |
+| 库没起来时接口返回 `503 数据库暂不可用`，静态页正常 | 这是**预期行为**：`Database` 懒建连接池，启动不连库、后台每 10s 重连；库恢复后自动可用。若要排查，看启动日志里 `[Database]` 那条 `数据库连接失败` 的 cause |
+| 账号密码写错时进程**启动即崩**（Rust panic / `exit -1073740791`） | 根因在 `sqlx4k` 1.13.1 的 Rust 封装：它把非 `Database` 类错误全部 `panic!`（鉴权失败落到 `Error::Protocol`），而该 crate 以 `panic = "abort"` 构建、导出又是 `extern "C"`，于是 abort 整个进程、Kotlin 侧接不住。**1.14.0 已改成回 `ERROR_DATABASE`**（本工程已升级，实测鉴权失败时抛可捕获的 `SQLError`）。`MySqlAuthProbe` 预检保留，作快速失败与友好报错 |
+| 升级 `sqlx4k` 后 KSP 报 `NoSuchMethodError: ...UtilsKt.validate$default(...)` | `sqlx4k-codegen` 与其编译所用的 KSP 版本必须同档：1.14.0 编译在 KSP **2.3.12** 上，插件仍是 2.3.11 就撞签名 → `libs.versions.toml` 里把 `ksp` 同步升到 **2.3.12**（升级 sqlx4k 时要一起动） |
+| `pkill -f xxx` 之后同一行后续命令没执行 | `pkill -f` 会把承载命令的 shell 自身也匹配上 → 按 PID kill（见 §2 清理） |
 | MariaDB 报 `1064 ... near '; select id from ...'` | sqlx4k 在 MySQL 方言下把生成的 `insert` / `update` 拼成多语句脚本 → 写入改用单语句 `@Query` |
 | 写进库的时间比本地时间差 8 小时 | 实体时间字段用了 `LocalDateTime`（驱动会话时区是 `+00:00`）→ **一律改 `kotlin.time.Instant`** |
 | KSP 报 `Invalid repository method name` / `first parameter must be named 'context'` / `Suspend function cannot override non-suspend` | sqlx4k codegen 的三条硬规则（见 [AGENTS.md](../AGENTS.md) §5） |
@@ -264,15 +281,19 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 
 ## 5. 待办 / 已知缺口
 
-- **P0 收尾**：删掉 `DemoController` 与 `AuthInterceptor.DEV_PROBES`，然后进 P1。
-- **P1 缺口**（前端已经在调、本项目还没有的端点）：`/menu/list|create|update|destroy|navigate`、`/user/getStudentInfoByStudentId`、`/api/sse` + `/sse/registry`；另外 `sys_logs` 落库（日志拦截器）与 OSS / 头像上传、SSE 实机回归。
-- **前端工程**：`ktor-template-web`（`F:\Develop\Node\ktor-template-web`，`origin` 待补）尚未与契约副本 `lolosia-web` 对齐，属 P1；`viteJar.contextPath` 仍是 `home`，要改得两边同时改。
+- **P0 收尾已完成**：`DemoController` 与 `AuthInterceptor.DEV_PROBES` 已删（`ClasspathController` 保留作运维探针）。
+- **数据库健壮性已完成**：`Database` 改**懒建连接池 + 后台重连**（启动不建池、失败只记日志，库恢复自动可用）；库未就绪时读库请求返回 `503`。并在 `mySQL(...)` 建池前加 `MySqlAuthProbe` **裸 TCP 握手预检**（`Ok` 才建池 / `Unreachable`·`Denied` 提前判失败 / `Inconclusive` 回退 sqlx4k），挡掉 sqlx4k 在账号密码错时 panic 崩进程的问题。三情形本机实测通过。
+- **P1 进度**（以当前前端 `E:\Dev\Node\lolosia-web` 的实际调用为准）：
+  - **已完成**：图形验证码 `/captcha` `/verify` `/register`；头像上传/读取 `/user/avatar`；SSE `/api/sse` + `/sse/registry`（**开发板 aarch64 实机回归通过**：握手拿 id、匿名建流、首帧 `event: status` 及时 flush）；OSS 文件服务 `/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`（本机端到端冒烟通过）；`classpath.zip` 改 **DEFLATED**（读取端 `platform.zlib` inflate，Windows 与 aarch64 均实测，`/home/` 仍 200/395B）。
+  - 前端已路由页面调用的接口：**全部具备**；`/user/getStudentInfoByStudentId` 属其它工程带过来的残留、并未被调用，**不迁**。
+  - **仍未做**（当前前端未调用 / 可选）：`sys_logs` 落库、WebP 转换、菜单管理 `/menu/{list,create,update,destroy,navigate}`（`menuManagement` / `roleManagement` 视图未挂路由，已弃用）、`textAi`（P2）。
+- **前端工程**：契约以前端 `E:\Dev\Node\lolosia-web` 为准（`viteJar.contextPath` 仍是 `home`，要改得两边同时改）。
 - **bcrypt 的尾巴**：`gensalt` 的随机源是 Kotlin 默认 PRNG（`Random.Default.nextBytes`），**非密码学强度** → 若要更严，用平台 CSPRNG（Linux `getrandom` / Windows `BCryptGenRandom`）做 expect/actual 替换。
 - **`RoleService.create` 的自增 id 靠回查**（按 `type + roleName` 取最大 id）；若要更稳可考虑角色 id 改应用侧生成（需评估既有 1~5 号角色引用）。
 - **三处多语句写还没包事务**：`UserService.create` / `update` / `delete` 目前是两条独立语句，中途失败会留中间态。`ctx.transaction { }` 已就位，包上属**行为变更**，待拍板。
 - **`UserInfo`（`ctx.user`）目前零调用方**：能力已备但没有接口走到它，属未验证代码。
 - **测试**：native 侧 `commonTest` 只有依赖声明、**零测试**；验证全靠临时冒烟脚本（§2）。`legacy/jvm/test/kotlin/ServerTest.kt` 未迁移。
-- **`classpath.zip` 只支持 STORED**（未实现 DEFLATED），release 里约 5MB 是这个 zip；改 DEFLATED 需补 `platform.zlib` inflate。属可选优化。
+- **`classpath.zip` 已改 DEFLATED**（`classpath { compressed = true }`，读取端 `ZipClasspath` 用 `platform.zlib` 做 raw inflate）：本机 zip 由 ~5MB 降到 ~2.5MB，Windows 与 aarch64 均实测可读。
 - **产物体积**：mingwX64 release 约 14.5 MiB（Koin / okio / kotlinx-datetime / ktor-client 的 klib 代码）——属预期代价，暂不优化。
 - 前端 `vite*.ts` 会连 `vitest.config.ts` / `vitest.setup.ts` 一起匹配，改测试配置也会触发一次 vite 构建；收紧可写 `vite.config*.ts`。
 
@@ -284,24 +305,24 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | Kotlin/Native 工具链 | 首次构建自动下载到 `~/.konan`（约 2.1GB） |
 | WSL2 + Ubuntu-24.04（含 `aarch64-linux-gnu-objcopy`） | Windows 上构建 linux 目标时的 objcopy 步骤 |
 | `qemu-user-static` + `libc6-arm64-cross`（+ `libcrypt.so.1`） | 不开板子验证旧 aarch64 产物（接了 sqlx4k 后已失效，见 §2） |
-| Node 24 + pnpm 10.22 + 前端工程 `F:\Develop\Node\ktor-template-web` | `viteJar` 构建前端产物 |
+| Node 24 + pnpm 10.22 + 前端工程 `E:\Dev\Node\lolosia-web` | `viteJar` 构建前端产物 |
 | QUIC 客户端 `F:\Develop\Python\quic-socket` | SSH 隧道到开发板 |
 | MariaDB / MySQL | 数据库 |
 
 ## 7. 工程形态：三处位置 + Trae 工作区
 
-同一份代码分三处存放，Trae 工作区用 **junction** 串成一个工作区：
+同一份代码分三处存放，Trae 工作区用 **junction** 串成一个工作区（下表路径以**当前开发机**为准，换机请各自核对）：
 
 | 内容 | 路径 | 仓库 |
 | --- | --- | --- |
-| 后端（本仓库） | `F:\Develop\Kotlin\ktor-template` | `gitee.com/lolosia/ktor-template`，分支 `native` |
-| 前端 | `F:\Develop\Node\ktor-template-web` | 派生自一份非公开的前端基座工程，分支 `master`；**`origin` 待补** |
-| 工作区 | `F:\Develop\Trae\ktor-template` | 不是仓库（只有 junction 与两份文件） |
+| 后端（本仓库） | `E:\Dev\Kotlin\ktor-template` | `gitee.com/lolosia/ktor-template`，分支 `native` |
+| 前端 | `E:\Dev\Node\lolosia-web` | 派生自一份非公开的前端基座工程，分支 `master`；**`origin` 待补** |
+| 工作区 | 随机器而异（本机 `doc/` 在 `E:\Dev\Trae\lolosia`） | 不是仓库 |
 
 ```
-ktor-template/                                     ← Trae 工作区
-├── backend/      → F:\Develop\Kotlin\ktor-template     （junction）
-├── web/          → F:\Develop\Node\ktor-template-web   （junction）
+ktor-template/                                     ← Trae 工作区（junction 串起 backend / web）
+├── backend/      → E:\Dev\Kotlin\ktor-template     （junction）
+├── web/          → E:\Dev\Node\lolosia-web          （junction）
 ├── temp/
 └── AGENT.md      项目概述 + 前后端代码规范
 ```

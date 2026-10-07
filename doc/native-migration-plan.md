@@ -576,10 +576,13 @@ Ebean 依赖 **JVM 反射 + 运行时字节码增强 + JDBC**，在 Kotlin/Nativ
 
 ### P1 —— 扩展库与功能补齐
 
-- **图形验证码**：调研 KMP/C 方案（用户提示：hutool 的源码 jar 在 Gradle 目录下，可自行移植）；
-- WebP 转换（找 C 库 + cinterop，或直接用 `libwebp`）；
-- OSS 文件上传/下载、头像、菜单权限；
-- SSE 事件总线的实机回归（CIO 下 flush 行为）；
+> 状态（2026-10-07）：**图形验证码、头像、SSE 事件总线（含开发板真机回归）、OSS 文件服务、`classpath.zip` DEFLATED 均已完成**。
+> WebP 与菜单权限当前前端未调用（不做）；gzip/br 交给前置 Nginx。
+
+- **图形验证码**：✅ 自研 PNG + 点阵字（见 §13.15）；
+- WebP 转换（找 C 库 + cinterop，或直接用 `libwebp`）—— 前端当前未调用，暂不做；
+- OSS 文件上传 / 下载、头像、菜单权限 —— ✅ OSS（`/api/oss/*`）与头像；菜单沿用 legacy 只留 `/menu/config`（`menuManagement` / `roleManagement` 视图未挂路由，已弃用）；
+- SSE 事件总线的实机回归（CIO 下 flush 行为）—— ✅ 开发板 aarch64 实测首帧及时到达；
 - 压缩（gzip/br，KMP 库或交给 Nginx）；
 - 若 sqlx4k 出现方言问题，按需降级为"driver + 手写 SQL"。
 
@@ -1378,8 +1381,8 @@ Traffic 日志形如 `[2026-09-22 10:27:21.922] [INFO ] [Traffic] POST /api/user
 
 **遗留（P0 收尾 / 后续）**
 
-- `DemoController` 与 `AuthInterceptor.DEV_PROBES` 是**临时脚手架**，P0 收尾整块删；
-- 前端还调了本项目**尚无**的端点：`/captcha`、`/verify`、`/register`、`/menu/list|create|update|destroy|navigate`、`/user/getStudentInfoByStudentId`、`/sse` + `/sse/registry`、`/opi/topic/llm/text/*`；`sys_logs` 落库、OSS 与头像（P1）；
+- ~~`DemoController` 与 `AuthInterceptor.DEV_PROBES` 是临时脚手架，P0 收尾整块删~~ —— **已删**（`ClasspathController` 保留作运维探针）；
+- 前端契约以 `E:\Dev\Node\lolosia-web` 为准：已路由页面调用的接口均已具备（验证码 / 头像 / SSE / `menu/config`）；`/user/getStudentInfoByStudentId` 是其它工程带来的残留、并未被调用，不迁；OSS 全套与菜单管理（`menuManagement` / `roleManagement` 视图未挂路由）当前前端未调用，属可选模板能力；
 - 0.7 尾巴：`BCrypt.gensalt` 换平台 CSPRNG（expect/actual）。
 
 ### 13.15 自研图形验证码 + `/captcha` `/verify` `/register`（2026-09-22）

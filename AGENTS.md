@@ -8,7 +8,7 @@
 
 ## 0. 项目定位
 
-- **Kotlin/Native 全栈模板**：Kotlin 2.4.0（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB。
+- **Kotlin/Native 全栈模板**：Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB。
 - 目标平台只有 **`mingwX64`**（Windows 本地开发）与 **`linuxArm64`**（部署到开发板）；**没有 JVM 目标**。
 - 产物是**单个原生可执行文件**：前端产物、SQL、默认配置都以 `classpath.zip` 形式内嵌，无 fat jar、无外部资源目录。
 - 根包 **`moe.lolosia.web`**；唯一的独立 Gradle 模块是 `:router-ksp`（插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。
@@ -76,6 +76,7 @@ generatedRoutes()                      // @Controller 路由批量注册
 - `@Controller` 只能标在 `object` 上。
 - **注解参数名可省略**：`@Path` / `@Query` / `@Header` / `@Form` / `@FilePart` 不写名字时取形参名；`@Body` 直接反序列化 `@Serializable` 请求体。
 - 支持的参数类型只有 `String / Int / Long / Double / Boolean / Uuid / 枚举`（不做嵌套泛型绑定，超范围请手写路由）。
+  例外：`@Form` 支持 `List<String>`（同名多值字段，如 OSS 上传的 `reference`），`@FilePart` 支持 `List<UploadedFile>`（同名多文件）。
 - 无法绑定的形参**编译期报错**：要么加参数注解，要么给类型标 `@Injectable`。
 - 返回值直接写业务对象即可，**信封交给 `EnvelopeInterceptor`**：
   - 裸 `String` 会被当 `text/plain` 发出、**不包信封**；要包一段 JSON 文本就返回 `dto.RawJson`。
@@ -96,6 +97,9 @@ generatedRoutes()                      // @Controller 路由批量注册
 
 ## 5. 数据层（sqlx4k）
 
+- **连接池懒建**：`Database` 构造只存配置、不连库；由 `startReconnectLoop` 挂在应用作用域后台重连（失败只记日志、不崩溃）。**别在启动路径上建池** —— `mySQL(...)` 会阻塞到连上为止（主机不可达约 30s 后抛 `PoolTimedOut`）。
+- **建池前先跑 `MySqlAuthProbe`（裸 TCP 握手预检）**：`connect` 在调 `mySQL(...)` 之前先用 [MySqlAuthProbe] 发一次 `HandshakeResponse41`：`Unreachable`（不可达，顺带省掉 sqlx4k 约 30s 的阻塞）/ `Denied`（鉴权失败、库不存在等确定性错误）直接判失败，`Ok` 才建池，`Inconclusive`（协议不认识 / 需 TLS / 未知插件）才回退给 sqlx4k。目的是**快速失败 + 明确报错**（sqlx4k 1.13.1 的 Rust 封装在这些情形会 `panic!`，叠加 `panic = "abort"` 直接崩进程；**1.14.0 起已改为回错误**）。改数据源相关的排障从日志里的 `[Database]` 行入手。
+- 库未就绪时 `ctx.db` 抛 `ApiException(503, "数据库暂不可用…")`（前端据此报错，属预期）；库恢复后后台重连成功即自动可用。
 - **实体**：`@Table("表名")` + `@Id`（库自增）或 `@Id(insert = true)`（应用给主键）；列名自动 snake_case。
 - **仓库**：接口标 `@Repository` + `@Injectable`，继承 `CrudRepository<T>`。
   - 首参必须是 `context: QueryExecutor`，方法必须 `suspend`，**每个方法都要带 `@Query`**（没有派生查询）。
@@ -122,6 +126,7 @@ generatedRoutes()                      // @Controller 路由批量注册
 
 - **资源一律走 `classpath` 中间层**，不要用文件系统路径：`src/<源集>/resources/**` 就是 classpath 根，运行时 `classpath.read("static/home/index.html")`。
   - `Classpath` 的来源标识：`scheme`（`file` / `classpath` / `empty`）与 `origin`（供日志展示）。
+  - 内嵌 `classpath.zip` 默认 **DEFLATED**（`classpath { compressed = true }`），读取端 `ZipClasspath` 用 `platform.zlib` 做 inflate；STORED 也支持。
 - **前端路径不许写死**：用 `generateConstants` 产出的 `VITE_DEFAULT`（值 = viteJar 的 `contextPath`）拼路由。
 - **配置只有一个入口** [`settings/AppSettings.kt`](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable`）。
   优先级（低→高，**按字段深合并**）：数据类默认值 < 内嵌 `application.json` < 磁盘 `application.json` < 环境变量 < 命令行端口。
@@ -162,11 +167,11 @@ src/commonMain/kotlin/moe/lolosia/web/
   configuration/AppModule.kt     Koin：appModule / serviceModule（手写逃生口）/ startAppKoin / platformModule(expect)
   generated/GeneratedRegistries.kt  5 个生成注册表的 expect 签名（actual 由 router-ksp 生成）
   api/package.kt                 对外 HTTP 客户端（Ktor Client；引擎按目标选 curl / winhttp），含 sse / ws / streamingRequest
-  controller/                    LoginController / SseController / Demo·Classpath（探针）/ system/{User,Role,UserRole,Menu}
-  database/                      Database（驱动）+ repository/（@Repository 接口）+ model/（@Table 实体）
-  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos
-  interceptor/                   Traffic → Ctx → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
-  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / ddns/
+  controller/                    LoginController / SseController / OssController / Classpath（运维探针）/ system/{User,Role,UserRole,Menu}
+  database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
+  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos
+  interceptor/                   Traffic → Ctx → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
+  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / ddns/ / oss/
   service/system/                UserService / RoleService / UserRoleService / QuerySupport
   settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
   util/captcha/                 自研图形验证码（点阵字 + 算式）
@@ -178,7 +183,7 @@ src/commonMain/kotlin/moe/lolosia/web/
   util/log/                     Log / LogLevel / Logger（自研）
   util/platform/Env.kt          envOrNull（expect）
   util/proc/Shell.kt            子进程
-  util/router/                  注解 + 参数绑定 + multipart 解析 + RouterInjection
+  util/router/                  注解 + 参数绑定（含 List<String> / List<UploadedFile>）+ multipart 解析 + RouterInjection
   util/session/                 Context / UserInfo / ApplicationCallContext / package.kt
   util/sse/                     EventSource / KtorEventSource / SseContent
   util/time/Time.kt             nowLocal（仅日志）/ nowEpochMs
