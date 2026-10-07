@@ -17,7 +17,7 @@
 | 0.6 sqlx4k 数据层 | ✅ | 会话/缓存 + 用户/角色/绑定的数据访问层与 Service 层；本机 MariaDB 实测 12/12 通过 |
 | 0.7 bcrypt（吃 `$2a$` cost 10） | ✅ | 移植 jBCrypt 0.4，官方向量逐字命中；已接进建用户 / 改密码 / 登录校验 |
 | 0.8 鉴权拦截器链 + 登录 + 系统接口 | ✅ | 链顺序由 `@Interceptor(order)` 经 KSP 生成；已挂 Traffic(-9) / Ctx(-5) / Auth(-3) / Envelope(-2)；`/api/login` `/api/logout` + 用户/角色/绑定/菜单控制器 |
-| 0.9 部署（systemd 拉起原生二进制） | ✅ | 见 §3 |
+| 0.9 部署（原生二进制：systemd / docker 两种 mode） | ✅ | 见 §3 |
 | 0.10 图形验证码 + `/captcha` `/verify` `/register` | ✅ | 验证码自研（`util/image` + `util/captcha`），存 `sys_cache`，5 分钟一次性消费 |
 
 **P0 之后的架构收敛（当前形态）**：启动流程已全部落在 commonMain —— `main` 在 `Main.kt`，Ktor 装配在 `configuration/AppConfigure.kt`，
@@ -245,8 +245,40 @@ kill -9 <pid>; rm -f /tmp/ktor-test.kexe; rm -rf /tmp/ktortest
   | 原生（新） | `ktor-template-native.service` | 7130 | `ktor-template`（+ `.previous` 回滚文件） |
 
 - `platforms.json`（**已 gitignore，不提交**）配 `webPath` 与服务器；原生部署靠服务器上的 `"abi"` 开启（`arm64`/`aarch64` → linuxArm64，`x64`/`amd64`/`x86_64` → linuxX64；不配 = 走 JVM fat jar）。x64 云主机同样只需在其 server 项里配 `"abi": "x64"`。
+- 原生还分两种 `"mode"`，**同一个 `abi` 都能用**：
+
+  | mode | 机制 | 适用 |
+  | --- | --- | --- |
+  | `systemd` | 可执行文件落 `/srv/<名字>/`，插件改 `<名字>-native.service` 的 `ExecStart` 后重启 | 板子等能直接跑产物的机器 |
+  | `docker` | 可执行文件与配置以挂载方式注入基础镜像（**不构建镜像、不需要 Dockerfile**） | 云主机；只想要个可管理的运行环境 |
+
 - **`host` 必须写 `127.0.0.1`，不要写 `localhost`**：Windows 上 `localhost` 会先解析到 `::1`，而隧道只绑 IPv4。
   > 原生服务的 `host = "0.0.0.0"` 只绑 IPv4，从外部用板子的 **IPv6** 探 7130 会失败（JVM/Netty 默认双栈，所以 7129 探得通）。要 IPv6 直连就把监听地址改成 `::`。
+
+### mode=docker（原生）细节
+
+- 基础镜像配在 `build.gradle.kts`：`binary { dockerImage = "ubuntu:24.04" }`；镜像只需要有 glibc 与动态链接库
+  （产物 `NEEDED` 里是 libc / libz / libcrypt / libgcc_s / libm / libpthread / libresolv / libutil / librt，符号版本最高 `GLIBC_2.18`）。
+- **国内直连 docker.io 拉不动**（实测 `dial tcp …:443: i/o timeout`），走 `docker { image("ubuntu:24.04") { mirror = "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/ubuntu:24.04" } }`：
+  插件先拉 mirror 再 `docker tag` 回原名，远端运行用的始终是 `ubuntu:24.04`。
+- 运行形态（一次 `docker run -d`，全部靠挂载，无镜像层）：
+
+  ```bash
+  docker run -d --restart=always --name <名字> \
+    --network host -w /app \
+    -v /srv/<名字>:/app \
+    -v /etc/localtime:/etc/localtime:ro \
+    -v /etc/timezone:/etc/timezone:ro \
+    -v /usr/share/zoneinfo:/usr/share/zoneinfo:ro \
+    ubuntu:24.04 /app/<名字> [启动参数…]
+  ```
+  - `--network host`：应用直接绑宿主端口（无需按端口做 `-p` 映射）；容器里的 `127.0.0.1` 就是宿主，
+    所以 `application.yaml` 里的库地址照常写就行；DDNS 取网卡 IPv6 也才看得到宿主网卡。
+  - 时区挂**三个**路径，少一个日志就整片落在 UTC（原理见 §4 表里对应那条）。
+- 回滚：旧容器**先停**再 `docker rename` 成 `<名字>-old`；新版起来后回查 `docker ps` 状态，
+  只有 `Up` 才算成功（`Restarting` 一律当失败），成功后删掉 `-old`，失败则打印容器日志、删掉新容器并提示怎么切回旧容器。
+- 目录布局与 systemd 形态共用：`/srv/<名字>/` 下就是 `可执行文件` + `application.yaml` + `work/` + `可执行文件.previous`。
+  首次部署若远端没有 `application.yaml`，插件会弹对话框让你填（与 JVM 的 docker 流程一致）。
 
 ### 两条到板子的路
 
@@ -297,6 +329,9 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | JS 上传的字段值带前导 CRLF | multipart 头部结束位置要**逐行扫到空行**，不能用第一个 CRLF |
 | Native 上 `receiveMultipart()` 抛异常 | Ktor 3.4 在 Native 未实现 multipart → 自研纯字节解析器（`util/router/Multipart.kt`） |
 | 覆盖正在运行的可执行文件失败 | `ETXTBSY` → 先 `mv old old.previous` 再 `mv new` |
+| `deploy` 报「容器 … 未能存活（状态：Restarting (…)）」 | 新容器起来就崩，`docker logs` 会一并打出来。`139` = SIGSEGV（多半是缺库）；若是 `tcpBind` 的 `Address already in use`，多半端口被别的容器占着（例如更早失败留下的 `<名字>-old` 还在跑）→ `ss -lntp \| grep <端口>` |
+| 容器里应用日志时间是 UTC | 基础镜像不带 tzdata，而 kotlinx-datetime 在 Linux 上认时区只有两条路：`/etc/localtime` 是指向 `/usr/share/zoneinfo` 的**软链**，或 `/etc/timezone` + `/usr/share/zoneinfo` 且 `/etc/localtime` 内容与之一致（Debian 系的 `/etc/localtime` 是拷贝而非软链）。所以三个都要挂；**给 `TZ` 环境变量没用**（该实现不读它） |
+| `docker pull` 卡住或 `dial tcp …:443: i/o timeout` | docker.io 直连不通（国内常见）→ 在 `docker { image("镜像名") { mirror = "…" } }` 里配镜像源，如华为云 SWR 的 `swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/…` |
 | 后台脚本退出后服务跟着死 | `setsid … < /dev/null &`（见 §2） |
 | PowerShell 跑 `.ps1` 中文乱码/语法错 | PS 5.1 按 ANSI 读脚本 → 脚本里只用 ASCII，或改文件编码为 UTF-8 BOM |
 | PowerShell 里 `$home` 赋值报只读错误 | `$home` 是内置只读变量，换名 |
@@ -368,6 +403,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | QUIC 客户端 `F:\Develop\Python\quic-socket` | SSH 隧道到开发板 |
 | （可选）`~/.konan` 自带的 clang + sysroot | 只在重建第三方 C 静态库时用（`thirdparty/build-libs.ps1`），日常构建不需要 |
 | MariaDB / MySQL | 数据库 |
+| 目标机的 Docker（仅 `mode=docker` 时需要） | 原生产物挂进基础镜像运行，不构建镜像；基础镜像与国内加速源见 §3 |
 
 ## 7. 工程形态：三处位置 + Trae 工作区
 

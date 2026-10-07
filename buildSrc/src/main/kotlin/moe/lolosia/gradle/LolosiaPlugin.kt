@@ -6,6 +6,7 @@ import moe.lolosia.gradle.extension.ServerConfig
 import moe.lolosia.gradle.extension.ViteJarExtension
 import moe.lolosia.gradle.task.ARTIFACT_BINARY
 import moe.lolosia.gradle.task.ARTIFACT_JAR
+import moe.lolosia.gradle.task.DEFAULT_DOCKER_IMAGE
 import moe.lolosia.gradle.task.DeployTask
 import moe.lolosia.gradle.task.DockerImageInfo
 import moe.lolosia.gradle.task.GenerateConstantsTask
@@ -121,6 +122,7 @@ class LolosiaPlugin : Plugin<Project> {
             files = project.files(linkTask.outputFile),
             remoteName = binary?.name ?: project.rootProject.name,
             unitName = binary?.unitName,
+            dockerImage = binary?.dockerImage ?: DEFAULT_DOCKER_IMAGE,
             launchArgs = server.args.toList(),
         )
     }
@@ -163,6 +165,7 @@ class LolosiaPlugin : Plugin<Project> {
                 this.artifact = artifact.files
                 remoteArtifactName = artifact.remoteName
                 unitFileName = artifact.unitName
+                dockerImage = artifact.dockerImage
                 launchArgs = artifact.launchArgs
                 serverName = serverConfig.name
                 serverHost = serverConfig.host
@@ -330,7 +333,7 @@ class LolosiaPlugin : Plugin<Project> {
 
 /**
  * 一次部署的产物：形态 + 产出它的任务 + 文件集合。
- * [remoteName] / [unitName] / [launchArgs] 仅原生形态使用。
+ * [remoteName] / [unitName] / [dockerImage] / [launchArgs] 仅原生形态使用。
  */
 private class DeployArtifact(
     val kind: String,
@@ -338,5 +341,6 @@ private class DeployArtifact(
     val files: FileCollection,
     val remoteName: String? = null,
     val unitName: String? = null,
+    val dockerImage: String = DEFAULT_DOCKER_IMAGE,
     val launchArgs: List<String> = emptyList(),
 )

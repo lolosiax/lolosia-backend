@@ -191,7 +191,7 @@ lolosia {
                 port = (server["port"] as? Number)?.toInt() ?: 22
                 user = server["user"] as String
                 password = server["password"] as String
-                // docker（默认）需要根目录有 Dockerfile/docker_shell.sh；systemd 需要 <项目名>.service
+                // docker（默认）：JVM 需要根目录有 Dockerfile/docker_shell.sh，原生可执行文件则直接挂载进基础镜像
                 mode = server["mode"] as? String ?: "docker"
                 // 目标机架构：配了 arm64 / x64 就部署原生可执行文件，不配则部署 JVM 的 bootJar
                 abi = server["abi"] as? String
@@ -204,6 +204,16 @@ lolosia {
         // 具体哪台机器部署原生、部署哪个架构，由各 server 的 abi 决定。
         binary {
             buildType = "release"
+            // docker 形态的容器入口：可执行文件与配置以挂载方式注入，这个镜像只当运行环境
+            dockerImage = "ubuntu:24.04"
+        }
+    }
+
+    // 镜像补齐（国内直连 docker.io 基本拉不动，这里用华为云 SWR 的 docker.io 镜像代理）：
+    // 缺失时先拉 mirror 再打回原名，远端运行用的始终是 imageName 本身
+    docker {
+        image("ubuntu:24.04") {
+            mirror = "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/ubuntu:24.04"
         }
     }
 

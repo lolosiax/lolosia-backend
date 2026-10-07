@@ -71,6 +71,16 @@ open class BinaryConfig {
     @Input
     @Optional
     var unitName: String? = null
+
+    /**
+     * docker 模式的基础镜像；不写用插件默认值（`DEFAULT_DOCKER_IMAGE`）。
+     *
+     * 镜像只是「运行环境」，可执行文件以挂载方式注入，**不构建镜像**；
+     * 镜像缺失时按 `docker { image(...) }` 里声明的 mirror 拉取。
+     */
+    @Input
+    @Optional
+    var dockerImage: String? = null
 }
 
 open class ServerConfig(val name: String) {
@@ -107,9 +117,10 @@ open class ServerConfig(val name: String) {
 
     /**
      * 部署方式：
-     * - "docker"（默认）：布到 [pwd]/docker_build，构建并启动容器（需要项目根目录有 Dockerfile、docker_shell.sh）
-     * - "systemd"：no-docker，直接布到 [pwd]（work 的父目录），并把项目根目录的 <rootProject.name>.service
-     *   就地更新 ExecStart 指向后，由 systemd 托管启动（保留一份 <name>.previous.jar 便于回滚）
+     * - "docker"（默认）：JVM 布到 [pwd]/docker_build 构建并启动容器（需要根目录有 Dockerfile、docker_shell.sh）；
+     *   原生可执行文件则挂载进基础镜像直接运行，不构建镜像（见 [BinaryConfig.dockerImage]）
+     * - "systemd"：no-docker，直接布到 [pwd]（work 的父目录）。JVM 把根目录的 <rootProject.name>.service
+     *   就地更新 ExecStart 指向后由 systemd 托管；原生可执行文件直接由 systemd 拉起（保留一份可执行文件便于回滚）
      */
     @Input
     var mode: String = "docker"

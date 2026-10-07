@@ -29,7 +29,8 @@ import java.util.zip.ZipFile
  *
  * 支持两种产物形态（由 [artifactKind] 区分）：
  * - `jar`：JVM fat jar，拆包成 slim.jar + 按 sha256 增量补 `BOOT-INF/lib`，systemd 以 `java -jar` 拉起；
- * - `binary`：Kotlin/Native 自包含可执行文件，整包替换，systemd 直接拉起可执行文件本身。
+ * - `binary`：Kotlin/Native 自包含可执行文件。systemd 形态整包替换后直接拉起可执行文件；
+ *   docker 形态把可执行文件挂载进基础镜像运行（不构建镜像，见 [deployBinaryDocker]）。
  *
  * @author 洛洛希雅Lolosia
  * @since 2026-05-14 11:37:42
@@ -54,6 +55,10 @@ open class DeployTask : DefaultTask() {
     @Input
     @Optional
     var unitFileName: String? = null
+
+    /** binary + docker 形态：运行可执行文件的基础镜像。 */
+    @Input
+    var dockerImage: String = DEFAULT_DOCKER_IMAGE
 
     /** binary 形态：传给可执行文件的启动参数。 */
     @Input
@@ -100,15 +105,20 @@ open class DeployTask : DefaultTask() {
         val artifactFile = artifact.singleFile
 
         if (isBinary()) {
-            check(isSystemdMode()) {
-                "原生可执行文件目前只支持 systemd 部署（当前 mode=$serverMode）：" +
-                    "docker 方式需要另外编写以该二进制为入口的 Dockerfile"
+            if (isSystemdMode()) {
+                sshService.run(delegateClosureOf<RunHandler> {
+                    session(remote, delegateClosureOf<SessionHandler> {
+                        deployBinary(basePwd, artifactFile)
+                    } as Closure<Any>)
+                })
+            } else {
+                val yamlContent = resolveApplicationYaml(sshService, remote, basePwd)
+                sshService.run(delegateClosureOf<RunHandler> {
+                    session(remote, delegateClosureOf<SessionHandler> {
+                        deployBinaryDocker(basePwd, artifactFile, yamlContent)
+                    } as Closure<Any>)
+                })
             }
-            sshService.run(delegateClosureOf<RunHandler> {
-                session(remote, delegateClosureOf<SessionHandler> {
-                    deployBinary(basePwd, artifactFile)
-                } as Closure<Any>)
-            })
             return
         }
 
@@ -211,6 +221,90 @@ open class DeployTask : DefaultTask() {
         if (!output.contains("PATCH_OK")) {
             throw RuntimeException("更新 $unit 的 ExecStart 失败：请确认其中存在 ExecStart= 行")
         }
+    }
+
+    // ===== 原生形态（docker）：可执行文件挂载进基础镜像直接运行，不构建镜像 =====
+
+    /**
+     * 与 systemd 形态共用同一份远端目录布局（可执行文件 + `application.yaml` + `work/`），
+     * 只是改为整目录挂进容器（[basePwd] → `/app`），由容器当运行环境。
+     *
+     * 两个刻意的选择：
+     * - `--network host`：应用直接绑定宿主端口（不必猜端口做 `-p` 映射），DDNS 也才看得到宿主的网卡地址；
+     * - 挂宿主的时区文件：基础镜像不带 tzdata，日志会整片落在 UTC。
+     *
+     * 时区要挂**三个**路径（少一个都退回 UTC）：kotlinx-datetime 在 Linux 上认时区只有两条路 ——
+     * `/etc/localtime` 是指向 `/usr/share/zoneinfo` 的软链，或者 `/etc/timezone` + `/usr/share/zoneinfo`
+     * 且 `/etc/localtime` 的内容与之一致。Debian 系的 `/etc/localtime` 是**拷贝**而非软链，所以三条都得给。
+     *
+     * 旧容器改名成 `<name>-old` 保留作回滚点，新版确认活着之后才删。
+     */
+    private fun SessionHandler.deployBinaryDocker(basePwd: String, exeFile: File, yamlContent: String?) {
+        val exeName = remoteArtifactName ?: project.rootProject.name
+        val backupName = "$exeName-old"
+        val staging = "$exeName.new"
+
+        ensureDockerImage(dockerImage)
+
+        execute("mkdir -p $basePwd")
+        execute("cd $basePwd && rm -f $staging")
+        uploadFile(exeFile, "$basePwd/$staging")
+        if (yamlContent != null) {
+            uploadContent(yamlContent, "$basePwd/application.yaml")
+        }
+        execute("cd $basePwd && chmod +x $staging")
+
+        // 旧容器改名保留作回滚点。必须先停：`docker rename` 对运行中的容器只是换个名字，
+        // 端口仍被它占着，新容器起来会直接崩在 bind 上。
+        val renamed = execute(
+            "if docker ps -a --format '{{.Names}}' | grep -qx '$exeName'; then " +
+                "docker stop '$exeName' >/dev/null; " +
+                "docker rm -f '$backupName' >/dev/null 2>&1 || true; " +
+                "docker rename '$exeName' '$backupName'; echo ROLLBACK_KEPT; fi"
+        )
+        val hasBackup = renamed.contains("ROLLBACK_KEPT")
+
+        // 覆盖正在运行的可执行文件会 ETXTBSY，所以先改名挪走旧的 inode，再把新文件搬进来
+        execute(
+            "cd $basePwd && mkdir -p work && " +
+                "(mv -f $exeName $exeName.previous 2>/dev/null || true) && " +
+                "mv -f $staging $exeName"
+        )
+
+        val entry = (listOf("/app/$exeName") + launchArgs).joinToString(" ")
+        execute(
+            "docker run -d --restart=always --name '$exeName' " +
+                "--network host -w /app " +
+                "-v '$basePwd:/app' " +
+                "-v /etc/localtime:/etc/localtime:ro " +
+                "-v /etc/timezone:/etc/timezone:ro " +
+                "-v /usr/share/zoneinfo:/usr/share/zoneinfo:ro " +
+                "'$dockerImage' $entry"
+        )
+
+        // `docker run -d` 只要容器建得出来就返回 0，进程随后崩掉（缺库、端口被占…）照样「成功」：
+        // 起来后必须回查一次状态，Restarting 也算失败
+        val status = execute(
+            "sleep 3; docker ps --filter 'name=^${exeName}$' --format '{{.Status}}'"
+        ).trim()
+        if (!status.startsWith("Up")) {
+            val logs = execute(
+                hashMapOf("ignoreError" to true),
+                "docker logs --tail 40 '$exeName' 2>&1"
+            ).trim()
+            execute("docker rm -f '$exeName' >/dev/null 2>&1 || true")
+            throw RuntimeException(
+                "容器 $exeName 未能存活（镜像 $dockerImage，状态：${status.ifEmpty { "未创建" }}）。容器日志：\n$logs\n" +
+                    "已删除该容器；" +
+                    if (hasBackup) "回滚旧版本：mv $exeName.previous $exeName && docker start $backupName"
+                    else "首次部署，没有旧版本可回滚"
+            )
+        }
+
+        execute("docker rm -f '$backupName' >/dev/null 2>&1 || true")
+        logger.lifecycle(
+            "已部署原生可执行文件（docker）：$basePwd/$exeName → 容器 $exeName（镜像 $dockerImage，$status）"
+        )
     }
 
     // ===== docker 模式：布到 <pwd>/docker_build，构建并启动容器 =====
@@ -470,6 +564,14 @@ open class DeployTask : DefaultTask() {
         }
     }
 
+    /**
+     * 确保 [image] 在远端存在。若该镜像名在 `docker { image(...) }` 里声明过 mirror，
+     * 走的是「拉 mirror 再打回原名」，因此远端始终以原镜像名运行。
+     */
+    private fun SessionHandler.ensureDockerImage(image: String) {
+        ensureDockerImages(mapOf(image to (dockerImages[image] ?: DockerImageInfo(mirror = ""))))
+    }
+
     private fun SessionHandler.ensureDirectories(pwd: String) {
         val homeDir = execute("echo \$HOME").trim()
         val libCacheDir = "$homeDir/.cache/lolosia-gradle-cache/"
@@ -586,3 +688,11 @@ const val ARTIFACT_JAR: String = "jar"
 
 /** 产物形态：Kotlin/Native 自包含可执行文件。 */
 const val ARTIFACT_BINARY: String = "binary"
+
+/**
+ * 原生 docker 形态的默认基础镜像。
+ *
+ * 只需提供 glibc 与动态链接库（产物依赖 libc / libz / libcrypt / libgcc_s 等），
+ * 代码与配置都以挂载方式注入，故不必为每个项目单独构建镜像。
+ */
+const val DEFAULT_DOCKER_IMAGE: String = "ubuntu:24.04"

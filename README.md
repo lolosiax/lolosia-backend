@@ -25,7 +25,7 @@
 - **统一响应信封** `{code,msg,data}`：由 `EnvelopeInterceptor` 在 send pipeline 上按**响应 MIME** 统一包装（只认 `/api/` 下的 JSON；`text/plain` 与文件流/SSE 原样放行，要强制包一段 JSON 文本就返回 `dto.RawJson`）
 - **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
-- **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件（自动留 `.previous` 回滚文件）
+- **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件、或挂进基础镜像由 docker 托管（两种都自动留 `.previous` 回滚文件）
 
 ## 🧱 技术栈
 
@@ -153,7 +153,7 @@ curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: applicati
 | `gradlew viteJar` | 构建 vite 前端工程（路径取自 `platforms.json` 的 `webPath`） |
 | `gradlew generateConstants` | 依 vite 平台生成 `VITE_DEFAULT` 常量（值 = `contextPath`，避免把 `/home` 写死） |
 | `gradlew classpathZip<目标>` | 把各源集 `resources` + vite 产物合并成 `classpath.zip`（link 任务自动依赖） |
-| `gradlew deploy<服务器名>` / `deploy` | 按 `platforms.json` 部署（`deploy` 指向 `deploy.active` 那台）；配了 `abi` 走原生二进制，否则找 `bootJar` |
+| `gradlew deploy<服务器名>` / `deploy` | 按 `platforms.json` 部署（`deploy` 指向 `deploy.active` 那台）；配了 `abi` 走原生二进制，否则找 `bootJar`；`mode` 选 systemd / docker |
 | `gradlew gitArchive` | 按 vite 平台导出 git 归档 |
 
 ## 🧭 写一个控制器
@@ -244,13 +244,21 @@ object ExampleController {
 - **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）。DI 绑定**不用手写**：`router-ksp` 扫 `@Repository` / `@Injectable` / `@Service` 生成 `GeneratedInjection.kt`（`repositoryModules()` + `serviceModule()` + `Koin.registerInjectables()`），签名在 commonMain 的 [GeneratedRegistries.kt](src/commonMain/kotlin/moe/lolosia/web/generated/GeneratedRegistries.kt) 声明为 `expect`、生成物是 `actual`，[Main.kt](src/commonMain/kotlin/moe/lolosia/web/Main.kt) 直接调用；实现类名按 sqlx4k 的固定约定 `<接口名>Impl` 推导，对不上会在 KSP 阶段报错
 - **时间列一律 `kotlin.time.Instant`**（业务用 `Clock.System.now()`），驱动按 UTC 往返；只有日志用本地时间展示
 
-## 🚢 部署（systemd）
+## 🚢 部署
 
-1. `platforms.json` 里给目标服务器配 `mode: "systemd"` 与 `abi`（`arm64`/`aarch64` → linuxArm64，`x64`/`amd64`/`x86_64` → linuxX64；决定部署原生二进制，不配则走 `bootJar`）
-2. `gradlew deploy<服务器名>`（或 `deploy`）→ 上传可执行文件 → `mv old old.previous` 再替换（避免覆盖运行中的文件报 `ETXTBSY`）→ 改写远端 `<名字>-native.service` 的 `ExecStart` 为可执行文件路径 → 重启服务
-3. 首次部署会由脚本生成单元文件；想自定义 `User=` / 资源限制，就在**服务器上**改，插件不会覆盖已有单元
+1. `platforms.json` 里给目标服务器配 `abi`（`arm64`/`aarch64` → linuxArm64，`x64`/`amd64`/`x86_64` → linuxX64；配了就部署原生二进制，不配则走 `bootJar`）与 `mode`
+2. `gradlew deploy<服务器名>`（或 `deploy`）→ 上传可执行文件 → `mv old old.previous` 再替换（避免覆盖运行中的文件报 `ETXTBSY`）→ 交给 systemd / docker 拉起
 
-部署目录约定为 `/srv/ktor-template/`（磁盘 `application.json` 也放这里）。CIO 引擎无 HTTPS 与压缩，这两件事交给前置 Nginx。
+**`mode: "systemd"`**：改写远端 `<名字>-native.service` 的 `ExecStart` 为可执行文件路径后重启服务。首次部署由插件生成单元文件；想自定义 `User=` / 资源限制，就在**服务器上**改，插件不会覆盖已有单元。
+
+**`mode: "docker"`**：不构建镜像，产物以挂载方式注入基础镜像运行（JVM 项目另有那套 Dockerfile 流程，原生不用）。
+
+- 基础镜像配在 `build.gradle.kts` 的 `binary { dockerImage }`，加速源配在 `docker { image("ubuntu:24.04") { mirror } }`；国内直连 docker.io 拉不动，模板默认走华为云 SWR 的 docker.io 代理
+- 挂载：`/srv/ktor-template` → `/app`（可执行文件、配置、`work/` 都在其中），另挂宿主 `/etc/localtime` `/etc/timezone` `/usr/share/zoneinfo`（基础镜像不带 tzdata，少挂一个日志就整片落在 UTC）
+- 网络用 `--network host`：应用直接绑宿主端口，容器里的 `127.0.0.1` 就是宿主（库地址按这个配）
+- 回滚：旧容器**先停**再改名成 `<名字>-old`，新版确认活着才删；失败会打印容器日志并删掉新容器
+
+部署目录约定为 `/srv/ktor-template/`（磁盘 `application.json` / `application.yaml` 也放这里）。CIO 引擎无 HTTPS 与压缩，这两件事交给前置 Nginx。
 
 ## 🗺 迁移进度与路线图
 

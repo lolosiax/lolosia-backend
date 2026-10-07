@@ -160,7 +160,7 @@ gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
 ```
 
 - 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64` / `linkReleaseExecutableLinuxX64`；
-  部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`，见 [doc/development-notes.md](doc/development-notes.md)）。
+  部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
 - **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（Windows 上借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链）；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
 - **没有自动化测试**（`commonTest` 只有依赖声明）；行为验证目前靠临时冒烟脚本（命令清单见 `doc/development-notes.md`）。
 - KSP 聚合输出**必须带源文件**：`Dependencies(aggregating = true, *sourceFiles)`。只写 `aggregating = true` 会漏扫未改动文件，症状是「**编译通过但接口全 404**」。
