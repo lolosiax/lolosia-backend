@@ -334,6 +334,8 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 ## 5. 待办 / 已知缺口
 
 - **P0 收尾已完成**：`DemoController` 与 `AuthInterceptor.DEV_PROBES` 已删（`ClasspathController` 保留作运维探针）。
+- **`legacy/jvm/` 已移除**（2026-10）：可迁移的部分都已落进 `commonMain`，旧 JVM 实现不再留在工作区（它本来也不参与编译）。
+  真要翻旧实现时从 git 历史取回：引入它的那次提交是 `378fbee`。
 - **数据库健壮性已完成**：`Database` 改**懒建连接池 + 后台重连**（启动不建池、失败只记日志，库恢复自动可用）；库未就绪时读库请求返回 `503`。并在 `mySQL(...)` 建池前加 `MySqlAuthProbe` **裸 TCP 握手预检**（`Ok` 才建池 / `Unreachable`·`Denied` 提前判失败 / `Inconclusive` 回退 sqlx4k），挡掉 sqlx4k 在账号密码错时 panic 崩进程的问题。三情形本机实测通过。
 - **P1 进度**（以当前前端 `E:\Dev\Node\lolosia-web` 的实际调用为准）：
   - **已完成**：图形验证码 `/captcha` `/verify` `/register`；头像上传/读取 `/user/avatar`；SSE `/api/sse` + `/sse/registry`（**开发板 aarch64 实机回归通过**：握手拿 id、匿名建流、首帧 `event: status` 及时 flush）；OSS 文件服务 `/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`（本机端到端冒烟通过）；`classpath.zip` 改 **DEFLATED**（读取端 `platform.zlib` inflate，Windows 与 aarch64 均实测，`/home/` 仍 200/395B）。
@@ -346,7 +348,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 - **`RoleService.create` 的自增 id 靠回查**（按 `type + roleName` 取最大 id）；若要更稳可考虑角色 id 改应用侧生成（需评估既有 1~5 号角色引用）。
 - **三处多语句写还没包事务**：`UserService.create` / `update` / `delete` 目前是两条独立语句，中途失败会留中间态。`ctx.transaction { }` 已就位，包上属**行为变更**，待拍板。
 - **`UserInfo`（`ctx.user`）目前零调用方**：能力已备但没有接口走到它，属未验证代码。
-- **测试**：native 侧 `commonTest` 只有依赖声明、**零测试**；验证全靠临时冒烟脚本（§2）。`legacy/jvm/test/kotlin/ServerTest.kt` 未迁移。
+- **测试**：native 侧 `commonTest` 只有依赖声明、**零测试**；验证全靠临时冒烟脚本（§2）。
 - **`classpath.zip` 已改 DEFLATED**（`classpath { compressed = true }`，读取端 `ZipClasspath` 用 `platform.zlib` 做 raw inflate）：本机 zip 由 ~5MB 降到 ~2.5MB，Windows 与 aarch64 均实测可读。
 - **产物体积**：mingwX64 release 约 15.7 MiB（Koin / okio / kotlinx-datetime / ktor-client 的 klib 代码 + 内嵌的图像编解码静态库 libwebp·libpng·libjpeg-turbo·giflib·libz）——属预期代价，暂不优化。
 - 前端 `vite*.ts` 会连 `vitest.config.ts` / `vitest.setup.ts` 一起匹配，改测试配置也会触发一次 vite 构建；收紧可写 `vite.config*.ts`。

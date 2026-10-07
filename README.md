@@ -4,8 +4,7 @@
 
 - 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB**
 - 目标平台：**`mingwX64`**（Windows 本地开发调试）与 **`linuxArm64`**（部署到开发板）；**不保留 JVM 目标**
-- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（PNG 编码 + 点阵算式，见 `util/image`、`util/captcha`）
-- 旧 JVM 代码整体放在 [legacy/jvm](legacy/jvm)，不参与编译，仅作迁移参考
+- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）
 
 > 项目风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 冒烟 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
 > JVM → Kotlin/Native 的迁移详设与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)。
@@ -65,14 +64,13 @@
 │   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService
 │   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
 │   │   ├── settings/             # AppSettings（@Serializable）+ 多级覆盖 SettingsLoader
-│   │   └── util/                 # captcha / classpath / crypto(BCrypt) / image(PNG) / json / koin / ktor / log / router / session / time
+│   │   └── util/                 # captcha / classpath / crypto(BCrypt) / image(Image) / json / koin / ktor / log / router / session / time
 │   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
 │   ├── nativeMain/kotlin/…/      # ZipClasspath / DiskClasspath 等实现 + installPlatformClasspath / 平台 Env / platformModule（expect/actual）
 │   ├── mingwX64Main/kotlin/…/    # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
 │   └── linuxArm64Main/kotlin/…/  # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── sql/                          # 建表脚本（7 张表 + view_user_role 视图）
-├── legacy/jvm/                   # 旧 JVM 代码（不参与编译，仅参考）
 ├── ktor-template.service         # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```

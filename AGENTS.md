@@ -13,7 +13,6 @@
 - 产物是**单个原生可执行文件**：前端产物、SQL、默认配置都以 `classpath.zip` 形式内嵌，无 fat jar、无外部资源目录。
 - 图像编解码（WebP / PNG / JPEG / GIF）走**预编译的 C 静态库**，随可执行文件静态链入；库产物随仓库提交，日常构建不需要 C 工具链（`thirdparty/`，见 §7 / §10）。
 - 根包 **`moe.lolosia.web`**；唯一的独立 Gradle 模块是 `:router-ksp`（插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。
-- `legacy/jvm/` 是旧 JVM 实现，**不参与编译**，只作移植参考。
 
 ## 1. 代码风格
 
@@ -148,8 +147,8 @@ generatedRoutes()                      // @Controller 路由批量注册
 
 ## 8. 接口契约
 
-- **路径与出参形状以前端工程为准**，不以 `legacy/` 后端为准；前端与 legacy 已漂移，冲突时**忠实前端**。
-- 改契约前先在前端源码里 grep 一遍调用点，别按 legacy 想当然。
+- **路径与出参形状以前端工程为准**；旧 JVM 后端已从工作区移除（只在 git 历史里），不要再拿它对照。
+- 改契约前先在前端源码里 grep 一遍调用点。
 
 ## 9. 验证与提交
 
@@ -211,7 +210,6 @@ router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller�
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、
                                 NativeClasspath.kt（zip 合并 + windres/objcopy 嵌入 + 链接参数）、extension/
 sql/                            建表脚本（7 表 + view_user_role 视图）
-legacy/jvm/                     旧 JVM 代码，仅参考，不参与编译
 ```
 
 ## 11. 深度材料
