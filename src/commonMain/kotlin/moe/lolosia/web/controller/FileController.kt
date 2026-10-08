@@ -103,6 +103,9 @@ object FileController {
      * 支持 `Range`：流式分块下发，`Accept-Ranges: bytes` + `206 Partial Content` +
      * `Content-Range`（不可满足回 416）。视频播放器靠它拖进度条、边下边播；
      * 不支持 Range 时每次都得把整个文件读进内存，几百 MB 的视频会把板子撑爆。
+     *
+     * `download=1` 会补一个 `Content-Disposition: attachment`：浏览器的 `<a download>` 在跨源时会被忽略
+     * （本地 dev 前端 5005、后端 7129），只有靠响应头才真能存成文件。
      */
     @GET("/files/raw")
     suspend fun raw(
@@ -112,6 +115,7 @@ object FileController {
         @Query path: String?,
         @Query exp: String?,
         @Query sig: String?,
+        @Query download: String?,
     ): OutgoingContent {
         val relative = requireSignedPath(signer, path, exp, sig)
         val entry = browser.stat(relative) ?: throw ApiException(404, "文件不存在")
@@ -120,6 +124,9 @@ object FileController {
         val contentType = ContentType.parse(entry.mime)
         val size = entry.size
         ctx.call.response.header(HttpHeaders.AcceptRanges, "bytes")
+        if (download == "1") {
+            ctx.call.response.header(HttpHeaders.ContentDisposition, attachmentDisposition(entry.name))
+        }
 
         fun content(offset: Long, length: Long, status: HttpStatusCode) = FileRangeContent(
             length = length,
@@ -152,5 +159,27 @@ object FileController {
         if (relative.isEmpty()) throw ApiException(400, "缺少文件路径")
         if (!signer.verify(relative, exp?.toLongOrNull(), sig)) throw ApiException(403, "直链签名无效或已过期")
         return relative
+    }
+
+    /**
+     * RFC 6266 的下载头：`filename*` 用 RFC 5987 的 UTF-8 百分号编码（中文名必须这么写），
+     * 再配一个纯 ASCII 的 `filename` 兜底给不认识 `filename*` 的老客户端。
+     */
+    private fun attachmentDisposition(name: String): String {
+        val ascii = name.filter { it.code in 0x20..0x7E && it != '"' && it != '\\' }.ifBlank { "download" }
+        return "attachment; filename=\"$ascii\"; filename*=UTF-8''${encode5987(name)}"
+    }
+
+    /** 除 RFC 5987 的 `attr-char` 外，一律按 UTF-8 字节转成 `%XX`。 */
+    private fun encode5987(value: String): String {
+        val builder = StringBuilder()
+        for (byte in value.encodeToByteArray()) {
+            val code = byte.toInt() and 0xFF
+            val ch = code.toChar()
+            val safe = ch in 'a'..'z' || ch in 'A'..'Z' || ch in '0'..'9' || ch in "!#$&+-.^_`|~"
+            if (safe) builder.append(ch)
+            else builder.append('%').append(code.toString(16).uppercase().padStart(2, '0'))
+        }
+        return builder.toString()
     }
 }
