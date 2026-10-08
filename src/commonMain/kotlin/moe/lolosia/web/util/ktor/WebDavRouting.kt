@@ -351,33 +351,4 @@ private fun parseLockTimeout(header: String?): Long {
     return (seconds ?: DEFAULT_LOCK_SECONDS).coerceIn(60L, MAX_LOCK_SECONDS)
 }
 
-/** Range 解析结果。 */
-private sealed interface RangeParse {
-    data object None : RangeParse
-    data object Unsatisfiable : RangeParse
-    data class Ok(val start: Long, val endInclusive: Long) : RangeParse
-}
 
-/** 只支持单段 `bytes=a-b` / `bytes=a-` / `bytes=-n`；多段与非法格式按「整文件」处理。 */
-private fun parseRange(header: String?, size: Long): RangeParse {
-    if (header == null || !header.startsWith("bytes=", ignoreCase = true)) return RangeParse.None
-    val spec = header.substring(6).substringBefore(',').trim()
-    val dash = spec.indexOf('-')
-    if (dash < 0) return RangeParse.None
-    val startText = spec.substring(0, dash).trim()
-    val endText = spec.substring(dash + 1).trim()
-    return try {
-        if (startText.isEmpty()) {
-            // 后缀范围：取最后 n 字节
-            val n = endText.toLong()
-            if (n <= 0 || size == 0L) RangeParse.Unsatisfiable
-            else RangeParse.Ok((size - n).coerceAtLeast(0), size - 1)
-        } else {
-            val start = startText.toLong()
-            val end = if (endText.isEmpty()) size - 1 else endText.toLong().coerceAtMost(size - 1)
-            if (start > end || start >= size) RangeParse.Unsatisfiable else RangeParse.Ok(start, end)
-        }
-    } catch (_: NumberFormatException) {
-        RangeParse.None
-    }
-}

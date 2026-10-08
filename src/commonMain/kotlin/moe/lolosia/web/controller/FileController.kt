@@ -2,6 +2,7 @@ package moe.lolosia.web.controller
 
 import io.ktor.http.*
 import io.ktor.http.content.*
+import io.ktor.server.response.*
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.FileDetail
 import moe.lolosia.web.dto.FileEntry
@@ -13,6 +14,7 @@ import moe.lolosia.web.service.files.FileSigner
 import moe.lolosia.web.service.files.ThumbnailService
 import moe.lolosia.web.service.files.normalizeRelative
 import moe.lolosia.web.service.media.MediaQueryService
+import moe.lolosia.web.util.ktor.*
 import moe.lolosia.web.util.router.*
 import moe.lolosia.web.util.session.Context
 
@@ -88,13 +90,15 @@ object FileController {
     }
 
     /**
-     * 取原图 / 原文件（缩略图还没生成时的回退，以及「看原图」）。
+     * 取原图 / 原文件（缩略图还没生成时的回退、「看原图」，以及视频播放）。
      *
-     * 整个文件读进内存再返回：文件管理器面向的是照片，单张几 MB 可以接受；
-     * 真要传大文件应该走 WebDAV。
+     * 支持 `Range`：流式分块下发，`Accept-Ranges: bytes` + `206 Partial Content` +
+     * `Content-Range`（不可满足回 416）。视频播放器靠它拖进度条、边下边播；
+     * 不支持 Range 时每次都得把整个文件读进内存，几百 MB 的视频会把板子撑爆。
      */
     @GET("/files/raw")
     suspend fun raw(
+        ctx: Context,
         browser: FileBrowser,
         signer: FileSigner,
         @Query path: String?,
@@ -104,8 +108,34 @@ object FileController {
         val relative = requireSignedPath(signer, path, exp, sig)
         val entry = browser.stat(relative) ?: throw ApiException(404, "文件不存在")
         if (entry.directory) throw ApiException(400, "这是一个目录")
-        val bytes = browser.readSource(relative) ?: throw ApiException(404, "读取失败")
-        return ByteArrayContent(bytes, ContentType.parse(entry.mime))
+
+        val contentType = ContentType.parse(entry.mime)
+        val size = entry.size
+        ctx.call.response.header(HttpHeaders.AcceptRanges, "bytes")
+
+        fun content(offset: Long, length: Long, status: HttpStatusCode) = FileRangeContent(
+            length = length,
+            offset = offset,
+            contentType = contentType,
+            status = status,
+        ) { browser.openSource(relative) ?: throw ApiException(404, "读取失败") }
+
+        return when (val range = parseRange(ctx.call.request.headers[HttpHeaders.Range], size)) {
+            RangeParse.None -> content(0L, size, HttpStatusCode.OK)
+
+            RangeParse.Unsatisfiable -> {
+                ctx.call.response.header(HttpHeaders.ContentRange, "bytes */$size")
+                throw ApiException(416, "Range 不可满足")
+            }
+
+            is RangeParse.Ok -> {
+                ctx.call.response.header(
+                    HttpHeaders.ContentRange,
+                    "bytes ${range.start}-${range.endInclusive}/$size",
+                )
+                content(range.start, range.endInclusive - range.start + 1, HttpStatusCode.PartialContent)
+            }
+        }
     }
 
     /** 校验直链签名，返回合法的相对路径。 */

@@ -16,10 +16,12 @@ import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.media.isMediaName
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
+import okio.BufferedSource
 import okio.FileMetadata
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
+import okio.buffer
 
 /** 目录列表的排序键。 */
 enum class FileSortKey { NAME, SIZE, MTIME, TYPE }
@@ -137,6 +139,19 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
             height = size?.height
         }
         return FileDetail(entry = entry, width = width, height = height, thumbs = thumbs)
+    }
+
+    /**
+     * 打开源文件的流式读取（原图 / 视频按 `Range` 分段下发用）；调用方负责 `close`。
+     *
+     * 与 [readSource] 的区别是不把内容读进内存：视频动辄几百 MB，整读会把板子撑爆。
+     */
+    fun openSource(relative: String): BufferedSource? {
+        val path = resolve(rootPath, relative)
+        if (fs.metadataOrNull(path)?.isDirectory != false) return null
+        return runCatching { fs.source(path).buffer() }
+            .onFailure { log.warn(it) { "打开文件失败：$relative" } }
+            .getOrNull()
     }
 
     /** 读源文件内容；[limit] 非空时只读前 [limit] 字节（读文件头用，避免拉整个大文件）。 */
