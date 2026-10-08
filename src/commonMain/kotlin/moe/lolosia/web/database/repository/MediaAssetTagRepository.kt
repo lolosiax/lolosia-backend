@@ -75,6 +75,34 @@ interface MediaAssetTagRepository : CrudRepository<MediaAssetTagEntity> {
         updatedAt: Instant,
     ): Result<Long>
 
+    /** 按「资产 + 标签 + 来源」翻否决位：属性页打标 / 否决都走它（§7.3）。 */
+    @Query(
+        "update media_asset_tag set negative = :negative, updated_at = :updatedAt, updated_by = :updatedBy " +
+            "where asset_id = :assetId and tag_id = :tagId and source = :source and deleted = 0"
+    )
+    suspend fun executeUpdateNegativeByAssetIdAndTagIdAndSource(
+        context: QueryExecutor,
+        assetId: Long,
+        tagId: Long,
+        source: String,
+        negative: Boolean,
+        updatedAt: Instant,
+        updatedBy: String?,
+    ): Result<Long>
+
+    /** 人工解除关联：这个资产上这个标签的**所有来源**一起软删（规则下次扫描可能再加回来，要挡住用 deny）。 */
+    @Query(
+        "update media_asset_tag set deleted = 1, updated_at = :updatedAt, updated_by = :updatedBy " +
+            "where asset_id = :assetId and tag_id = :tagId and deleted = 0"
+    )
+    suspend fun executeSoftDeleteByAssetIdAndTagId(
+        context: QueryExecutor,
+        assetId: Long,
+        tagId: Long,
+        updatedAt: Instant,
+        updatedBy: String?,
+    ): Result<Long>
+
     /** 清掉某个资产某一来源的全部关联（重跑模型前先清 `model` 行）。 */
     @Query(
         "update media_asset_tag set deleted = 1, updated_at = :updatedAt " +

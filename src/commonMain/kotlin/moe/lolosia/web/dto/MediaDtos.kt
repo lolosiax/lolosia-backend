@@ -27,6 +27,10 @@ data class MediaTagItem(
     val parentId: Long? = null,
     /** 被多少个未删除的资产引用。 */
     val count: Long = 0,
+    /** 生效来源：`manual` / `rule` / `model`（`manual > rule > model`，§7.3）。 */
+    val source: String = "",
+    /** 人工否决：这张图明确不是该标签；属性页据此画成带删除线的红标签。 */
+    val negative: Boolean = false,
 )
 
 /** 单个文件的完整媒体信息（属性编辑页与检索结果共用）。 */
@@ -101,6 +105,25 @@ data class MediaPropertyApplyReq(
 /** 请求扫描某个目录（**仅本地索引**，不出网）。`path` 为空表示浏览根。 */
 @Serializable
 data class MediaIndexScanReq(val path: String? = null)
+
+/**
+ * 请求里的一个标签引用。`namespace` + `name` 组合定位词表里的一行，**不存在就按需建**
+ * （根级自由标签是一等公民，§7.5）。
+ */
+@Serializable
+data class MediaTagRef(val namespace: String, val name: String)
+
+/**
+ * 人工打标 / 解除 / 否决的共同请求体（`doc/media-index-design.md` §11.2 的 `media/tags/…`）。
+ *
+ * 三个接口形状一致，差别只在语义：`attach` 打上（来源 `manual`）、`detach` 解除关联、
+ * `deny` 记否决（`negative = 1`，规则与模型都不会再加回来）。
+ */
+@Serializable
+data class MediaTagsReq(
+    val path: String? = null,
+    val tags: List<MediaTagRef> = emptyList(),
+)
 
 /**
  * SSE 事件 `media:index` 的负载：这个文件的本地索引刚完成。

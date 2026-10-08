@@ -4,6 +4,7 @@ import moe.lolosia.web.dto.MediaDetail
 import moe.lolosia.web.dto.MediaIndexScanReq
 import moe.lolosia.web.dto.MediaPropertyApplyReq
 import moe.lolosia.web.dto.MediaPropertyReq
+import moe.lolosia.web.dto.MediaTagsReq
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.service.files.normalizeRelative
 import moe.lolosia.web.service.media.MEDIA_INDEX_EVENT
@@ -23,12 +24,14 @@ import moe.lolosia.web.util.session.Context
 /**
  * 媒体索引接口：属性页读写与本地索引扫描（`doc/media-index-design.md` §11.2 的 P1 子集）。
  *
- * - `media/detail` 与 `media/property/…` 是**属性页**用的：详情读全量元数据，属性页写评级 / 描述；
+ * - `media/detail` 与 `media/property/…`、`media/tags/…` 是**属性页**用的：详情读全量元数据，
+ *   属性页写评级 / 描述，以及人工打标 / 解除 / 否决；
  * - `media/index/scan` 只做**本地索引**（stat / 哈希 / EXIF / 规则打标），**不出网**；
  *   外发分析要等用户显式点「全盘分析」，那是 P3 的 `media/analyze/…`。
  *
- * §11.2 里 P2 的标签词表（`tags/…`、`tag/…`）、检索（`search` / `facets` / `manifest`）
- * 与 P4 的向量（`similar`）暂未落地，接口路径新增即定，届时按同一张表补齐。
+ * §11.2 里 P2 剩下的**词表管理**（`tag/tree`、`tag/rename`、`tag/move`、`tag/merge`）
+ * 与检索（`search` / `facets` / `manifest`）、P4 的向量（`similar`）暂未落地，
+ * 接口路径新增即定，届时按同一张表补齐。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -58,6 +61,33 @@ object MediaController {
         property: MediaPropertyService,
         @Body req: MediaPropertyApplyReq,
     ): MessageResult = property.apply(ctx, req)
+
+    /** 属性页：人工打标（来源 `manual`；标签不存在则按需建，§7.5）。 */
+    @POST("/media/tags/attach")
+    @Permission(MEDIA_WRITE)
+    suspend fun attachTags(
+        ctx: Context,
+        property: MediaPropertyService,
+        @Body req: MediaTagsReq,
+    ): MessageResult = property.attachTags(ctx, req)
+
+    /** 属性页：解除标签关联（只摘关联、不删标签；规则下次扫描可能再加回来）。 */
+    @POST("/media/tags/detach")
+    @Permission(MEDIA_WRITE)
+    suspend fun detachTags(
+        ctx: Context,
+        property: MediaPropertyService,
+        @Body req: MediaTagsReq,
+    ): MessageResult = property.detachTags(ctx, req)
+
+    /** 属性页：人工否决（`negative = 1`，规则与模型都不会再加回来，§7.3）。 */
+    @POST("/media/tags/deny")
+    @Permission(MEDIA_WRITE)
+    suspend fun denyTags(
+        ctx: Context,
+        property: MediaPropertyService,
+        @Body req: MediaTagsReq,
+    ): MessageResult = property.denyTags(ctx, req)
 
     /**
      * 请求本地索引扫描：`path` 为空表示整个浏览根。

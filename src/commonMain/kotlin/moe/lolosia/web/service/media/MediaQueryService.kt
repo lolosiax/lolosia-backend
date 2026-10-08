@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import moe.lolosia.web.database.model.MediaAssetEntity
+import moe.lolosia.web.database.model.MediaAssetTagEntity
 import moe.lolosia.web.database.model.RATING_UNKNOWN
 import moe.lolosia.web.database.repository.MediaAssetRepository
 import moe.lolosia.web.database.repository.MediaAssetTagRepository
@@ -40,6 +41,9 @@ class MediaQueryService(
     private val tags: MediaTagRepository,
     private val bindings: MediaAssetTagRepository,
 ) {
+
+    /** 标签来源优先级：数字小的赢（`manual > rule > model`，§7.3）。 */
+    private val sourceRank: Map<String, Int> = mapOf(SOURCE_MANUAL to 0, SOURCE_RULE to 1, SOURCE_MODEL to 2)
 
     /** 单个文件的完整媒体信息。GPS 只有拿到 `lolosia.media.location` 才下发（§6.4）。 */
     suspend fun detail(ctx: Context, path: String?): MediaDetail {
@@ -116,15 +120,32 @@ class MediaQueryService(
         return obj.entries.map { (key, value) -> MediaExifItem(key, (value as? JsonPrimitive)?.content.orEmpty()) }
     }
 
-    /** 该资产身上的标签；`negative`（人工否决）的不列出。 */
+    /**
+     * 该资产身上的标签。同一个标签可能有多条来源行，这里按 `manual > rule > model` 合并成一条生效的
+     * （§7.3），否决的行**照列但带上 `negative`** —— 属性页要把「这张图明确不是什么」显示出来。
+     */
     private suspend fun tagItems(ctx: Context, assetId: Long): List<MediaTagItem> {
-        val links = bindings.findAllByAssetId(ctx.db, assetId).getOrThrow().filter { !it.negative }
+        val links = bindings.findAllByAssetId(ctx.db, assetId).getOrThrow()
         if (links.isEmpty()) return emptyList()
-        return links.mapNotNull { link ->
+        val winners = links.groupBy { it.tagId }.values.mapNotNull { winningLink(it) }
+        return winners.mapNotNull { link ->
             val tag = tags.findOneById(ctx.db, link.tagId).getOrThrow() ?: return@mapNotNull null
-            MediaTagItem(tag.id, tag.namespace, tag.name, tag.parentId)
-        }.distinctBy { it.id }
+            MediaTagItem(
+                id = tag.id,
+                namespace = tag.namespace,
+                name = tag.name,
+                parentId = tag.parentId,
+                source = link.source,
+                negative = link.negative,
+            )
+        }.sortedBy { it.id }
     }
+
+    /** 同一标签的多条来源里挑生效的那条：来源优先级高的赢，同来源里**否决的赢**。 */
+    private fun winningLink(rows: List<MediaAssetTagEntity>): MediaAssetTagEntity? =
+        rows.minWithOrNull(
+            compareBy<MediaAssetTagEntity>({ sourceRank[it.source] ?: Int.MAX_VALUE }, { !it.negative })
+        )
 
     private fun FileEntry.withMedia(row: MediaAssetEntity?): FileEntry = copy(
         rating = row?.rating ?: RATING_UNKNOWN,

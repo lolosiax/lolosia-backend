@@ -1,9 +1,12 @@
 package moe.lolosia.web.service.media
 
+import moe.lolosia.web.database.model.MediaAssetEntity
 import moe.lolosia.web.database.repository.MediaAssetRepository
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.MediaPropertyApplyReq
 import moe.lolosia.web.dto.MediaPropertyReq
+import moe.lolosia.web.dto.MediaTagRef
+import moe.lolosia.web.dto.MediaTagsReq
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.service.files.FileBrowser
 import moe.lolosia.web.util.router.Injectable
@@ -79,5 +82,56 @@ class MediaPropertyService(
             }
         }
         return MessageResult("已应用到 $changed 个文件")
+    }
+
+    /** 人工打标（§11.2 的 `media/tags/attach`）：来源恒为 [SOURCE_MANUAL]，标签不存在则按需建。 */
+    suspend fun attachTags(ctx: Context, req: MediaTagsReq): MessageResult {
+        val (asset, refs) = requireTagRequest(ctx, req)
+        val operator = ctx.userId
+        var changed = 0
+        for (ref in refs) {
+            if (tagService.attach(ctx.db, asset.id, ref.namespace, ref.name, SOURCE_MANUAL, operator) != null) changed++
+        }
+        return MessageResult("已打上 $changed 个标签")
+    }
+
+    /** 人工解除关联：只摘关联、不删标签；规则下次扫描还会再加回来，要挡住请用否决。 */
+    suspend fun detachTags(ctx: Context, req: MediaTagsReq): MessageResult {
+        val (asset, refs) = requireTagRequest(ctx, req)
+        val operator = ctx.userId
+        var changed = 0L
+        for (ref in refs) {
+            changed += tagService.detach(ctx.db, asset.id, ref.namespace, ref.name, operator)
+        }
+        return MessageResult("已解除 $changed 个标签")
+    }
+
+    /**
+     * 人工否决（§7.3）：这张图**明确不是**这个标签。
+     *
+     * 写 `negative = 1` 之后，规则与模型都不能再把它加回来 —— 这是与 [detachTags] 的唯一区别。
+     */
+    suspend fun denyTags(ctx: Context, req: MediaTagsReq): MessageResult {
+        val (asset, refs) = requireTagRequest(ctx, req)
+        val operator = ctx.userId
+        var changed = 0
+        for (ref in refs) {
+            if (tagService.deny(ctx.db, asset.id, ref.namespace, ref.name, operator) != null) changed++
+        }
+        return MessageResult("已否决 $changed 个标签")
+    }
+
+    /** 打标类请求的公共前置：解析路径 → 索引行，并归一化 + 去重标签列表。 */
+    private suspend fun requireTagRequest(ctx: Context, req: MediaTagsReq): Pair<MediaAssetEntity, List<MediaTagRef>> {
+        val (relative, _) = browser.requirePath(req.path)
+        if (relative.isEmpty()) throw ApiException(400, "缺少文件路径")
+        val refs = req.tags
+            .map { MediaTagRef(it.namespace.trim(), it.name.trim()) }
+            .filter { it.namespace.isNotEmpty() && it.name.isNotEmpty() }
+            .distinct()
+        if (refs.isEmpty()) throw ApiException(400, "没有要处理的标签")
+        val row = assets.findOneByPath(ctx.db, relative).getOrThrow()
+            ?: throw ApiException(404, "该文件尚未建立索引，请先跑一轮索引扫描")
+        return row to refs
     }
 }

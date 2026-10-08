@@ -18,7 +18,8 @@ import kotlin.time.Clock
  * 规则集是**整轮扫描加载一次**的（[loadRules]），不在每个文件上重查库 —— 十万张图就是十万次
  * 查询，机械盘上不可接受。
  *
- * 人工打标（属性页的勾选 / 否决）是 P2 的事，v1 只落 [SOURCE_RULE] 与 [SOURCE_MANUAL] 两种来源。
+ * 人工打标走 [attach] / [detach] / [deny]，来源恒为 [SOURCE_MANUAL]；规则打标走 [applyRules]，
+ * 来源 [SOURCE_RULE]；[SOURCE_MODEL] 留给 P3 的外发分析。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -98,7 +99,11 @@ class MediaTagService(
         return tags.findOneByNamespaceAndName(exec, namespace, name).getOrNull()?.id
     }
 
-    /** 关联一个标签；同一来源已关联过就跳过（幂等，允许同标签有多来源行）。 */
+    /**
+     * 关联一个标签；同一来源已关联过就跳过（幂等，允许同标签有多来源行）。
+     *
+     * 同来源的行已存在但被**否决**过时顺手把否决位翻正 —— 否则「先否决、再打上」从界面看像是没生效。
+     */
     suspend fun attach(
         exec: QueryExecutor,
         assetId: Long,
@@ -109,10 +114,64 @@ class MediaTagService(
     ): Long? {
         val tagId = ensureTag(exec, namespace, name, operator) ?: return null
         val existing = bindings.findAllByAssetIdAndTagId(exec, assetId, tagId).getOrNull().orEmpty()
-        if (existing.any { it.source == source }) return tagId
+        val same = existing.firstOrNull { it.source == source }
         val now = Clock.System.now()
+        if (same != null) {
+            if (same.negative) {
+                bindings.executeUpdateNegativeByAssetIdAndTagIdAndSource(
+                    exec, assetId, tagId, source, false, now, operator,
+                ).getOrThrow()
+            }
+            return tagId
+        }
         bindings.executeInsert(exec, assetId, tagId, source, null, null, false, now, operator, now, operator)
             .getOrThrow()
+        return tagId
+    }
+
+    /**
+     * 人工解除关联：这个资产上这个标签的**所有来源**一起软删，返回受影响行数。
+     *
+     * 刻意**不按需建**标签 —— 解除是「拿掉」，不该顺手往词表里塞一行。
+     *
+     * 与 [deny] 的分工：解除只是把关联摘掉，目录规则下次扫描还会再加回来；要挡住才用否决。
+     */
+    suspend fun detach(
+        exec: QueryExecutor,
+        assetId: Long,
+        namespace: String,
+        name: String,
+        operator: String?,
+    ): Long {
+        val tagId = tags.findOneByNamespaceAndName(exec, namespace, name).getOrNull()?.id ?: return 0L
+        return bindings.executeSoftDeleteByAssetIdAndTagId(exec, assetId, tagId, Clock.System.now(), operator)
+            .getOrThrow()
+    }
+
+    /**
+     * 人工否决：这张图**明确不是**这个标签（§7.3）。
+     *
+     * 没有 `manual` 行就补一条带否决位的，有就翻位 —— 之后规则与模型想打这个标签都得先过这一关。
+     */
+    suspend fun deny(
+        exec: QueryExecutor,
+        assetId: Long,
+        namespace: String,
+        name: String,
+        operator: String?,
+    ): Long? {
+        val tagId = ensureTag(exec, namespace, name, operator) ?: return null
+        val now = Clock.System.now()
+        val existing = bindings.findAllByAssetIdAndTagId(exec, assetId, tagId).getOrNull().orEmpty()
+        if (existing.none { it.source == SOURCE_MANUAL }) {
+            bindings.executeInsert(
+                exec, assetId, tagId, SOURCE_MANUAL, null, null, true, now, operator, now, operator,
+            ).getOrThrow()
+            return tagId
+        }
+        bindings.executeUpdateNegativeByAssetIdAndTagIdAndSource(
+            exec, assetId, tagId, SOURCE_MANUAL, true, now, operator,
+        ).getOrThrow()
         return tagId
     }
 
