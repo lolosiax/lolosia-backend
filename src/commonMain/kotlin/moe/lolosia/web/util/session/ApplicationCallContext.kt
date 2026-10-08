@@ -7,6 +7,7 @@ import io.ktor.util.*
 import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
+import moe.lolosia.web.service.permission.PermissionResolver
 
 /**
  * [Context] 的唯一实现：把一次请求要用到的东西挂在一起。
@@ -23,12 +24,13 @@ internal class ApplicationCallContext(
     private val database: Database,
     users: SysUserRepository,
     bindings: ViewUserRoleRepository,
+    resolver: PermissionResolver,
 ) : Context {
 
     /** 请求级共享数据不跨线程（一次请求只有一个协程写它），故不开并发保护。 */
     override val data: Attributes = Attributes(concurrent = false)
 
-    override val user: UserInfo = UserInfo(this, users, bindings)
+    override val user: UserInfo = UserInfo(this, users, bindings, resolver)
 
     override val db: QueryExecutor get() = database.driver
 

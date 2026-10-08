@@ -43,28 +43,37 @@ interface SysRoleRepository : CrudRepository<SysRoleEntity> {
     suspend fun countByKeys(context: QueryExecutor, keys: String): Result<Long>
 
     @Query(
-        "insert into sys_role(role_name, type, created_at, created_by, updated_at, updated_by, deleted) " +
-            "values (:roleName, :type, :createdAt, :createdBy, :updatedAt, :updatedBy, 0)"
+        "insert into sys_role(role_name, type, parent_id, created_at, created_by, updated_at, updated_by, deleted) " +
+            "values (:roleName, :type, :parentId, :createdAt, :createdBy, :updatedAt, :updatedBy, 0)"
     )
     suspend fun executeInsert(
         context: QueryExecutor,
         roleName: String?,
         type: String?,
+        parentId: Long?,
         createdAt: Instant,
         createdBy: String?,
         updatedAt: Instant,
         updatedBy: String?,
     ): Result<Long>
 
-    @Query("update sys_role set role_name = :roleName, type = :type, updated_at = :updatedAt, updated_by = :updatedBy where id = :id")
+    @Query(
+        "update sys_role set role_name = :roleName, type = :type, parent_id = :parentId, " +
+            "updated_at = :updatedAt, updated_by = :updatedBy where id = :id"
+    )
     suspend fun executeUpdateById(
         context: QueryExecutor,
         id: Long,
         roleName: String?,
         type: String?,
+        parentId: Long?,
         updatedAt: Instant,
         updatedBy: String?,
     ): Result<Long>
+
+    /** 只改继承关系（权限注册表同步用，见 `service.permission.syncRegistryGroups`）。 */
+    @Query("update sys_role set parent_id = :parentId where id = :id")
+    suspend fun executeUpdateParentById(context: QueryExecutor, id: Long, parentId: Long?): Result<Long>
 
     @Query("update sys_role set deleted = 1, updated_at = :updatedAt, updated_by = :updatedBy where id = :id")
     suspend fun executeSoftDeleteById(

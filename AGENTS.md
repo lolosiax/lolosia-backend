@@ -56,7 +56,8 @@ repositoryModules()                    // @Repository 接口 → sqlx4k 生成�
 serviceModule()                        // @Service 类型的单例绑定（构造器注入）
 koin.registerInjectables()             // 容器实例 → 路由「按类型注入」
 configureInterceptors(koin)            // @Interceptor(order) 升序注册
-generatedRoutes()                      // @Controller 路由批量注册
+generatedRoutes()                      // @Controller 路由批量注册（含 @Permission 校验）
+generatedPermissions()                 // @Permission 节点目录（给管理界面做权限选择器）
 ```
 
 **Koin**
@@ -80,14 +81,18 @@ generatedRoutes()                      // @Controller 路由批量注册
 - 无法绑定的形参**编译期报错**：要么加参数注解，要么给类型标 `@Injectable`。
 - 返回值直接写业务对象即可，**信封交给 `EnvelopeInterceptor`**：
   - 裸 `String` 会被当 `text/plain` 发出、**不包信封**；要包一段 JSON 文本就返回 `dto.RawJson`。
+- **接口授权用 `@Permission("a.b.c")`**（可标函数或 `object`，函数上的覆盖 `object` 的；多个值是 **OR**）：
+  `RouterProcessor` 在生成的路由体首行插入 `call.requirePermission(...)`，未通过抛 **403**；
+  **不标 = 只要求登录**（与不引入本机制时一致）。权限模型、命名规范与判定口径见 [doc/rbac-design.md](doc/rbac-design.md)。
 - 跨项目复用控制器时，目标是**只改 import**（注解同名同义，方法体零改动）。
 
 ## 4. 请求上下文 `ctx` 与服务层
 
-- 一次请求一个 `Context`（挂在 `call.attributes`，请求结束随 `call` 释放），三面：
+- 一次请求一个 `Context`（挂在 `call.attributes`，请求结束随 `call` 释放），四面：
   - 请求面 `ctx.call`（**仅控制器用**）、`ctx.data`（请求期共享数据区）；
   - 用户面 `ctx.session` / `ctx.userId` / `ctx.user`（当前用户与角色懒查一次并缓存）；
-  - 执行面 `ctx.db` / `ctx.transaction { }`。
+  - 执行面 `ctx.db` / `ctx.transaction { }`；
+  - **权限面 `ctx.hasPermission("a.b.c")`**：`@Permission` 生成的路由校验最终落到它。规则 = 组链（自身组 + 沿 `sys_role.parent_id` 的祖先组，库里没规则时回退 `permissions.yaml` 默认值）+ 用户直授；判定见 [doc/rbac-design.md](doc/rbac-design.md)。
 - **服务层方法首参一律 `ctx: Context`**（与旧 JVM 族同位置）；服务**不持有连接池**（容器里的 `Database` 只给基础设施与 `CtxInterceptor`）。
 - 服务层**禁用 `ctx.call`**：需要 IP / UA / 请求头时由控制器抽成普通参数传下去。
 - 审计列的操作者**显式传 `operatorId: String?`**，不从 `ctx.userId` 隐式取（注册链路没有登录态）。
@@ -108,6 +113,12 @@ generatedRoutes()                      // @Controller 路由批量注册
   - ⚠️ **不支持 `IN (列表)`**：占位符编译期就固定成一个 `?`，传 `List` 会被当单值绑定并运行期报错 → 批量在服务层循环单条。
   - ⚠️ **MySQL 方言下不要用 `CrudRepository` 自带的 `insert` / `update`**：生成器拼成 `insert …; select …` 多语句脚本，MariaDB 预处理直接 `1064`。写入用单语句 `@Query`（如 `executeInsert`）；`delete` 是单语句，可用。
   - 拿不到自增 id：`execute*` 只回受影响行数 → 需要新 id 时**插入后回查**。
+- ⚠️ **`@Query` 的主表必须与实体 `@Table` 一致**（codegen 会校验，否则报 `targets table 'x' but the repository entity is mapped to table 'y'`）：
+  跨表取数把**本表当驱动表**再 `join` 别的表，不要从别的表 `join` 回来。
+- **权限规则只在 `PermissionService`（管理侧读写）/ `PermissionResolver`（判定侧解析）里碰**：规则串语法 `[+/-]a.b.c` / `a.b.*` / `*`，写入前必须过 `Permissions.canonical()` 校验（非法串拒 `400`）；
+  保存是**全量替换**（软删 + 插入，跑在同一事务里）。判定口径：合并**组链**（自身组 + 沿 `sys_role.parent_id` 的祖先组）与用户直授 → **负号优先** → 未命中拒绝，`owner` 组直接放行。
+- **内置组的默认权限在内嵌资源 [`permissions.yaml`](src/commonMain/resources/permissions.yaml)，不在 SQL 里**：某组在 `sys_role_permission` 一条规则都没有时回退用它，库里有规则就完全以库为准。
+  `extends` 由启动时的 `service.permission.syncRegistryGroups` 同步进 `sys_role.parent_id`（只改继承，不建组、不写规则）；组本身仍由 `sql/sys_role.sql` 建（其 id 被代码引用）。
 - **生成物位置**：实现类是 `object XxxImpl`，在目标源集包 `moe.lolosia.web.database.generated`，**只存在于目标源集**。
   绑定**不手写** —— 由 `router-ksp` 扫 `@Repository` 生成 `repositoryModules()`（见 §2）。
 - **时间列一律 `kotlin.time.Instant`**（业务用 `Clock.System.now()`），**不要用 `LocalDateTime`**：驱动全程按 UTC 往返，时区语义由类型系统保证；只有日志用 `nowLocal()` 展示本地时间。
@@ -121,6 +132,8 @@ generatedRoutes()                      // @Controller 路由批量注册
   `application/json` / `text/json` / `*+json` 包成 `{code,msg,data}`；`text/plain` **不包**；文件流 / SSE 不处理；
   顶层已含 `code`/`msg`/`data` 三键的响应（`ApiResult`、StatusPages 的错误响应）**跳过**，避免双重包裹；
   必须原样的响应（如 SSE 握手）给 call 打 `EnvelopeSkipKey`。
+- **鉴权分两层，别混为一谈**：`AuthInterceptor`（`-3`）只管「**是否登录**」，「**这个接口你能不能调**」由路由级的 `@Permission`（§3）负责。
+  白名单只免掉「没登录就 401」，**不免权限** —— 白名单里的接口若标了 `@Permission`，会因无会话而判失败。
 - **WebDAV 挂在 `/api` 之外**（默认 `/dav`，见 `util/ktor/WebDavRouting.kt`）：既不经会话鉴权、也不套信封，鉴权走 HTTP Basic ——
   WebDAV 客户端（Windows「映射网络驱动器」）要的是原样状态码与 207 多状态 XML。**不要**把它挪进 `/api`，也不要给它套信封。
 
@@ -129,6 +142,8 @@ generatedRoutes()                      // @Controller 路由批量注册
 - **资源一律走 `classpath` 中间层**，不要用文件系统路径：`src/<源集>/resources/**` 就是 classpath 根，运行时 `classpath.read("static/home/index.html")`。
   - `Classpath` 的来源标识：`scheme`（`file` / `classpath` / `empty`）与 `origin`（供日志展示）。
   - 内嵌 `classpath.zip` 默认 **DEFLATED**（`classpath { compressed = true }`），读取端 `ZipClasspath` 用 `platform.zlib` 做 inflate；STORED 也支持。
+  - ⚠️ **改了 `resources/**` 必须重新链接**：`buildSrc/NativeClasspath.kt` 已把 `classpath.res` / `classpath.o` 声明为链接任务的输入，只改资源内容也会触发 `classpathZip → windres/objcopy → link`；若发现改动没生效，先看 link 任务是不是被判了 UP-TO-DATE。
+- **默认权限注册表**是内嵌资源 `permissions.yaml`（`classpath` 根下），由 `loadPermissionRegistry` 在 `appModule` 里解析成 `PermissionRegistry` 单例；改它同样要重新编译。
 - **运行期资源目录**（不在二进制内）：`/res/resources/**` → `work/resources/**`，用 `FileStoreClasspath` 把 `FileStore` 的子目录挂给 `staticClasspath`（前端 landing 页背景图走这条）。
   带 `?webp` 时按旧版语义转 WebP 并落盘缓存 `work/cache/webp/{源文件内容md5}.webp`；不支持解码的格式（bmp / tiff）或转换失败一律回退原图（`service/WebpCache.kt` 落盘，转码走 `util/image/Image.kt`）。
 - **WebDAV**：`AppSettings.webdav`（`enabled` / `path` / `root` / `username` / `password` / `realm`）把 `root` 目录（如挂载的机械盘 `/mnt/hdd1`）挂到 `path` 下；
@@ -180,13 +195,13 @@ src/commonMain/kotlin/moe/lolosia/web/
   Main.kt                        唯一入口：装 classpath → 读配置 → 起 Koin → 起 CIO 引擎
   configuration/AppConfigure.kt  Application.configureApplication(koin)：插件 / 中间件 / 路由 / DDNS
   configuration/AppModule.kt     Koin：appModule / serviceModule（手写逃生口）/ startAppKoin / platformModule(expect)
-  generated/GeneratedRegistries.kt  5 个生成注册表的 expect 签名（actual 由 router-ksp 生成）
+  generated/GeneratedRegistries.kt  6 个生成注册表的 expect 签名（actual 由 router-ksp 生成）
   api/package.kt                 对外 HTTP 客户端（Ktor Client；引擎按目标选 curl / winhttp），含 sse / ws / streamingRequest
-  controller/                    LoginController / SseController / OssController / Classpath（运维探针）/ system/{User,Role,UserRole,Menu}
+  controller/                    LoginController / SseController / OssController / Classpath（运维探针）/ system/{User,Role,UserRole,Menu,Permission}
   database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
-  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos
+  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos / PermissionDtos
   interceptor/                   Traffic → Ctx → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
-  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）
+  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）/ permission/（RBAC：PermissionRegistry · PermissionResolver · PermissionService）
   service/system/                UserService / RoleService / UserRoleService / QuerySupport
   settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
   util/captcha/                 自研图形验证码（点阵字 + 算式）
@@ -202,7 +217,7 @@ src/commonMain/kotlin/moe/lolosia/web/
   util/session/                 Context / UserInfo / ApplicationCallContext / package.kt
   util/sse/                     EventSource / KtorEventSource / SseContent
   util/time/Time.kt             nowLocal（仅日志）/ nowEpochMs
-src/commonMain/resources/       application.json（内嵌默认配置）/ static/home/ / hello.txt
+src/commonMain/resources/       application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ static/home/ / hello.txt
 src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspath(Image) / EmptyClasspath、
                                 installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*、
                                 util/image/Image.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
@@ -215,7 +230,7 @@ router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller�
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、
                                 NativeClasspath.kt（zip 合并 + windres/objcopy 嵌入 + 链接参数）、extension/
-sql/                            建表脚本（7 表 + view_user_role 视图）
+sql/                            建表脚本（9 表，含 sys_role.parent_id 与权限规则两表；无种子规则 —— 默认值在 permissions.yaml）+ migrate_rbac_groups.sql（历史库一次性迁移）
 ```
 
 ## 11. 深度材料
@@ -223,5 +238,6 @@ sql/                            建表脚本（7 表 + view_user_role 视图）
 | 文档 | 内容 |
 | --- | --- |
 | [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) | **本派生项目**自身的差异与运行事实（更名 / WebDAV / 部署 / 网络实测）；上游模板那份 md 不动，差异都记在这里 |
+| [doc/rbac-design.md](doc/rbac-design.md) | RBAC 权限体系：组 + 点分权限（`±通配`）+ 用户直授 + `@Permission` 的设计、判定口径与已实现落点 |
 | [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 / 工程形态（运行层面） |
 | [doc/native-migration-plan.md](doc/native-migration-plan.md) | JVM → Kotlin/Native 迁移详设与实测记录（历史） |

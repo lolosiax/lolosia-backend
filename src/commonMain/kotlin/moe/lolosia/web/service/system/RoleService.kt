@@ -3,6 +3,7 @@ package moe.lolosia.web.service.system
 import moe.lolosia.web.database.repository.SysRoleRepository
 import moe.lolosia.web.database.repository.SysUserRoleRepository
 import moe.lolosia.web.dto.*
+import moe.lolosia.web.service.permission.OWNER
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
@@ -43,13 +44,13 @@ class RoleService(
         return RolePageResult(rows.map { it.toRow() }, total)
     }
 
-    /** 新建角色（`roleName` / `type` 必填，与旧版报错信息一致），返回整行（含自增 id）。 */
+    /** 新建组（`roleName` / `type` 必填，与旧版报错信息一致），返回整行（含自增 id）。 */
     suspend fun create(ctx: Context, req: RoleCreateReq, operatorId: String? = null): RoleRow {
         val roleName = req.roleName ?: throw IllegalArgumentException("必须填写roleName")
         val type = req.type ?: throw IllegalArgumentException("必须填写type")
 
         val now = Clock.System.now()
-        roles.executeInsert(ctx.db, roleName, type, now, operatorId, now, operatorId).getOrThrow()
+        roles.executeInsert(ctx.db, roleName, type, req.parentId, now, operatorId, now, operatorId).getOrThrow()
 
         return roles.findAllByType(ctx.db, type).getOrThrow()
             .filter { it.roleName == roleName }
@@ -58,7 +59,7 @@ class RoleService(
             ?: error("角色已写入但读不回来：type=$type, roleName=$roleName")
     }
 
-    /** 修改角色：`null` 的字段保持原值。 */
+    /** 修改组：`null` 的字段保持原值。 */
     suspend fun update(ctx: Context, req: RoleUpdateReq, operatorId: String? = null) {
         val current = roles.findOneById(ctx.db, req.id).getOrThrow() ?: throw NoSuchElementException("角色不存在")
         roles.executeUpdateById(
@@ -66,21 +67,17 @@ class RoleService(
             id = current.id,
             roleName = req.roleName ?: current.roleName,
             type = req.type ?: current.type,
+            parentId = req.parentId ?: current.parentId,
             updatedAt = Clock.System.now(),
             updatedBy = operatorId ?: current.updatedBy,
         ).getOrThrow()
     }
 
-    /** 删除角色：不存在直接返回（旧版同此）；超级管理员与使用中的角色不许删。 */
+    /** 删除组：不存在直接返回（旧版同此）；拥有者组与使用中的组不许删。 */
     suspend fun destroy(ctx: Context, id: Long, operatorId: String? = null) {
         val role = roles.findOneById(ctx.db, id).getOrThrow() ?: return
-        if (role.type == SUPER_ADMIN) throw IllegalStateException("不能删除超级管理员角色")
+        if (role.type?.lowercase() == OWNER) throw IllegalStateException("不能删除拥有者组")
         if (bindings.countByRoleId(ctx.db, id).getOrThrow() > 0) throw IllegalStateException("该角色正在使用")
         roles.executeSoftDeleteById(ctx.db, id, Clock.System.now(), operatorId).getOrThrow()
-    }
-
-    private companion object {
-        /** 不可删除的角色类型。 */
-        const val SUPER_ADMIN: String = "super_admin"
     }
 }

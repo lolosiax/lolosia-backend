@@ -23,18 +23,22 @@ import moe.lolosia.web.util.session.Context
 object OssController {
 
     @POST("/oss/list")
+    @Permission("lolosia.oss.file.read")
     suspend fun list(ctx: Context, files: UserFileService, @Body req: OssListReq): List<OssFile> =
         files.list(ctx, req.service)
 
     @POST("/oss/getMetas")
+    @Permission("lolosia.oss.file.read")
     suspend fun getMetas(ctx: Context, files: UserFileService, @Body req: OssMetasReq): List<OssFile> =
         files.getMetas(ctx, req.service, req.md5)
 
     @POST("/oss/fileCheck")
+    @Permission("lolosia.oss.file.read")
     suspend fun fileCheck(ctx: Context, files: UserFileService, @Body req: OssCheckReq): List<Boolean> =
         files.check(ctx, req.md5)
 
     @POST("/oss/upload")
+    @Permission("lolosia.oss.file.write")
     suspend fun upload(
         ctx: Context,
         files: UserFileService,

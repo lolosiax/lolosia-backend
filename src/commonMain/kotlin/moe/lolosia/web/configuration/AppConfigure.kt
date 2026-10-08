@@ -12,6 +12,7 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
 import moe.lolosia.web.VITE_DEFAULT
 import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.SysRoleRepository
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.ApiResult
 import moe.lolosia.web.generated.configureInterceptors
@@ -21,6 +22,8 @@ import moe.lolosia.web.service.WebpCache
 import moe.lolosia.web.service.dav.DavLockManager
 import moe.lolosia.web.service.dav.DavStore
 import moe.lolosia.web.service.ddns.DdnsService
+import moe.lolosia.web.service.permission.PermissionRegistry
+import moe.lolosia.web.service.permission.syncRegistryGroups
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.classpath.FileStoreClasspath
 import moe.lolosia.web.util.classpath.StaticClasspathConfig
@@ -150,6 +153,10 @@ fun Application.configureApplication(koin: Koin) {
     // DDNS：挂到应用作用域按配置间隔轮询，未启用时只记一条日志
     koin.get<DdnsService>().start(this)
 
-    // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用
-    koin.get<Database>().startReconnectLoop(this)
+    // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用。
+    // 连上后顺带把权限注册表声明的组继承同步进 sys_role.parent_id（幂等；规则不落库，见 service.permission）
+    val database = koin.get<Database>()
+    database.startReconnectLoop(this) {
+        syncRegistryGroups(database.driver, koin.get<PermissionRegistry>(), koin.get<SysRoleRepository>())
+    }
 }

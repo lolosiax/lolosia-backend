@@ -2,6 +2,7 @@ package moe.lolosia.web.generated
 
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
+import moe.lolosia.web.dto.PermissionCatalogEntry
 import org.koin.core.Koin
 import org.koin.core.module.Module
 
@@ -29,6 +30,9 @@ expect fun Koin.registerInjectables()
 
 /** 批量注册全部注解式控制器的路由。 */
 expect fun Routing.generatedRoutes()
+
+/** 全部 `@Permission` 节点的目录（编译期扫描生成，供管理界面做权限选择器）。 */
+expect fun generatedPermissions(): List<PermissionCatalogEntry>
 
 /** 按 `@Interceptor(order)` 升序注册全部中间件。 */
 expect fun Application.configureInterceptors(koin: Koin)

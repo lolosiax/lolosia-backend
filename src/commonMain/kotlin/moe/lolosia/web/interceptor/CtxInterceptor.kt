@@ -4,6 +4,7 @@ import io.ktor.server.application.*
 import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
+import moe.lolosia.web.service.permission.PermissionResolver
 import moe.lolosia.web.util.session.ApplicationCallContext
 import moe.lolosia.web.util.session.ContextKey
 
@@ -23,9 +24,13 @@ fun Application.installCtxInterceptor(
     db: Database,
     users: SysUserRepository,
     bindings: ViewUserRoleRepository,
+    resolver: PermissionResolver,
 ) {
     intercept(ApplicationCallPipeline.Call) {
-        call.attributes.put(ContextKey, ApplicationCallContext(call, db, users, bindings))
+        call.attributes.put(
+            ContextKey,
+            ApplicationCallContext(call, db, users, bindings, resolver),
+        )
         proceed()
     }
 }

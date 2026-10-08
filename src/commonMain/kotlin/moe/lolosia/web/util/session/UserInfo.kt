@@ -4,6 +4,8 @@ import moe.lolosia.web.database.model.SysUserEntity
 import moe.lolosia.web.database.model.ViewUserRoleEntity
 import moe.lolosia.web.database.repository.SysUserRepository
 import moe.lolosia.web.database.repository.ViewUserRoleRepository
+import moe.lolosia.web.service.permission.PermissionResolver
+import moe.lolosia.web.service.permission.PermissionRule
 
 /**
  * 当前登录用户（请求级，挂在 [Context.user] 上）。
@@ -19,6 +21,7 @@ class UserInfo internal constructor(
     private val ctx: Context,
     private val users: SysUserRepository,
     private val bindings: ViewUserRoleRepository,
+    private val resolver: PermissionResolver,
 ) {
     /** 当前登录用户 id；未登录按 401 处理。 */
     val id: String get() = ctx.requireUserId()
@@ -28,6 +31,12 @@ class UserInfo internal constructor(
 
     private var roleLoaded: Boolean = false
     private var cachedRole: ViewUserRoleEntity? = null
+
+    private var rolesLoaded: Boolean = false
+    private var cachedRoles: List<ViewUserRoleEntity> = emptyList()
+
+    private var rulesLoaded: Boolean = false
+    private var cachedRules: List<PermissionRule> = emptyList()
 
     /** 当前用户实体；一次请求内只查一次。 */
     suspend fun entity(): SysUserEntity? {
@@ -47,15 +56,33 @@ class UserInfo internal constructor(
         return cachedRole
     }
 
-    /** 角色类型（`sys_role.type`）。 */
+    /** 组类型（`sys_role.type`）。 */
     suspend fun roleType(): String? = role()?.type
 
-    /** 是否管理员（旧版判定是 `"admin" in roleType`，即包含）。 */
+    /** 是否管理员组（`"admin" in roleType`，即包含）。 */
     suspend fun isAdmin(): Boolean = roleType()?.contains("admin") == true
 
-    /** 是否教师。 */
-    suspend fun isTeacher(): Boolean = roleType() == "teacher"
+    /** 当前用户的**全部**组绑定（[role] 只取第一条）；一次请求内只查一次。 */
+    suspend fun roles(): List<ViewUserRoleEntity> {
+        if (!rolesLoaded) {
+            cachedRoles = bindings.findAllByUserId(ctx.db, id).getOrThrow()
+            rolesLoaded = true
+        }
+        return cachedRoles
+    }
 
-    /** 是否学生。 */
-    suspend fun isStudent(): Boolean = roleType() == "student"
+    /** 是否拥有者组：权限判定时视为拥有 `*`（见 `service.permission.OWNER`）。 */
+    suspend fun isOwner(): Boolean = resolver.isOwner(ctx.db, id)
+
+    /**
+     * 当前用户生效的权限规则（组链上的规则 + 用户直授，含组继承与注册表默认值兜底）；
+     * 一次请求内只解析一次。
+     */
+    suspend fun permissionRules(): List<PermissionRule> {
+        if (!rulesLoaded) {
+            cachedRules = resolver.rulesOfUser(ctx.db, id)
+            rulesLoaded = true
+        }
+        return cachedRules
+    }
 }

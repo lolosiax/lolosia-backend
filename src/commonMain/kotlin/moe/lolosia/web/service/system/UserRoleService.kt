@@ -38,22 +38,22 @@ class UserRoleService(
             ?: UserRoleRow(userId = userId, roleId = ROLE_ID_UNKNOWN)
 
     /**
-     * 取用户的角色；**没有任何绑定时自动补一条「学生」角色**（旧版行为，登录链路依赖它）。
+     * 取用户的组；**没有任何绑定时自动补一条「普通用户」组**（旧版行为，登录链路依赖它）。
      *
-     * @throws NoSuchElementException 库里连 `student` 角色都没有（数据没初始化）
+     * @throws NoSuchElementException 库里连 `user` 组都没有（数据没初始化）
      */
     suspend fun getRoleByUserId(ctx: Context, userId: String): UserRoleRow {
         if (bindings.countByUserId(ctx.db, userId).getOrThrow() == 0L) {
-            val student = roles.findAllByType(ctx.db, STUDENT).getOrThrow().firstOrNull()
+            val user = roles.findAllByType(ctx.db, USER).getOrThrow().firstOrNull()
                 ?: throw NoSuchElementException("找不到用户角色")
             val now = Clock.System.now()
-            bindings.executeInsert(ctx.db, userId, student.id, now, userId, now, userId).getOrThrow()
+            bindings.executeInsert(ctx.db, userId, user.id, now, userId, now, userId).getOrThrow()
         }
         return getByUserId(ctx, userId)
     }
 
     private companion object {
-        /** 自动补绑定时用的角色类型。 */
-        const val STUDENT: String = "student"
+        /** 自动补绑定时用的组类型。 */
+        const val USER: String = "user"
     }
 }

@@ -120,7 +120,7 @@ class LoginService(
 
     /**
      * 注册（与 master 分支的 `register` 一致）：用户名 + 密码 + 手机号/邮箱直接建号，
-     * 角色固定为「学生」（[ROLE_ID_STUDENT]）。**不做邮箱验证**。
+     * 组固定为「普通用户」（[ROLE_ID_USER]）。**不做邮箱验证**。
      *
      * 建号本身由 [UserService.create] 完成（密码在其中 bcrypt(cost=10) 入库）；
      * 它的 `IllegalArgumentException` / `IllegalStateException` 都是用户输入问题（缺手机邮箱、同名用户已存在），
@@ -138,7 +138,7 @@ class LoginService(
             password = password,
             email = email,
             phone = phone,
-            roleId = ROLE_ID_STUDENT,
+            roleId = ROLE_ID_USER,
         )
         return try {
             userService.create(ctx, req)

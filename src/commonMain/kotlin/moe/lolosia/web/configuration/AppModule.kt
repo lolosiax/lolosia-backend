@@ -1,6 +1,8 @@
 package moe.lolosia.web.configuration
 
 import moe.lolosia.web.database.Database
+import moe.lolosia.web.service.permission.PermissionRegistry
+import moe.lolosia.web.service.permission.loadPermissionRegistry
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.classpath.Classpath
 import org.koin.core.Koin
@@ -16,7 +18,8 @@ import org.koin.dsl.module
  * 暴露给 common 后，由 [moe.lolosia.web.main] 经 [startAppKoin] 的 `platformModules` 传入，绑定表不手写。
  *
  * 这里只留「无法由类型推导」的绑定：配置对象 [AppSettings] 与 [Classpath] 是外部实例，
- * `Database` 的构造参数取自配置，都不进 `@Service` 的自动生成范围。
+ * `Database` 的构造参数取自配置，[PermissionRegistry] 从 classpath 里的 `permissions.yaml` 解析，
+ * 都不进 `@Service` 的自动生成范围。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -24,6 +27,7 @@ fun appModule(config: AppSettings, cp: Classpath): Module = module {
     single<AppSettings> { config }
     single<Classpath> { cp }
     single { Database(config.datasource) }
+    single { loadPermissionRegistry(cp) }
 }
 
 /**

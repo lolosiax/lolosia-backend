@@ -33,11 +33,11 @@ import moe.lolosia.web.util.time.toDisplayString
 /** 查不到角色绑定时 `roleId` 的哨兵值（旧版沿用）。 */
 const val ROLE_ID_UNKNOWN: Long = 0L
 
-/** 用户没有任何角色绑定时 `getUserInfo` 给出的默认角色 id（旧版沿用，即「教师」）。 */
-const val ROLE_ID_DEFAULT: Long = 3L
+/** 用户没有任何组绑定时 `getUserInfo` 给出的默认组 id（最低权限的「访客」）。 */
+const val ROLE_ID_DEFAULT: Long = 5L
 
-/** 注册（`/api/register`）时给新用户的角色 id（旧版写死 4，即「学生」，见 `sql/sys_role.sql`）。 */
-const val ROLE_ID_STUDENT: Long = 4L
+/** 注册（`/api/register`）时给新用户的组 id（固定 4，即「普通用户」，见 `sql/sys_role.sql`）。 */
+const val ROLE_ID_USER: Long = 4L
 
 /** `sys_user` 的安全视图（不含 `password`）。 */
 @Serializable
@@ -102,12 +102,17 @@ data class UserInfoRow(
     val roleId: Long = ROLE_ID_DEFAULT,
 )
 
-/** `sys_role` 一行；`menuId` / `menuTitle` 是已弃用的菜单字段，仅为前端兼容保留空数组。 */
+/**
+ * `sys_role` 一行（一个「组」）；`parentId` 是父组 id（组继承，`null` 为根基组）。
+ *
+ * `menuId` / `menuTitle` 是已弃用的菜单字段，仅为前端兼容保留空数组。
+ */
 @Serializable
 data class RoleRow(
     val id: Long,
     val roleName: String? = null,
     val type: String? = null,
+    val parentId: Long? = null,
     val createdAt: String? = null,
     val createdBy: String? = null,
     val updatedAt: String? = null,
@@ -140,6 +145,8 @@ data class UserRoleRow(
     val roleType: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
+    /** 生效的权限规则串（所属组 + 用户直授合并）；只有 `/user/myRole` 填它，其余接口为 `null`。 */
+    val rules: List<String>? = null,
 )
 
 /** 只改数据、不返回资源的接口统一回它（旧版是 `data: null`，前端只取 `msg`）。 */
@@ -243,18 +250,21 @@ data class RolePageReq(
     val roleName: String? = null,
 )
 
+/** 新建组入参；`parentId` 是父组 id（组继承），不传即根基组。 */
 @Serializable
 data class RoleCreateReq(
     val roleName: String? = null,
     val type: String? = null,
+    val parentId: Long? = null,
 )
 
-/** 修改角色入参：**字段为 `null` = 不修改**。 */
+/** 修改组入参：**字段为 `null` = 不修改**。 */
 @Serializable
 data class RoleUpdateReq(
     val id: Long,
     val roleName: String? = null,
     val type: String? = null,
+    val parentId: Long? = null,
 )
 
 @Serializable
@@ -294,6 +304,7 @@ fun SysRoleEntity.toRow(): RoleRow = RoleRow(
     id = id,
     roleName = roleName,
     type = type,
+    parentId = parentId,
     createdAt = createdAt?.toDisplayString(),
     createdBy = createdBy,
     updatedAt = updatedAt?.toDisplayString(),

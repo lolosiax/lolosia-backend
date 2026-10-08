@@ -141,7 +141,13 @@ private fun Project.embedAsWindowsResource(
     }
 
     target.binaries.withType<Executable>().configureEach {
-        linkTaskProvider.configure { dependsOn(windres) }
+        linkTaskProvider.configure {
+            dependsOn(windres)
+            // 资源是经 linkerOpts 以路径形式交给链接器的，Gradle 看不见它的内容变化 ——
+            // 不显式声明成输入，只改资源（如 permissions.yaml）不会触发重新链接，跑的还是旧二进制。
+            // 用 inputs.files 而非 inputs.file：文件尚未产出时不至于判定输入校验失败。
+            inputs.files(embedDir.get().asFile.resolve(CLASSPATH_RES))
+        }
         linkerOpts(embedDir.get().asFile.resolve(CLASSPATH_RES).absolutePath)
     }
 }
@@ -206,7 +212,11 @@ private fun Project.embedAsLinuxObject(
     }
 
     target.binaries.withType<Executable>().configureEach {
-        linkTaskProvider.configure { dependsOn(objcopyTask) }
+        linkTaskProvider.configure {
+            dependsOn(objcopyTask)
+            // 同 mingw 分支：资源以路径形式进 linkerOpts，须显式声明成输入才会因资源变化重新链接
+            inputs.files(embedDir.get().asFile.resolve(CLASSPATH_OBJECT))
+        }
         linkerOpts(
             // 让 objcopy 产生的符号进入动态符号表，平台侧才能用 dlsym 查到
             "-Wl,--export-dynamic",

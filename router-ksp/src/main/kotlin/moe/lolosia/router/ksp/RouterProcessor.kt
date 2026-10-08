@@ -39,8 +39,11 @@ class RouterProcessorProvider : SymbolProcessorProvider {
 
 private const val FQ = "moe.lolosia.web.util.router"
 
-/** 运行时里挂在 Ktor 类型上的扩展（`ApplicationCall.inject` / `readForm`）所在包。 */
+/** 运行时里挂在 Ktor 类型上的扩展（`ApplicationCall.inject` / `readForm` / `requirePermission`）所在包。 */
 private const val KTOR_FQ = "moe.lolosia.web.util.ktor"
+
+/** 生成物要引用的 DTO（权限节点目录的行类型）所在包。 */
+private const val DTO_FQ = "moe.lolosia.web.dto"
 
 private val HTTP_METHODS = linkedMapOf(
     "GET" to "get",
@@ -59,6 +62,9 @@ class RouterProcessor(
 ) : SymbolProcessor {
 
     private var generated = false
+
+    /** `@Permission` 节点目录：同一节点只留首次出现的（标题/位置取第一个用到它的接口）。 */
+    private val catalog = linkedMapOf<String, CatalogEntry>()
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
         if (generated) return emptyList()
@@ -88,11 +94,21 @@ class RouterProcessor(
             HTTP_METHODS.values.forEach { appendLine("import io.ktor.server.routing.$it") }
             appendLine("import $KTOR_FQ.inject")
             appendLine("import $KTOR_FQ.readForm")
+            appendLine("import $KTOR_FQ.requirePermission")
+            appendLine("import $DTO_FQ.PermissionCatalogEntry")
             appendLine()
             appendLine("/** 批量注册全部注解式控制器的路由。 */")
             appendLine("actual fun Routing.generatedRoutes() {")
             controllers.forEach { c -> appendController(c) }
             appendLine("}")
+            appendLine()
+            appendLine("/** 全部 @Permission 节点的目录（供管理界面做权限选择器）。 */")
+            appendLine("actual fun generatedPermissions(): List<PermissionCatalogEntry> = listOf(")
+            catalog.values.sortedBy { it.node }.forEach { e ->
+                val title = e.title?.let { "\"${esc(it)}\"" } ?: "null"
+                appendLine("    PermissionCatalogEntry(\"${esc(e.node)}\", $title, \"${esc(e.controller)}\", \"${esc(e.function)}\"),")
+            }
+            appendLine(")")
         }
 
         // 聚合输出：生成结果依赖全部 @Controller 所在文件。
@@ -108,6 +124,9 @@ class RouterProcessor(
         generated = true
         if (controllers.isNotEmpty()) {
             logger.info("[router] 已生成 ${controllers.size} 个控制器的路由：${controllers.joinToString { it.simpleName.asString() }}")
+            if (catalog.isNotEmpty()) {
+                logger.info("[router] 已生成 ${catalog.size} 个权限节点：${catalog.keys.sorted().joinToString(", ")}")
+            }
         }
         return emptyList()
     }
@@ -121,11 +140,20 @@ class RouterProcessor(
                 logger.error("控制器缺少全限定名", controller)
                 return
             }
+        // object 上的 @Permission 是该控制器全部路由的默认值
+        val classPermissions = controller.permissionNodes()
 
         controller.getDeclaredFunctions().forEach { fn ->
             val http = fn.findHttpMethod() ?: return@forEach
             val routePath = joinPath(prefix, http.second)
-            appendRoute(name, fn, http.first, routePath)
+            // 函数上的 @Permission 覆盖 object 上的默认值
+            val permissions = fn.permissionNodes().ifEmpty { classPermissions }
+            appendRoute(name, fn, http.first, routePath, permissions)
+            permissions.forEach { node ->
+                catalog.getOrPut(node) {
+                    CatalogEntry(node, fn.docTitle(), controller.simpleName.asString(), fn.simpleName.asString())
+                }
+            }
         }
     }
 
@@ -153,6 +181,7 @@ class RouterProcessor(
         fn: KSFunctionDeclaration,
         ktorFun: String,
         routePath: String,
+        permissions: List<String>,
     ) {
         val fnName = fn.simpleName.asString()
         val params = fn.parameters
@@ -229,6 +258,11 @@ class RouterProcessor(
         }
 
         appendLine("    $ktorFun(\"$routePath\") {")
+        if (permissions.isNotEmpty()) {
+            // 校验放最前：未通过时代码不会读到请求体（readForm/receive 都会消费 body）
+            val args = permissions.joinToString(", ") { "\"${esc(it)}\"" }
+            appendLine("        call.requirePermission($args)")
+        }
         if (needsForm) {
             appendLine("        val __form = call.readForm()")
         }
@@ -327,3 +361,34 @@ private fun KSValueParameter.hasAnnotation(fqn: String): Boolean = getAnnotation
 
 private fun KSValueParameter.getAnnotation(fqn: String): KSAnnotation? =
     annotations.firstOrNull { it.shortName.asString() == fqn.substringAfterLast('.') }
+
+// ===== 权限（@Permission）=====
+
+/** 权限节点目录的一行（仅 KSP 处理期使用）。 */
+private data class CatalogEntry(
+    val node: String,
+    val title: String?,
+    val controller: String,
+    val function: String,
+)
+
+/** 取 `@Permission` 的节点列表（未标注 / 全为空串则为空）。 */
+private fun KSAnnotated.permissionNodes(): List<String> =
+    getAnnotation("$FQ.Permission").stringListArg("value")
+
+/** 注解的 `vararg value` 实参（KSP 把 vararg 收成 `List<String>`）。 */
+private fun KSAnnotation?.stringListArg(name: String): List<String> =
+    (this?.arguments?.firstOrNull { it.name?.asString() == name }?.value as? List<*>)
+        ?.filterIsInstance<String>()
+        ?.filter { it.isNotBlank() }
+        ?: emptyList()
+
+/** KDoc 的首个非空行，当权限节点的可读标题。 */
+private fun KSFunctionDeclaration.docTitle(): String? = docString
+    ?.lineSequence()
+    ?.map { it.trim().removePrefix("*").trim() }
+    ?.firstOrNull { it.isNotEmpty() }
+
+/** 把文本转义成 Kotlin 字符串字面量的内容。 */
+private fun esc(text: String): String =
+    text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\$", "\\\$")

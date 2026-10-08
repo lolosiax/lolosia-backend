@@ -3,6 +3,7 @@ package moe.lolosia.web.controller.system
 import io.ktor.http.*
 import io.ktor.http.content.*
 import moe.lolosia.web.dto.*
+import moe.lolosia.web.service.permission.PermissionService
 import moe.lolosia.web.service.system.UserRoleService
 import moe.lolosia.web.service.system.UserService
 import moe.lolosia.web.util.router.*
@@ -26,30 +27,36 @@ object UserController {
 
     /** 分页列表（前端读 `data.data` / `data.total`）。 */
     @POST("/user/list")
+    @Permission("lolosia.user.read")
     suspend fun list(ctx: Context, users: UserService, @Body req: UserListReq): UserListResult =
         users.list(ctx, req.pageNo ?: 1, req.pageSize ?: 10, req.keys)
 
     /** 模糊搜索用户，最多 10 条（前端直接把它当数组用）。 */
     @POST("/user/searching")
+    @Permission("lolosia.user.read")
     suspend fun searching(ctx: Context, users: UserService, @Body req: SearchReq): List<UserRow> =
         users.searching(ctx, req.keys)
 
     /** 按 id 批量取用户（`@Query` 不支持 `IN`，服务层循环单条）。 */
     @POST("/user/get")
+    @Permission("lolosia.user.read")
     suspend fun get(ctx: Context, users: UserService, @Body req: IdListReq): List<UserRow> =
         users.get(ctx, req.idList.filterNotNull())
 
     @POST("/user/create")
+    @Permission("lolosia.user.write")
     suspend fun create(ctx: Context, users: UserService, @Body req: UserCreateReq): IdRow =
         IdRow(users.create(ctx, req, ctx.userId).id)
 
     @POST("/user/edit")
+    @Permission("lolosia.user.write")
     suspend fun edit(ctx: Context, users: UserService, @Body req: UserUpdateReq): EmptyResult {
         users.update(ctx, req, ctx.userId)
         return EmptyResult()
     }
 
     @POST("/user/delete")
+    @Permission("lolosia.user.write")
     suspend fun delete(ctx: Context, users: UserService, @Body req: IdsReq): EmptyResult {
         if (req.ids.isNotEmpty()) users.delete(ctx, req.ids, ctx.userId)
         return EmptyResult()
@@ -67,10 +74,19 @@ object UserController {
     suspend fun myInfo(ctx: Context, users: UserService): UserInfoRow =
         users.info(ctx, ctx.requireUserId())
 
-    /** 当前登录用户的角色（没有绑定时自动补一条「学生」，与旧版一致）。 */
+    /**
+     * 当前登录用户的角色（没有绑定时自动补一条「学生」，与旧版一致）。
+     *
+     * 额外回带 [UserRoleRow.rules]（生效的权限规则串）：前端守卫与 `v-permission` 直接用它，
+     * 不必再单独调 `/api/permission/my`。
+     */
     @POST("/user/myRole")
-    suspend fun myRole(ctx: Context, bindings: UserRoleService): UserRoleRow =
-        bindings.getRoleByUserId(ctx, ctx.requireUserId())
+    suspend fun myRole(
+        ctx: Context,
+        bindings: UserRoleService,
+        permissions: PermissionService,
+    ): UserRoleRow = bindings.getRoleByUserId(ctx, ctx.requireUserId())
+        .copy(rules = permissions.effectiveRules(ctx, ctx.requireUserId()))
 
     /**
      * 上传头像（前端 `setAvatar`：`PUT /user/avatar?id=<uuid>`，FormData 字段名 `file`）。

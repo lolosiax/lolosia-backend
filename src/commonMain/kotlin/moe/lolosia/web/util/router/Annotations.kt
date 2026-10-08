@@ -15,6 +15,17 @@ package moe.lolosia.web.util.router
 annotation class Controller(val prefix: String = "")
 
 /**
+ * 声明接口所需权限：多个值是 **OR**（满足任一即放行）。
+ *
+ * 标在 `@Controller` 的 `object` 上作该类路由的默认值，函数上的声明**覆盖** object 的。
+ * `RouterProcessor` 据此在生成的路由体首行插入 `call.requirePermission("…")`，未通过抛 403
+ * （判定见 `Context.hasPermission`）。
+ */
+@Target(AnnotationTarget.FUNCTION, AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class Permission(vararg val value: String)
+
+/**
  * 标注"可按类型注入"的类型：控制器形参声明为该类型（或其子类型）时无需任何注解，自动注入。
  *
  * @param requestScoped 该类型由请求上下文逐次提供（如 `Context`），**不在 DI 容器里**；

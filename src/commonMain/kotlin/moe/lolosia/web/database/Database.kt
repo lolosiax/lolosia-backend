@@ -109,13 +109,22 @@ class Database(private val config: AppSettings.DatasourceConfig) {
     /**
      * 后台重连：启动即试一次，失败则每 [interval] 再试，直到连上或作用域取消。
      * 挂在应用作用域上，保证「数据库重启后服务自动恢复」。
+     *
+     * [onConnected] 在**首次连上后**跑一次（已连上时立即跑），用于依赖库的启动期工作
+     * （如权限注册表的组继承同步）；它抛异常只记日志，不影响重连循环的既有语义。
      */
-    fun startReconnectLoop(scope: CoroutineScope, interval: Duration = RECONNECT_INTERVAL) {
+    fun startReconnectLoop(
+        scope: CoroutineScope,
+        interval: Duration = RECONNECT_INTERVAL,
+        onConnected: suspend () -> Unit = {},
+    ) {
         scope.launch {
             while (isActive && instance == null) {
                 if (connect()) break
                 delay(interval)
             }
+            if (instance == null) return@launch
+            runCatching { onConnected() }.onFailure { log.error(it) { "连库后的启动期任务失败" } }
         }
     }
 

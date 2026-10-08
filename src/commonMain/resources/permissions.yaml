@@ -1,0 +1,39 @@
+# 默认权限注册表：内置组（sys_role.type）→ 默认权限规则。
+#
+# 语义（见 doc/rbac-design.md §3.6）：
+# - 这是「默认值」：某个组在 sys_role_permission 里**一条规则都没有**时，判定就回退用这里的
+#   permissions；DB 里一旦有规则，一律以 DB 为准（运营在管理界面改过就不会被这里覆盖）。
+# - extends 声明组的父组；启动时据此写入 sys_role.parent_id（组继承落库），判定时沿 parent_id
+#   递归合并祖先组的规则。owner / guest 是根基组，没有父组。
+# - 规则串语法同 §3.2：`[+/-]a.b.c`、`a.b.*`、`*`；`+` 可省略（这里显式写上，与库里的存法一致）。
+#
+# 组 id 由 sql/sys_role.sql 固定（代码里有引用），这里只按 type 登记。
+groups:
+  # 拥有者：视为拥有 `*`，且不可被 `-` 规则剥夺（判定侧兜底，见 Permissions）。
+  owner:
+    title: 拥有者
+    permissions:
+      - "+*"
+
+  # 管理员：整个 lolosia 域，并继承普通用户的权限。
+  admin:
+    title: 管理员
+    extends:
+      - user
+    permissions:
+      - "+lolosia.*"
+
+  # 普通用户：能读写自己的云存储文件（在线文件管理器的授权来源），并继承访客。
+  user:
+    title: 普通用户
+    extends:
+      - guest
+    permissions:
+      - "+lolosia.user.read"
+      - "+lolosia.oss.file.write"
+
+  # 访客：只读，不引入继承。
+  guest:
+    title: 访客
+    permissions:
+      - "+lolosia.oss.file.read"

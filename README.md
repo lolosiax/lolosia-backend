@@ -4,7 +4,7 @@
 
 - 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB**
 - 目标平台：**`mingwX64`**（Windows 本地开发调试）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**不保留 JVM 目标**
-- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）、**WebDAV 服务**（手写协议层，把机械盘挂到 `/dav`，见 `service/dav`、`util/ktor/WebDavRouting.kt`）
+- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）、**WebDAV 服务**（手写协议层，把机械盘挂到 `/dav`，见 `service/dav`、`util/ktor/WebDavRouting.kt`）、**RBAC 权限体系**（组 + 点分权限 + `@Permission`，见 `service/permission`、`doc/rbac-design.md`）
 
 > 项目风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 冒烟 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
 > JVM → Kotlin/Native 的迁移详设与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)。
@@ -15,7 +15,7 @@
 - **按类型自动注入**（Spring 风格）：形参类型标了 `@Injectable` 就**无需注解**直接注入，如 `fun whoami(ctx: Context)`、`fun config(config: AppSettings)`
 - **服务自动装配**：业务服务标 `@Service`，`router-ksp` 生成 `serviceModule()`（`single { X(get(), …) }` 构造器注入），不用手写 Koin 绑定；`@Service` 管容器绑定、`@Injectable` 管路由形参注入，两者都需要时都标
 - **生成注册表跨源集可见**：KSP 生成物只能落在各目标源集，故签名以 `expect` 写在 commonMain 的 `GeneratedRegistries.kt`、各目标生成 `actual`（编译器强制配对，签名对不上直接编译报错）；于是 `main` 与 Ktor 装配全在 commonMain，平台差异只剩 `installPlatformClasspath` / `envOrNull` / `platformModule` 三处 expect/actual
-- **请求上下文 `ctx`**：一次请求一个（挂在 `call.attributes` 上，请求结束随 `call` 释放），分三面 —— 请求面 `ctx.call`（仅控制器用；IP / UA / 请求头由控制器抽成普通参数往下传）、用户面 `ctx.session` / `ctx.userId` / `ctx.user`（当前用户与角色懒查一次并缓存）、执行面 `ctx.db` / `ctx.transaction { }`；另有 `ctx.data` 作请求期共享数据区。**服务层方法首参透传 `ctx`**（与旧 JVM 族同位置）
+- **请求上下文 `ctx`**：一次请求一个（挂在 `call.attributes` 上，请求结束随 `call` 释放），分四面 —— 请求面 `ctx.call`（仅控制器用；IP / UA / 请求头由控制器抽成普通参数往下传）、用户面 `ctx.session` / `ctx.userId` / `ctx.user`（当前用户与组懒查一次并缓存）、执行面 `ctx.db` / `ctx.transaction { }`、权限面 `ctx.hasPermission("a.b.c")`；另有 `ctx.data` 作请求期共享数据区。**服务层方法首参透传 `ctx`**（与旧 JVM 族同位置）
 - **参数注解名称可省略**：`@Path` / `@Query` / `@Header` / `@Form` / `@FilePart` 不写名字默认取形参名；`@Body` 直接反序列化 `@Serializable` 请求体
 - **`classpath.zip` 中间层**：源集下的 `resources/**` 就是 classpath 根，构建期嵌入可执行文件，运行时 `classpath.read("static/home/index.html")` —— 写法与 Java 打资源文件一致
 - **多级配置覆盖**：数据类默认值 < 内嵌 JSON < 磁盘 `application.json` < 环境变量 < 命令行端口
@@ -24,6 +24,7 @@
 - **自研图形验证码**（`util/captcha`）：Native 上没有 `java.awt` / `javax.imageio`，于是自写 5×7 点阵字形 + 算式生成，画在 `Image`（内嵌 libpng 编码）的空白画布上出图，逐字对齐 hutool `LineCaptcha` / `MathGenerator`（100×40、150 条干扰线、`a+b=` 且结果可为负）
 - **统一响应信封** `{code,msg,data}`：由 `EnvelopeInterceptor` 在 send pipeline 上按**响应 MIME** 统一包装（只认 `/api/` 下的 JSON；`text/plain` 与文件流/SSE 原样放行，要强制包一段 JSON 文本就返回 `dto.RawJson`）
 - **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
+- **接口级权限**：`@Permission("a.b.c")` 由 KSP 生成 `call.requirePermission(...)`（失败回 `403`）；权限来自「组链（自身组 + 继承的祖先组）+ 用户直授」，规则是 `±a.b.c` / `a.b.*` / `*` 形式的点分串，**负号优先、未命中拒绝**，`owner` 组兜底放行；内置组（`owner` / `admin` / `user` / `guest`）的**默认权限登记在内嵌资源 `permissions.yaml`**，库为空时兜底生效（OSS 文件的读写就是 `user` 组的默认权限）—— 见 [doc/rbac-design.md](doc/rbac-design.md)
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
 - **WebDAV 服务**：把 `webdav.root`（如挂载的机械盘 `/mnt/hdd1`）以 WebDAV 挂在 `webdav.path`（默认 `/dav`）下，覆盖 `OPTIONS / PROPFIND / PROPPATCH / GET(含 Range) / PUT / DELETE / MKCOL / COPY / MOVE / LOCK / UNLOCK`，HTTP Basic 鉴权。挂载点在 `/api` 之外，**不套 `{code,msg,data}` 信封、也不走会话鉴权** —— Windows「映射网络驱动器」这类客户端要的是原样状态码与 207 多状态 XML
 - **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件、或挂进基础镜像由 docker 托管（两种都自动留 `.previous` 回滚文件）
@@ -60,18 +61,18 @@
 │   │   ├── controller/           # 业务（Login / User / Role / UserRole / Menu）+ Demo / Classpath（插件验证用）
 │   │   ├── database/             # Database（sqlx4k 驱动）+ repository 各 @Repository + model 实体
 │   │   ├── dto/                  # ApiResult（{code,msg,data} 信封）/ RawJson / SystemDtos / LoginDtos
-│   │   ├── generated/            # GeneratedRegistries.kt（5 个 expect 签名；actual 由 router-ksp 生成到各目标）
+│   │   ├── generated/            # GeneratedRegistries.kt（6 个 expect 签名；actual 由 router-ksp 生成到各目标）
 │   │   ├── interceptor/          # Traffic / Ctx / Auth / Envelope 四层（顺序由 @Interceptor 经 KSP 生成）
-│   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService / WebpCache / oss / dav（WebDAV）
+│   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService / WebpCache / oss / dav（WebDAV）/ permission（RBAC 注册表·解析·管理）
 │   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
 │   │   ├── settings/             # AppSettings（@Serializable）+ 多级覆盖 SettingsLoader
 │   │   └── util/                 # captcha / classpath / crypto(BCrypt) / image(Image) / json / koin / ktor / log / router / session / time
-│   ├── commonMain/resources/     # application.json（内嵌默认配置）/ static/home/ / hello.txt
+│   ├── commonMain/resources/     # application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ static/home/ / hello.txt
 │   ├── nativeMain/kotlin/…/      # ZipClasspath / DiskClasspath 等实现 + installPlatformClasspath / 平台 Env / platformModule（expect/actual）
 │   ├── mingwX64Main/kotlin/…/    # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
 │   └── linuxMain/kotlin/…/       # 两个 linux 目标共享的 ApiClient / EmbeddedClasspath / Mkdir / Shell 实现（无入口）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
-├── sql/                          # 建表脚本（7 张表 + view_user_role 视图）
+├── sql/                          # 建表脚本（9 张表 + view_user_role 视图）+ migrate_rbac_groups.sql（历史库组模型迁移）
 ├── lolosia-backend-native.service # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```
@@ -108,6 +109,8 @@ mysql -u root -p -D lolosia-backend < sql/sys_cache.sql
 mysql -u root -p -D lolosia-backend < sql/sys_user_roles.sql
 mysql -u root -p -D lolosia-backend < sql/sys_logs.sql
 mysql -u root -p -D lolosia-backend < sql/oss_user_file.sql
+mysql -u root -p -D lolosia-backend < sql/sys_role_permission.sql   # 组规则（默认值在 permissions.yaml，这里不灌种子）
+mysql -u root -p -D lolosia-backend < sql/sys_user_permission.sql   # 用户直授规则
 mysql -u root -p -D lolosia-backend < sql/view_user_role.sql   # 视图放最后
 ```
 
@@ -200,7 +203,8 @@ object ExampleController {
 - 服务层**不要用 `ctx.call`**：需要客户端 IP / UA / 请求头时由控制器抽成普通参数传下去
 - 审计列的操作者（`created_by` / `updated_by`）仍**显式传 `operatorId`**，不从 `ctx.userId` 隐式取 —— 注册链路没有登录态
 
-业务接口（路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`、`/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`。
+业务接口（路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`、`/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`；
+权限管理：`/api/role/permission/{list,save}`（组规则）、`/api/user/permission/{list,save}`（用户直授）、`/api/permission/my`（当前用户生效权限）、`/api/permission/catalog`（`@Permission` 节点目录）。
 这些接口（以及探针里的 `/api/classpath/*`）默认都要鉴权：`POST` + `Authorization: Bearer <sessionId>`；免鉴权白名单是 `/api/login`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse` 与取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）—— **`/api/logout` 不在白名单里**，它要带有效 token（否则 401）。
 
 模板另留一个资源探针 `/api/classpath/{list,read}`（列出/读取内嵌资源，需鉴权），用于运维排障。
@@ -288,7 +292,7 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 | 0.7 自研 bcrypt（`$2a$` cost 10） | ✅ 移植完成（官方向量锁定），已接进建用户/改密码/登录校验 |
 | 0.8 鉴权拦截器链 + 登录 + 系统接口 | ✅ 信封统一由 `EnvelopeInterceptor` 按响应 MIME 包；链 = Traffic → Ctx → SSE → Auth → Envelope；`/api/login` `/api/logout` + 用户/角色/绑定/菜单控制器（**以前端工程契约为准**） |
 | 0.9 部署（systemd 拉起原生二进制） | ✅ |
-| 0.10 自研图形验证码 + `/captcha` `/verify` `/register` | ✅ 自写 PNG + 点阵算式验证码（复刻 hutool），验证码存 `sys_cache`（随机 token、5 分钟、一次性消费）；注册沿用前端两步流程（`roleId = 4` 学生） |
+| 0.10 自研图形验证码 + `/captcha` `/verify` `/register` | ✅ 自写 PNG + 点阵算式验证码（复刻 hutool），验证码存 `sys_cache`（随机 token、5 分钟、一次性消费）；注册沿用前端两步流程（固定进 `user` 组，即 `sys_role.id = 4`） |
 
 > P0 已收尾（临时探针 `DemoController` / `DEV_PROBES` 已删），进入 P1。
 
