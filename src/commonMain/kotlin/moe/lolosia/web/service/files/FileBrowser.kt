@@ -115,7 +115,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
         val relative = normalizeRelative(path) ?: return null
         if (relative.isEmpty()) return null
         val meta = fs.metadataOrNull(resolve(rootPath, relative)) ?: return null
-        if (nameOf(relative).startsWith(".")) return null
+        if (isHiddenName(nameOf(relative))) return null
         return toEntry(nameOf(relative), relative, meta)
     }
 
@@ -155,8 +155,8 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
     /**
      * 递归收集 [relative] 子树下的图片条目（用于后台全量扫描）。
      *
-     * 每层目录之间让出一次（`delay`），避免在机械盘上长时间独占 IO；跳过隐藏目录，
-     * 因此 `.cache` 不会被扫到。返回的条目**不算缩略图存在性**（那是一次额外 stat，
+     * 每层目录之间让出一次（`delay`），避免在机械盘上长时间独占 IO；跳过隐藏名（见 [isHiddenName]），
+     * 因此 `.cache`、`lost+found` 不会被扫到。返回的条目**不算缩略图存在性**（那是一次额外 stat，
      * 这里不需要）。
      */
     suspend fun collectImages(relative: String): List<FileEntry> {
@@ -168,7 +168,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
     private suspend fun collectInto(dir: Path, relative: String, out: MutableList<FileEntry>) {
         val children = fs.listOrNull(dir).orEmpty().sortedBy { it.name.lowercase() }
         for (child in children) {
-            if (child.name.startsWith(".")) continue
+            if (isHiddenName(child.name)) continue
             val meta = fs.metadataOrNull(child) ?: continue
             if (meta.isDirectory) {
                 delay(1)
@@ -193,7 +193,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
     private suspend fun collectMediaInto(dir: Path, relative: String, out: MutableList<FileEntry>) {
         val children = fs.listOrNull(dir).orEmpty().sortedBy { it.name.lowercase() }
         for (child in children) {
-            if (child.name.startsWith(".")) continue
+            if (isHiddenName(child.name)) continue
             val meta = fs.metadataOrNull(child) ?: continue
             if (meta.isDirectory) {
                 delay(1)
@@ -205,7 +205,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
     }
 
     /**
-     * 递归列出 [relative] 子树下的**目录**相对路径（含自身），跳过 `.` 开头的隐藏目录。
+     * 递归列出 [relative] 子树下的**目录**相对路径（含自身），跳过隐藏名（见 [isHiddenName]）。
      *
      * 媒体索引用它做「本轮扫描没见到哪些已登记的文件」的逐目录比对（`doc/media-index-design.md` §5.3）。
      */
@@ -219,7 +219,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
     private suspend fun collectDirsInto(dir: Path, relative: String, out: MutableList<String>) {
         val children = fs.listOrNull(dir).orEmpty().sortedBy { it.name.lowercase() }
         for (child in children) {
-            if (child.name.startsWith(".")) continue
+            if (isHiddenName(child.name)) continue
             if (fs.metadataOrNull(child)?.isDirectory != true) continue
             val childRelative = childOf(relative, child.name)
             out.add(childRelative)
@@ -237,7 +237,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
         checkSubdirs: Boolean = false,
     ): FileEntry? {
         val meta = fs.metadataOrNull(child) ?: return null
-        if (child.name.startsWith(".")) return null
+        if (isHiddenName(child.name)) return null
         return toEntry(child.name, childOf(parentRelative, child.name), meta, checkChildren = checkChildren, checkSubdirs = checkSubdirs)
     }
 
@@ -250,7 +250,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
      * 好在这属于同目录元数据、redirector 会缓存枚举结果，实测代价可忽略。
      */
     private fun visibleSummary(dir: Path): Pair<Boolean, Boolean> {
-        val children = fs.listOrNull(dir).orEmpty().filterNot { it.name.startsWith(".") }
+        val children = fs.listOrNull(dir).orEmpty().filterNot { isHiddenName(it.name) }
         if (children.isEmpty()) return false to false
         return true to children.any { fs.metadataOrNull(it)?.isDirectory == true }
     }
