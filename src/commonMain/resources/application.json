@@ -27,5 +27,17 @@
     "password": "",
     "realm": "lolosia-webdav"
   },
+  "files": {
+    "root": "",
+    "signKey": "",
+    "signTtlSeconds": 900,
+    "thumbnail": {
+      "enabled": false,
+      "sizes": [256, 512, 1024],
+      "quality": 80,
+      "scanIntervalSeconds": 600,
+      "maxSourceBytes": 67108864
+    }
+  },
   "logLevel": "INFO"
 }

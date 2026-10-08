@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  应用程序清单（PE 资源类型 24，ID 1），由 classpath.rc 引用、windres 编译后链入 exe。
+
+  activeCodePage=UTF-8（Win10 1803+ 生效）会把进程的 ANSI/OEM 代码页切成 65001。
+  这是必需的：okio 在 native 上通过 CRT 的窄字符 API（opendir/readdir/stat/fopen）访问文件系统，
+  而它传给这些 API 的是 UTF-8 字节。默认 ACP=936（中文 GBK）时，磁盘上「影集」这样的中文名会被
+  按 GBK 解回来、再被当成 UTF-8 解码 → 乱码 → okio 的 stat 失败 → 目录列举里直接看不到，
+  WebDAV 与文件管理器都受影响。切成 UTF-8 后窄字符 API 内部会转成宽字符再调 W 系 API，中文名正常。
+
+  实测：不开清单时 readdir 返回 d3b0efbfbdefbfbd（GBK「影」+ 两个替换字符），开启后返回 e5bdb1e99b86（UTF-8「影集」）。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="moe.lolosia.web" version="1.0.0.0" processorArchitecture="*"/>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

@@ -116,8 +116,8 @@ private fun Project.embedAsWindowsResource(
 ) {
     val prepareRc = tasks.register("prepareClasspathRc$suffix", Copy::class.java) {
         group = "classpath"
-        description = "把 classpath.rc 放到 classpath.zip 同级目录，供 windres 使用"
-        from(layout.projectDirectory.file("classpath/mingw/classpath.rc"))
+        description = "把 classpath.rc 与 app.manifest 放到 classpath.zip 同级目录，供 windres 使用"
+        from(layout.projectDirectory.dir("classpath/mingw"))
         into(embedDir)
     }
 
@@ -129,6 +129,8 @@ private fun Project.embedAsWindowsResource(
         val dir = embedDir.get().asFile
         workingDir = dir
         inputs.file(dir.resolve("classpath.rc"))
+        // app.manifest 由 classpath.rc 引用（RT_MANIFEST），内容变化也要重新编译
+        inputs.file(dir.resolve(APP_MANIFEST))
         inputs.file(dir.resolve(CLASSPATH_ZIP_NAME))
         outputs.file(dir.resolve(CLASSPATH_RES))
 
@@ -248,4 +250,7 @@ private fun objcopyConfigFor(targetName: String): ObjcopyConfig? = when (targetN
 
 private const val CLASSPATH_ZIP_NAME = "classpath.zip"
 private const val CLASSPATH_RES = "classpath.res"
+
+/** Windows 应用程序清单文件名（classpath.rc 里以 RT_MANIFEST 引用）。 */
+private const val APP_MANIFEST = "app.manifest"
 private const val CLASSPATH_OBJECT = "classpath.o"

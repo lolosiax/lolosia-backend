@@ -1,0 +1,40 @@
+package moe.lolosia.web.service.files
+
+/**
+ * 一个档位的缩略图。
+ *
+ * @property size 档位（最长边像素）
+ * @property bytes 编码后的 WebP 字节
+ * @property width 缩略图像素宽
+ * @property height 缩略图像素高
+ * @author 洛洛希雅Lolosia
+ */
+class Thumbnail(val size: Int, val bytes: ByteArray, val width: Int, val height: Int)
+
+/**
+ * 一张源图生成出的全部档位。
+ *
+ * @property sourceWidth 源图像素宽
+ * @property sourceHeight 源图像素高
+ * @property items 各档位结果（可能少于请求的档位：某档编码失败就不含它）
+ * @author 洛洛希雅Lolosia
+ */
+class ThumbnailSet(val sourceWidth: Int, val sourceHeight: Int, val items: List<Thumbnail>)
+
+/**
+ * 缩略图生成器：解码一次 → 按各档位等比缩放（原图只解一次，避免同一张照片反复解 55MP）→ 编码 WebP。
+ *
+ * 依赖内嵌的 C 图像库（libpng / libjpeg-turbo / libwebp / giflib）与 `RgbaImage`，这些类型只在
+ * native 源集，因此实现只写在 nativeMain；commonMain 只拿得到本声明。
+ *
+ * @author 洛洛希雅Lolosia
+ */
+expect object ThumbnailGenerator {
+
+    /**
+     * 把 [bytes] 解码后按 [sizes] 各缩一版，编码为有损 WebP（[quality] 取 1~100）。
+     *
+     * 格式不支持或解码失败返回 `null`；单档编码失败则该档位不出现在结果里，不抛异常。
+     */
+    fun generate(bytes: ByteArray, sizes: List<Int>, quality: Int): ThumbnailSet?
+}

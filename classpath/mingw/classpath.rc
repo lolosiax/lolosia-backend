@@ -2,3 +2,7 @@
 // 由 Gradle 任务 windresClasspathMingwX64 用 Kotlin/Native 自带的 mingw windres 编译成 .res 后链接。
 // 资源名/类型必须与 src/mingwX64Main/kotlin/moe/lolosia/classpath/Classpath.mingw.kt 中一致。
 IDR_CLASSPATH  CLASSPATH  "classpath.zip"
+
+// 应用程序清单（RT_MANIFEST = 24，ID 1）：把进程代码页切成 UTF-8，
+// 否则 okio 走的 CRT 窄字符 API 会把中文文件名解错而丢弃（详见 app.manifest 内的说明）。
+1  24  "app.manifest"

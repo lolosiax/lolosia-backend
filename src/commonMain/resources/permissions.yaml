@@ -15,7 +15,7 @@ groups:
     permissions:
       - "+*"
 
-  # 管理员：整个 lolosia 域，并继承普通用户的权限。
+  # 管理员：整个 lolosia 域（含在线文件管理器的机械盘只读浏览），并继承普通用户的权限。
   admin:
     title: 管理员
     extends:
@@ -23,7 +23,8 @@ groups:
     permissions:
       - "+lolosia.*"
 
-  # 普通用户：能读写自己的云存储文件（在线文件管理器的授权来源），并继承访客。
+  # 普通用户：只读写自己的云存储文件（`lolosia.files.read` 只给 admin 及以上，
+  # 在线文件管理器浏览的是整块机械盘，不开放给普通用户）。
   user:
     title: 普通用户
     extends:

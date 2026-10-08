@@ -53,4 +53,8 @@ private val IGNORE_MATCHES: List<String> = listOf(
     "/api/oss/show/",
     "/api/oss/get/",
     "/api/user/avatar/get/",
+    // 文件管理器的缩略图 / 原图：给 <img> 用，认不出登录态，
+    // 由控制器自己校验 URL 签名（exp + sig，见 FileSigner），拿不到签名一律 403
+    "/api/files/thumb",
+    "/api/files/raw",
 )

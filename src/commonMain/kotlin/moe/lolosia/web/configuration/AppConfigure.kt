@@ -22,6 +22,7 @@ import moe.lolosia.web.service.WebpCache
 import moe.lolosia.web.service.dav.DavLockManager
 import moe.lolosia.web.service.dav.DavStore
 import moe.lolosia.web.service.ddns.DdnsService
+import moe.lolosia.web.service.files.ThumbnailService
 import moe.lolosia.web.service.permission.PermissionRegistry
 import moe.lolosia.web.service.permission.syncRegistryGroups
 import moe.lolosia.web.settings.AppSettings
@@ -152,6 +153,9 @@ fun Application.configureApplication(koin: Koin) {
 
     // DDNS：挂到应用作用域按配置间隔轮询，未启用时只记一条日志
     koin.get<DdnsService>().start(this)
+
+    // 缩略图后台生成：由 files.thumbnail.enabled 开关控制，未启用时只记一条日志
+    koin.get<ThumbnailService>().start()
 
     // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用。
     // 连上后顺带把权限注册表声明的组继承同步进 sys_role.parent_id（幂等；规则不落库，见 service.permission）

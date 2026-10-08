@@ -10,7 +10,11 @@ import okio.buffer
  * WebDAV 存储层：把 URL 相对路径安全映射到 [root] 下的真实路径，并封装 okio 的目录/文件操作。
  *
  * 路径**逐段校验**，拒绝 `.` / `..` / 空段 / 含分隔符与 NUL 的段，因此解析结果必然落在根内
- * （目录穿越防护）。文件系统访问走 `FileSystem.SYSTEM`，native 与 Windows 同一套 API。
+ * （目录穿越防护）。另外一切以 `.` 开头的段都会被拒（`resolve` 返回 `null` → 403），
+ * 目录列举也会跳过它们：这样 `.cache`（缩略图缓存）在 WebDAV 客户端里完全不可见，
+ * 不会把缓存目录混进机械盘的正常目录树。
+ *
+ * 文件系统访问走 `FileSystem.SYSTEM`，native 与 Windows 同一套 API。
  *
  * @param root 根目录绝对路径，如 `/mnt/hdd1`
  * @author 洛洛希雅Lolosia
@@ -28,6 +32,8 @@ class DavStore(val root: String) {
         for (seg in segments) {
             if (seg.isEmpty() || seg == "." || seg == "..") return null
             if (seg.any { it == '/' || it == '\\' || it == '\u0000' }) return null
+            // 隐藏项（含 .cache 缓存目录）对 WebDAV 不暴露：列举不显示，直连路径也拒绝
+            if (seg.startsWith(".")) return null
             path = path.resolve(seg)
         }
         return path
@@ -37,9 +43,9 @@ class DavStore(val root: String) {
 
     fun metadata(path: Path): FileMetadata? = fs.metadataOrNull(path)
 
-    /** 目录项，按名字排序（输出稳定，便于客户端对比）。 */
+    /** 目录项，按名字排序（输出稳定，便于客户端对比）；隐藏项跳过。 */
     fun children(path: Path): List<Path> =
-        fs.listOrNull(path).orEmpty().sortedBy { it.name.lowercase() }
+        fs.listOrNull(path).orEmpty().filterNot { it.name.startsWith(".") }.sortedBy { it.name.lowercase() }
 
     /** 新建目录；父目录不存在按 409 处理（与 WebDAV 语义一致，不隐式建父）。 */
     fun createDirectory(path: Path) {

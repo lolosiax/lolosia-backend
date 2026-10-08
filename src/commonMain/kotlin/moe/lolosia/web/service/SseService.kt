@@ -6,6 +6,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
@@ -75,5 +76,26 @@ class SseService {
      */
     suspend fun bind(id: String, userId: String) {
         mutex.withLock { if (sources.containsKey(id)) owners[id] = userId }
+    }
+
+    /**
+     * 向**通过 [allow] 的连接**广播一个事件。
+     *
+     * [allow] 收到的是连接绑定的用户 id；**未绑定用户的连接（登录页那种匿名连接）一律不推**。
+     * 同一个用户只判定一次，判定抛异常按「不放行」处理 —— 推送出问题不该影响业务协程。
+     *
+     * 先在锁内取快照、再到锁外逐条 [EventSource.send]：`send` 内部是 `trySend`，队列满或连接已
+     * 关闭时静默丢弃，不会反压业务协程，所以持锁发送只是徒增竞争。
+     */
+    suspend fun broadcast(event: String, data: JsonElement? = null, allow: suspend (userId: String) -> Boolean) {
+        val targets = mutex.withLock {
+            sources.entries.mapNotNull { (id, source) -> owners[id]?.let { it to source } }
+        }
+        val decided = mutableMapOf<String, Boolean>()
+        for ((userId, source) in targets) {
+            val allowed = decided[userId] ?: runCatching { allow(userId) }.getOrDefault(false)
+            decided[userId] = allowed
+            if (allowed) source.send(event, data)
+        }
     }
 }
