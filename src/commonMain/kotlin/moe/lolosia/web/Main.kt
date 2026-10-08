@@ -12,6 +12,7 @@ import moe.lolosia.web.settings.loadAppSettings
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.LogLevel
+import moe.lolosia.web.util.platform.awaitSignalTermination
 import moe.lolosia.web.util.platform.envOrNull
 
 /**
@@ -45,7 +46,14 @@ fun main(args: Array<String>) {
     log.info { "配置已加载：port=${config.server.port}, db=${config.datasource.url}, 日志级别=${Log.level}" }
     log.info { "starting on ${config.server.host}:${config.server.port} (Kotlin/Native + CIO)" }
 
-    embeddedServer(CIO, port = config.server.port, host = config.server.host) {
+    val server = embeddedServer(CIO, port = config.server.port, host = config.server.host) {
         configureApplication(koin)
-    }.start(wait = true)
+    }
+    // 监听 socket 带 SO_REUSEADDR（CIO 默认 false）：旧进程被强杀后端口上会残留成片的半开连接
+    // （FIN-WAIT-2 等），没有它新进程重绑会直接崩在 EADDRINUSE，被 systemd 反复拉起又反复崩
+    server.engineConfig.reuseAddress = true
+    server.start(wait = false)
+
+    // 信号处理器交给内核默认动作，挂起等进程被 SIGTERM / SIGINT 结束
+    awaitSignalTermination()
 }
