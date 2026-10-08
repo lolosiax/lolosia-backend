@@ -46,6 +46,14 @@ actual object ThumbnailGenerator {
         return ThumbnailSet(source.width, source.height, items, sample)
     }
 
+    actual fun encodeFull(bytes: ByteArray, quality: Int): ThumbnailSet? {
+        if (bytes.isEmpty()) return null
+        val source = decode(bytes) ?: return null
+        val encoded = Webp.encode(source, quality.coerceIn(1, 100).toFloat()) ?: return null
+        val item = Thumbnail(FULL_SIZE_SENTINEL, encoded, source.width, source.height)
+        return ThumbnailSet(source.width, source.height, listOf(item))
+    }
+
     actual fun sample(bytes: ByteArray): String? = decode(bytes)?.sampleRgb565()
 
     /** 按文件头识别格式后分派到对应门面解码。 */

@@ -71,11 +71,15 @@ object FileController {
     /**
      * 取缩略图（WebP）。`size` 不在配置档位里时回退到最小档。
      *
+     * `size=full` 是特例：要的是**原始分辨率的 WebP 预览**（只换编码不缩放），首次请求时现生成
+     * 一次并落盘缓存 —— 全屏查看器默认用它，档位缩略图最大只有 1024，屏幕一大就被放大糊掉。
+     *
      * 尚未生成时返回 404：前端据此继续显示占位图，等 `files:thumb` 事件到了再重新拉。
      */
     @GET("/files/thumb")
     suspend fun thumb(
         browser: FileBrowser,
+        thumbs: ThumbnailService,
         signer: FileSigner,
         @Query path: String?,
         @Query size: String?,
@@ -83,6 +87,10 @@ object FileController {
         @Query sig: String?,
     ): OutgoingContent {
         val relative = requireSignedPath(signer, path, exp, sig)
+        if (size == ThumbnailService.FULL_SIZE) {
+            val bytes = thumbs.fullPreview(relative) ?: throw ApiException(404, "预览图尚未生成")
+            return ByteArrayContent(bytes, ContentType.parse("image/webp"))
+        }
         val sizes = browser.cache.orderedSizes
         val target = size?.toIntOrNull()?.takeIf { it in sizes } ?: sizes.first()
         val bytes = browser.cache.read(relative, target) ?: throw ApiException(404, "缩略图尚未生成")

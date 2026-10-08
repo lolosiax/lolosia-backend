@@ -9,6 +9,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.MediaAssetRepository
@@ -107,6 +108,65 @@ class ThumbnailService(
         scanAll()
     }
 
+    /**
+     * 取**原始分辨率**的 WebP 预览：命中缓存直接返回，没有就现生成一次并落盘。
+     *
+     * 与档位缩略图不同，它不进后台队列 —— 只有用户真的打开这张图，才付这一次「解码原图 +
+     * 全尺寸编码」的代价（55MP 的照片在这块板子上要几秒、产物十几 MB），生成一次之后一直命中缓存。
+     *
+     * **仍受 `files.thumbnail.enabled` 约束**：它和档位缩略图共用同一份缓存目录，而那份目录
+     * 同一时间只能有一台机器在写（见配置注释）。开关关着时直接返回 `null`，由前端回退到原图直链。
+     *
+     * 不是图片、文件过大、解不出图同样返回 `null`。缓存写不进去（磁盘满 / 文件系统不允许）
+     * 不影响本次返回：预览是现算现给的，落盘只是省下一次的计算。
+     */
+    suspend fun fullPreview(relative: String): ByteArray? {
+        if (!config.enabled) return null
+        val entry = browser.stat(relative) ?: return null
+        if (entry.directory || !entry.image || entry.size <= 0L) return null
+        if (entry.size > config.maxSourceBytes) {
+            log.info { "跳过过大的图片：$relative（${entry.size} 字节 > ${config.maxSourceBytes}）" }
+            return null
+        }
+
+        val meta = cache.readMeta(relative)
+        if (isFullFresh(meta, entry.size, entry.mtime)) {
+            cache.readFull(relative)?.let { return it }
+        }
+
+        // 解码 + 全尺寸编码是纯 CPU 的重活，挪到默认调度器上跑，别占着请求线程
+        return withContext(Dispatchers.Default) {
+            val source = browser.readSource(relative) ?: return@withContext null
+            val set = ThumbnailGenerator.encodeFull(source, config.quality) ?: run {
+                log.info { "不是可解码的图片，跳过：$relative" }
+                return@withContext null
+            }
+            val item = set.items.firstOrNull() ?: return@withContext null
+            // 落盘失败只记日志（writeAt 里已 warn），本次照样把算出来的字节发出去
+            if (cache.writeFull(relative, item.bytes)) {
+                cache.writeMeta(
+                    ThumbnailMeta(
+                        source = relative,
+                        size = entry.size,
+                        mtime = entry.mtime,
+                        width = meta?.width?.takeIf { it > 0 } ?: set.sourceWidth,
+                        height = meta?.height?.takeIf { it > 0 } ?: set.sourceHeight,
+                        sizes = meta?.sizes.orEmpty(),
+                        sample = meta?.sample,
+                        full = true,
+                        generatedAt = meta?.generatedAt ?: nowEpochMs(),
+                    )
+                )
+            }
+            log.info { "原始分辨率预览已生成：$relative（${item.bytes.size} 字节，${set.sourceWidth}x${set.sourceHeight}）" }
+            item.bytes
+        }
+    }
+
+    /** 原始分辨率预览是否还对得上源文件（判断口径与缩略图一致：大小 + 修改时间）。 */
+    private fun isFullFresh(meta: ThumbnailMeta?, size: Long, mtime: Long): Boolean =
+        meta != null && meta.full && meta.size == size && meta.mtime == mtime
+
     private suspend fun enqueueDir(relative: String) {
         val entries = runCatching { browser.list(relative, null, null).entries }
             .onFailure { log.warn(it) { "扫描目录失败：$relative" } }
@@ -185,6 +245,10 @@ class ThumbnailService(
             return
         }
 
+        // 源文件变了：旧的全分辨率预览也对不上了，直接删掉，等下次打开时按新内容重建
+        val unchanged = meta != null && meta.size == entry.size && meta.mtime == entry.mtime
+        if (meta != null && !unchanged) cache.deleteFull(relative)
+
         val source = browser.readSource(relative) ?: return
         val set = ThumbnailGenerator.generate(source, cache.orderedSizes, config.quality)
         if (set == null) {
@@ -206,6 +270,8 @@ class ThumbnailService(
                 height = set.sourceHeight,
                 sizes = generated.sorted(),
                 sample = set.sample,
+                // 只是档位不全（源文件没变）的话，之前生成过的全分辨率预览依然有效，别把标记丢了
+                full = unchanged && meta.full,
                 generatedAt = nowEpochMs(),
             )
         )
@@ -264,6 +330,13 @@ class ThumbnailService(
     companion object {
         /** 推给前端的 SSE 事件名。 */
         const val THUMB_EVENT: String = "files:thumb"
+
+        /**
+         * `files/thumb` 的 `size` 传这个值时，要的是**原始分辨率的 WebP 预览**，而不是缩略图档位。
+         *
+         * 与 `files.thumbnail.sizes` 里的数字档位是两回事，所以用字面量而不是数字。
+         */
+        const val FULL_SIZE: String = "full"
 
         /** 与 `FileController` 各接口上的 `@Permission` 同一个节点。 */
         private const val FILE_READ: String = "lolosia.files.read"
