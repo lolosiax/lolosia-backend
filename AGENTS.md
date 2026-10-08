@@ -106,11 +106,17 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
 - **建池前先跑 `MySqlAuthProbe`（裸 TCP 握手预检）**：`connect` 在调 `mySQL(...)` 之前先用 [MySqlAuthProbe] 发一次 `HandshakeResponse41`：`Unreachable`（不可达，顺带省掉 sqlx4k 约 30s 的阻塞）/ `Denied`（鉴权失败、库不存在等确定性错误）直接判失败，`Ok` 才建池，`Inconclusive`（协议不认识 / 需 TLS / 未知插件）才回退给 sqlx4k。目的是**快速失败 + 明确报错**（sqlx4k 1.13.1 的 Rust 封装在这些情形会 `panic!`，叠加 `panic = "abort"` 直接崩进程；**1.14.0 起已改为回错误**）。改数据源相关的排障从日志里的 `[Database]` 行入手。
 - 库未就绪时 `ctx.db` 抛 `ApiException(503, "数据库暂不可用…")`（前端据此报错，属预期）；库恢复后后台重连成功即自动可用。
 - **实体**：`@Table("表名")` + `@Id`（库自增）或 `@Id(insert = true)`（应用给主键）；列名自动 snake_case。
+- ⚠️ **建表别给列加 `_bin` 排序规则或 `ascii` / `binary` 字符集**：sqlx4k 的 MySQL 驱动把这类列当二进制，
+  回给 Kotlin 的是**十六进制字符串**（`image` → `696d616765`），而且只填 `value` 不填 `bytes`，
+  `asString()` 也照抄（其 `ResultSet.Column` 的既定契约，`ffi.kt` 侧确实如此实现）。枚举 / 短标识列
+  一律跟表默认的 `utf8mb4_unicode_ci` 走 —— 唯一键顺带变成大小写不敏感，对标签这类数据正是想要的。
 - **仓库**：接口标 `@Repository` + `@Injectable`，继承 `CrudRepository<T>`。
   - 首参必须是 `context: QueryExecutor`，方法必须 `suspend`，**每个方法都要带 `@Query`**（没有派生查询）。
   - 方法名前缀白名单是**精确匹配**：`findAll` / `deleteAll` / `countAll`，或 `findAllBy*` / `findOneBy*` / `deleteBy*` / `countBy*` / `existsBy*` / `execute*`。
     返回类型由前缀决定：`findAllBy*→Result<List<T>>`、`findOneBy*→Result<T?>`、`countBy*→Result<Long>`、`execute*→Result<Long>`。
   - ⚠️ **不支持 `IN (列表)`**：占位符编译期就固定成一个 `?`，传 `List` 会被当单值绑定并运行期报错 → 批量在服务层循环单条。
+  - ⚠️ **`@Query` 的具名参数别撞 SQL 保留字**：KSP 用自己的 SQL 语法解析整条语句，`:sample` 会被词法切成
+    `:` + `SAMPLE`（`TABLESAMPLE` 的关键字）直接编译失败（`Invalid SQL syntax ... Encountered: <DOUBLE_COLON>`）→ 换个名字，如 `:sampleHex`。
   - ⚠️ **MySQL 方言下不要用 `CrudRepository` 自带的 `insert` / `update`**：生成器拼成 `insert …; select …` 多语句脚本，MariaDB 预处理直接 `1064`。写入用单语句 `@Query`（如 `executeInsert`）；`delete` 是单语句，可用。
   - 拿不到自增 id：`execute*` 只回受影响行数 → 需要新 id 时**插入后回查**。
 - ⚠️ **`@Query` 的主表必须与实体 `@Table` 一致**（codegen 会校验，否则报 `targets table 'x' but the repository entity is mapped to table 'y'`）：
@@ -189,6 +195,13 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
 gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
 ```
 
+- **本机跑起来**（改完代码冒烟用）：
+  - **建库导表**：本机 MariaDB 直接导 `sql/` 里的脚本即可（库 `lolosia-backend`）。客户端不在 `PATH`（本机在 `D:\Program Files\MariaDB 12.1\bin\`），且 `cmd /c` 重定向会被工具策略拦，
+    改用客户端自带的 `source`：`& "<...>\bin\mysql.exe" -u root -p<弱口令> -e "source <脚本的绝对路径>.sql"`。
+  - **启动后端**：`gradlew runReleaseExecutableMingwX64`，**cwd 必须是 `backend` 根目录** —— 磁盘 `application.yaml` 按工作目录找，换个 cwd 就退回内嵌默认配置。
+  - **重启**：先杀旧的 `lolosia-backend.exe`（`Get-Process lolosia-backend | Stop-Process -Force`）再跑；
+    否则 `linkReleaseExecutableMingwX64` 会因 exe 被旧进程占用报 `AccessDeniedException`。
+
 - 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64` / `linkReleaseExecutableLinuxX64`；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
 - **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（Windows 上借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链）；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
@@ -250,5 +263,6 @@ sql/                            建表脚本（9 表，含 sys_role.parent_id �
 | --- | --- |
 | [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) | **本派生项目**自身的差异与运行事实（更名 / WebDAV / 在线文件管理器 / 部署 / 网络实测）；上游模板那份 md 不动，差异都记在这里 |
 | [doc/rbac-design.md](doc/rbac-design.md) | RBAC 权限体系：组 + 点分权限（`±通配`）+ 用户直授 + `@Permission` 的设计、判定口径与已实现落点 |
+| [doc/media-index-design.md](doc/media-index-design.md) | 媒体库索引：文件身份（path / quick_id / sha256 三层）、标签体系与来源优先级、EXIF 等元数据抽取、评级与 NSFW 遮罩（直链签名折 flags）、embedding 与语义检索 |
 | [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 / 工程形态（运行层面） |
 | [doc/native-migration-plan.md](doc/native-migration-plan.md) | JVM → Kotlin/Native 迁移详设与实测记录（历史） |

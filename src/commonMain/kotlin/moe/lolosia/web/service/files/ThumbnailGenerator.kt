@@ -17,9 +17,15 @@ class Thumbnail(val size: Int, val bytes: ByteArray, val width: Int, val height:
  * @property sourceWidth 源图像素宽
  * @property sourceHeight 源图像素高
  * @property items 各档位结果（可能少于请求的档位：某档编码失败就不含它）
+ * @property sample 8×8 采样：每像素 4 位十六进制（RGB565 大端），共 256 字符；解不出为 `null`
  * @author 洛洛希雅Lolosia
  */
-class ThumbnailSet(val sourceWidth: Int, val sourceHeight: Int, val items: List<Thumbnail>)
+class ThumbnailSet(
+    val sourceWidth: Int,
+    val sourceHeight: Int,
+    val items: List<Thumbnail>,
+    val sample: String? = null,
+)
 
 /**
  * 缩略图生成器：解码一次 → 按各档位等比缩放（原图只解一次，避免同一张照片反复解 55MP）→ 编码 WebP。
@@ -37,4 +43,12 @@ expect object ThumbnailGenerator {
      * 格式不支持或解码失败返回 `null`；单档编码失败则该档位不出现在结果里，不抛异常。
      */
     fun generate(bytes: ByteArray, sizes: List<Int>, quality: Int): ThumbnailSet?
+
+    /**
+     * 只取 8×8 RGB565 采样（hex，256 字符），不编码缩略图；解不出返回 `null`。
+     *
+     * 专供**回填**：老的缓存里已经有缩略图、只缺采样时，直接解那一档小图（几十 KB）拿到采样，
+     * 比为了 64 个像素再把原图整个读一遍、解一遍便宜几个数量级。
+     */
+    fun sample(bytes: ByteArray): String?
 }

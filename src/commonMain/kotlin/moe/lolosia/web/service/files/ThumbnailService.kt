@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.repository.MediaAssetRepository
 import moe.lolosia.web.dto.FileThumbEvent
 import moe.lolosia.web.dto.SignedFile
 import moe.lolosia.web.service.SseService
@@ -21,6 +22,7 @@ import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.time.nowEpochMs
+import kotlin.time.Clock
 
 /**
  * 缩略图后台生成服务。
@@ -50,6 +52,7 @@ class ThumbnailService(
     private val signer: FileSigner,
     private val db: Database,
     private val resolver: PermissionResolver,
+    private val assets: MediaAssetRepository,
 ) {
 
     private val log = Log.of("Thumb")
@@ -156,7 +159,9 @@ class ThumbnailService(
         val stale = ArrayList<String>()
         for (entry in images) {
             if (entry.size <= 0L || entry.size > config.maxSourceBytes) continue
-            if (cache.isFresh(cache.readMeta(entry.path), entry.size, entry.mtime)) continue
+            val meta = cache.readMeta(entry.path)
+            // 缩略图齐全、且采样也在，才算新鲜；老缓存的缩略图是好的、只差采样，也排进来补
+            if (cache.isFresh(meta, entry.size, entry.mtime) && !meta?.sample.isNullOrEmpty()) continue
             stale.add(entry.path)
         }
         log.info { "扫描完成：图片 ${images.size} 张，其中待生成 ${stale.size} 张" }
@@ -171,7 +176,14 @@ class ThumbnailService(
             log.info { "跳过过大的图片：$relative（${entry.size} 字节 > ${config.maxSourceBytes}）" }
             return
         }
-        if (cache.isFresh(cache.readMeta(relative), entry.size, entry.mtime)) return
+
+        val meta = cache.readMeta(relative)
+        if (cache.isFresh(meta, entry.size, entry.mtime)) {
+            // 缩略图本身没问题，只差采样（升级前生成的缓存没有这一项）：解一档小图补上就行，
+            // 不为 64 个像素把原图重读重解一遍。
+            if (meta?.sample.isNullOrEmpty()) backfillSample(relative, meta)
+            return
+        }
 
         val source = browser.readSource(relative) ?: return
         val set = ThumbnailGenerator.generate(source, cache.orderedSizes, config.quality)
@@ -193,11 +205,42 @@ class ThumbnailService(
                 width = set.sourceWidth,
                 height = set.sourceHeight,
                 sizes = generated.sorted(),
+                sample = set.sample,
                 generatedAt = nowEpochMs(),
             )
         )
+        syncSample(relative, set.sample)
         log.info { "缩略图已生成：$relative -> ${generated.sorted()}" }
         notify(listOf(relative))
+    }
+
+    /**
+     * 只补采样：读一档已经落盘的小图（几十 KB）解出 8×8，写回缓存元数据与库。
+     *
+     * 只服务于**升级前**生成的缓存 —— 那时还没有采样字段，而新鲜度只看 size/mtime，
+     * 不主动补的话这些图永远拿不到采样。
+     */
+    private suspend fun backfillSample(relative: String, meta: ThumbnailMeta?) {
+        if (meta == null) return
+        val smallest = meta.sizes.minOrNull() ?: return
+        val bytes = cache.read(relative, smallest) ?: return
+        val sample = ThumbnailGenerator.sample(bytes) ?: return
+        cache.writeMeta(meta.copy(sample = sample))
+        syncSample(relative, sample)
+        log.info { "采样已回填：$relative" }
+    }
+
+    /**
+     * 把采样同步进 `media_asset`：本服务手上只有路径，所以按 path 单条 update。
+     *
+     * 行还不存在（媒体索引尚未登记这个文件）时影响 0 行 —— 索引探测时会自己从缓存
+     * 元数据里把采样读出来补上，两个方向都不会漏。库不可用就静静跳过。
+     */
+    private suspend fun syncSample(relative: String, sample: String?) {
+        if (sample.isNullOrEmpty()) return
+        val exec = runCatching { db.driver }.getOrNull() ?: return
+        runCatching { assets.executeUpdateSampleByPath(exec, relative, sample, Clock.System.now()).getOrThrow() }
+            .onFailure { log.warn(it) { "写入采样失败：$relative" } }
     }
 
     /**

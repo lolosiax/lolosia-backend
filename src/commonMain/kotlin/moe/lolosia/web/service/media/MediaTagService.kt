@@ -1,0 +1,134 @@
+package moe.lolosia.web.service.media
+
+import io.github.smyrgeorge.sqlx4k.QueryExecutor
+import moe.lolosia.web.database.model.RATING_EXPLICIT
+import moe.lolosia.web.database.repository.MediaAssetTagRepository
+import moe.lolosia.web.database.repository.MediaTagRepository
+import moe.lolosia.web.database.repository.MediaTagRuleRepository
+import moe.lolosia.web.settings.AppSettings
+import moe.lolosia.web.util.classpath.Classpath
+import moe.lolosia.web.util.log.Log
+import moe.lolosia.web.util.router.Injectable
+import moe.lolosia.web.util.router.Service
+import kotlin.time.Clock
+
+/**
+ * 标签词表的读写：**规则打标** + 按需建标签 + 评级投影。
+ *
+ * 规则集是**整轮扫描加载一次**的（[loadRules]），不在每个文件上重查库 —— 十万张图就是十万次
+ * 查询，机械盘上不可接受。
+ *
+ * 人工打标（属性页的勾选 / 否决）是 P2 的事，v1 只落 [SOURCE_RULE] 与 [SOURCE_MANUAL] 两种来源。
+ *
+ * @author 洛洛希雅Lolosia
+ */
+@Injectable
+@Service
+class MediaTagService(
+    private val rules: MediaTagRuleRepository,
+    private val tags: MediaTagRepository,
+    private val bindings: MediaAssetTagRepository,
+    private val classpath: Classpath,
+    settings: AppSettings,
+) {
+
+    private val log = Log.of("Media")
+    private val config = settings.files.media
+
+    /** 内嵌默认规则集；解析失败时为空表（只记日志，不阻断扫描）。 */
+    private val fallback: List<MediaRule> by lazy { loadMediaRules(classpath) }
+
+    /**
+     * 取当前生效的规则集：库表有规则就以库为准，一条都没有才回退内嵌资源
+     * （完全照搬 rbac 的两条来源优先级，见 `doc/media-index-design.md` §4.5）。
+     */
+    suspend fun loadRules(exec: QueryExecutor): MediaRuleSet {
+        if (!config.rules.enabled) return MediaRuleSet(emptyList())
+        val rows = rules.findAllByDeletedFalse(exec).getOrElse {
+            log.warn(it) { "读取规则表失败，回退内嵌默认规则集" }
+            return MediaRuleSet(fallback)
+        }
+        if (rows.isEmpty()) return MediaRuleSet(fallback)
+        // 库表的规则挂的是 tagId，翻译成与 yaml 一致的「命名空间:名字」
+        val keys = tags.findAllByDeletedFalse(exec).getOrElse { emptyList() }
+            .associate { it.id to "${it.namespace}:${it.name}" }
+        val mapped = rows.filter { it.enabled }.mapNotNull { row ->
+            val tag = row.tagId?.let { keys[it] }
+            if (tag == null && row.rating == null) return@mapNotNull null
+            MediaRule(row.matchType, row.pattern, tag, row.rating, row.priority)
+        }
+        return MediaRuleSet(mapped)
+    }
+
+    /**
+     * 应用一批规则：命中的标签逐个关联，并返回规则给出的评级（`null` = 不改评级）。
+     *
+     * 只写 [SOURCE_RULE] 的行，人工行一个都不动（§7.3）。
+     */
+    suspend fun applyRules(
+        exec: QueryExecutor,
+        ruleSet: MediaRuleSet,
+        assetId: Long,
+        path: String,
+        name: String,
+        operator: String?,
+    ): String? {
+        if (ruleSet.size == 0) return null
+        for (key in ruleSet.tagsFor(path, name)) {
+            val parts = key.split(':', limit = 2)
+            if (parts.size != 2) continue
+            attach(exec, assetId, parts[0], parts[1], SOURCE_RULE, operator)
+        }
+        return ruleSet.ratingFor(path, name)
+    }
+
+    /** 找一个标签；不存在则按需创建（根级自由标签 `parentId = null` 是合法状态，§7.5）。 */
+    suspend fun ensureTag(
+        exec: QueryExecutor,
+        namespace: String,
+        name: String,
+        operator: String?,
+    ): Long? {
+        tags.findOneByNamespaceAndName(exec, namespace, name).getOrNull()?.let { return it.id }
+        val now = Clock.System.now()
+        // 并发扫描可能同时建同一个标签，唯一键会拦下来 —— 拦下就回查，不当作错误
+        runCatching {
+            tags.executeInsert(exec, namespace, name, null, null, null, null, now, operator, now, operator).getOrThrow()
+        }.onFailure { log.warn(it) { "创建标签失败（可能是并发重复）：$namespace:$name" } }
+        return tags.findOneByNamespaceAndName(exec, namespace, name).getOrNull()?.id
+    }
+
+    /** 关联一个标签；同一来源已关联过就跳过（幂等，允许同标签有多来源行）。 */
+    suspend fun attach(
+        exec: QueryExecutor,
+        assetId: Long,
+        namespace: String,
+        name: String,
+        source: String,
+        operator: String?,
+    ): Long? {
+        val tagId = ensureTag(exec, namespace, name, operator) ?: return null
+        val existing = bindings.findAllByAssetIdAndTagId(exec, assetId, tagId).getOrNull().orEmpty()
+        if (existing.any { it.source == source }) return tagId
+        val now = Clock.System.now()
+        bindings.executeInsert(exec, assetId, tagId, source, null, null, false, now, operator, now, operator)
+            .getOrThrow()
+        return tagId
+    }
+
+    /**
+     * 评级 → 标签投影（§7.2）：列是权威、标签是投影，两者并存只为「按标签检索」能复用。
+     *
+     * 只有 `explicit` 才有投影；`source` 跟随评级的来源（`manual` / `rule`）。
+     */
+    suspend fun projectRating(
+        exec: QueryExecutor,
+        assetId: Long,
+        rating: String,
+        source: String,
+        operator: String?,
+    ) {
+        if (RatingPolicy.normalize(rating) != RATING_EXPLICIT) return
+        attach(exec, assetId, NAMESPACE_META, TAG_EXPLICIT, source, operator)
+    }
+}

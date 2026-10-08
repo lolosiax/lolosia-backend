@@ -1,0 +1,47 @@
+# 默认规则集：目录 / 文件名 → 标签或评级。
+#
+# 语义（见 doc/media-index-design.md §4.5 / §7.4）：
+# - 这是**默认值**：media_tag_rule 表里一条规则都没有时用它兜底；
+#   表里一旦有规则，一律以表为准（完全照搬 rbac §3.6 的两条来源优先级）。
+# - 它是**零依赖兜底**：不装 worker、不跑模型，光靠目录结构就能打出一批标签与评级，
+#   让新盘挂上来当天就能按目录搜出东西，不必等模型跑完几万张。
+# - 只读路径与文件名、不读文件内容、不出网，因此允许在后台扫描时自动跑。
+#
+# 字段：
+#   match    path_prefix | path_contains | name_glob | ext
+#   pattern  匹配串；path_* 与 name_glob 都**忽略大小写**
+#   tag      "命名空间:名字"；标签不存在时按需创建（所以这里写名字而不是 id）
+#   rating   unknown | safe | questionable | explicit
+#            tag 与 rating 至少填一个
+#   priority 小者优先，仅用于 rating 冲突时定胜负；缺省 100
+#
+# 改完要重新编译（内嵌资源随 classpath 打进可执行文件）。
+
+rules:
+  # ---- 目录 → 系列 ----
+  - match: path_prefix
+    pattern: "影集/VRChat/"
+    tag: "series:VRChat"
+  - match: path_prefix
+    pattern: "影集/娃照/"
+    tag: "series:娃照"
+
+  # ---- 目录名里出现角色名 → 角色 ----
+  # 娃照是按「日期-主题」建的目录（如 20260523-Moe初次拍摄），角色名夹在中间，
+  # 所以这里用 path_contains 而不是 path_prefix。
+  - match: path_contains
+    pattern: "Moe"
+    tag: "character:Moe"
+  - match: path_contains
+    pattern: "白上吹雪"
+    tag: "character:白上吹雪"
+
+  # ---- 文件名兜底评级（NSFW 靠这个在人工定级之前先挡一道）----
+  - match: name_glob
+    pattern: "*r18*"
+    rating: explicit
+    priority: 10
+  - match: name_glob
+    pattern: "*nsfw*"
+    rating: explicit
+    priority: 10

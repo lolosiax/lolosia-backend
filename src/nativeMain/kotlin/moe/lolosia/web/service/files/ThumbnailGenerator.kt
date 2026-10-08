@@ -33,14 +33,20 @@ actual object ThumbnailGenerator {
         val source = decode(bytes) ?: return null
 
         val items = ArrayList<Thumbnail>(targets.size)
+        var sample: String? = null
         for (size in targets) {
             val scaled = source.scaledToMax(size)
+            // 采样取自最小档缩略图：这一路的面积平均本来就要跑，再回到原始分辨率上重跑一趟
+            // （55MP 就是 5500 万次内层循环）只为得到 64 个像素纯属浪费。
+            if (sample == null) sample = scaled.sampleRgb565()
             val encoded = Webp.encode(scaled, quality.coerceIn(1, 100).toFloat()) ?: continue
             items.add(Thumbnail(size, encoded, scaled.width, scaled.height))
         }
         if (items.isEmpty()) return null
-        return ThumbnailSet(source.width, source.height, items)
+        return ThumbnailSet(source.width, source.height, items, sample)
     }
+
+    actual fun sample(bytes: ByteArray): String? = decode(bytes)?.sampleRgb565()
 
     /** 按文件头识别格式后分派到对应门面解码。 */
     private fun decode(bytes: ByteArray): RgbaImage? = when (Image.typeOf(bytes)) {
@@ -106,4 +112,32 @@ actual object ThumbnailGenerator {
         }
         return RgbaImage(targetWidth, targetHeight, out)
     }
+
+    /**
+     * 8×8 RGB565 采样，十六进制小写、每像素 4 位（大端），共 256 字符。
+     *
+     * 复用同一套面积平均缩到 8×8，再按 R 取高 5 位 / G 取高 6 位 / B 取高 5 位量化，
+     * 8×8×2 = 128 字节。前端拿它当加载前的占位、以及敏感内容的遮罩底图。
+     */
+    private fun RgbaImage.sampleRgb565(): String {
+        val small = boxResample(SAMPLE_SIZE, SAMPLE_SIZE)
+        val hex = CharArray(SAMPLE_SIZE * SAMPLE_SIZE * 4)
+        var at = 0
+        for (i in 0 until SAMPLE_SIZE * SAMPLE_SIZE) {
+            val r = small.pixels[i * 4].toInt() and 0xFF
+            val g = small.pixels[i * 4 + 1].toInt() and 0xFF
+            val b = small.pixels[i * 4 + 2].toInt() and 0xFF
+            val value = ((r shr 3) shl 11) or ((g shr 2) shl 5) or (b shr 3)
+            hex[at++] = HEX[(value shr 12) and 0xF]
+            hex[at++] = HEX[(value shr 8) and 0xF]
+            hex[at++] = HEX[(value shr 4) and 0xF]
+            hex[at++] = HEX[value and 0xF]
+        }
+        return hex.concatToString()
+    }
+
+    /** 采样边长（像素）。 */
+    private const val SAMPLE_SIZE: Int = 8
+
+    private const val HEX: String = "0123456789abcdef"
 }

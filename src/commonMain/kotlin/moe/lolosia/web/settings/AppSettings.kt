@@ -108,9 +108,46 @@ data class AppSettings(
         /** 直链签名的有效期（秒），下限 60。 */
         val signTtlSeconds: Int = 900,
         val thumbnail: ThumbnailConfig = ThumbnailConfig(),
+        val media: MediaConfig = MediaConfig(),
     ) {
         /** 实际生效的浏览根。 */
         fun resolveRoot(webdavRoot: String): String = root.ifBlank { webdavRoot }
+
+        /**
+         * 媒体索引：把浏览根下的图片 / 视频 / 音频登记成「一个文件一行」，抽出可筛选的元数据
+         * （拍摄时间 / 光圈 / 机型 / GPS…），并支持人工打标签与评级。
+         *
+         * ⚠️ **后台扫描只做本地的事**（stat / 哈希 / EXIF / 缩略图 / 规则打标），
+         * 标签与描述要等用户显式点「全盘分析」才会外发（见 `doc/media-index-design.md` §8.2）。
+         */
+        @Serializable
+        data class MediaConfig(
+            /** 是否启用媒体索引。关掉时所有入口都是空操作。 */
+            val enabled: Boolean = true,
+            /** 后台**本地**索引扫描间隔（秒），下限 300。 */
+            val indexIntervalSeconds: Int = 1800,
+            /** 探测元数据时读文件头的字节上限。 */
+            val probeMaxBytes: Int = 262144,
+            /** 探测器版本；升版即全量重探（语义同 `THUMBNAIL_CACHE_VERSION`）。 */
+            val probeVersion: Int = 1,
+            /** EXIF 没写时区时的兜底偏移（分钟，+480 = UTC+8）。 */
+            val defaultTimezoneOffset: Int = 480,
+            /** 连续多少轮扫描都没见到才软删（按扫描间隔折算成时间）。 */
+            val missingScanLimit: Int = 3,
+            val rules: RulesConfig = RulesConfig(),
+        ) {
+            /** 规则打标（目录 / 文件名 → 标签或评级）。 */
+            @Serializable
+            data class RulesConfig(
+                /**
+                 * 是否启用。
+                 *
+                 * 它是**本地派生**：只读路径与文件名、不读内容、不出网，所以允许在后台扫描时自动跑
+                 * （与「外发分析必须显式触发」不冲突）。想连它都关掉、完全手动打标，就设成 `false`。
+                 */
+                val enabled: Boolean = true,
+            )
+        }
 
         @Serializable
         data class ThumbnailConfig(

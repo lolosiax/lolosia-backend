@@ -12,7 +12,9 @@ import moe.lolosia.web.service.files.FileBrowser
 import moe.lolosia.web.service.files.FileSigner
 import moe.lolosia.web.service.files.ThumbnailService
 import moe.lolosia.web.service.files.normalizeRelative
+import moe.lolosia.web.service.media.MediaQueryService
 import moe.lolosia.web.util.router.*
+import moe.lolosia.web.util.session.Context
 
 /**
  * 在线文件管理器接口（只读）：列目录、看详情、取缩略图与原图。
@@ -32,11 +34,13 @@ object FileController {
     @GET("/files/list")
     @Permission("lolosia.files.read")
     suspend fun list(
+        ctx: Context,
         browser: FileBrowser,
+        media: MediaQueryService,
         @Query path: String?,
         @Query sort: String?,
         @Query order: String?,
-    ): FileListResult = browser.list(path, sort, order)
+    ): FileListResult = media.enrich(ctx, browser.list(path, sort, order))
 
     /** 只列子目录：目录树懒加载用，比列全量轻。 */
     @GET("/files/dirs")
@@ -46,7 +50,12 @@ object FileController {
     /** 单个文件的详情（预览面板）。 */
     @GET("/files/detail")
     @Permission("lolosia.files.read")
-    suspend fun detail(browser: FileBrowser, @Query path: String?): FileDetail = browser.detail(path)
+    suspend fun detail(
+        ctx: Context,
+        browser: FileBrowser,
+        media: MediaQueryService,
+        @Query path: String?,
+    ): FileDetail = media.enrich(ctx, browser.detail(path))
 
     /** 请求把某个目录的图片插队生成缩略图（前端打开目录时调）。 */
     @POST("/files/scan")

@@ -114,6 +114,7 @@ class ThumbnailCache(private val root: String, val sizes: List<Int>) {
  * @property width 源图像素宽
  * @property height 源图像素高
  * @property sizes 已生成的档位
+ * @property sample 8×8 采样（每像素 4 位十六进制，RGB565 大端，共 256 字符）；老缓存可能为 `null`
  * @property generatedAt 生成时间（毫秒）
  */
 @Serializable
@@ -124,5 +125,6 @@ data class ThumbnailMeta(
     @SerialName("width") val width: Int,
     @SerialName("height") val height: Int,
     @SerialName("sizes") val sizes: List<Int>,
+    @SerialName("sample") val sample: String? = null,
     @SerialName("generatedAt") val generatedAt: Long,
 )

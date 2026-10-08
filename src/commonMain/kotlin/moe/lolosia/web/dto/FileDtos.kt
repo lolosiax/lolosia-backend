@@ -50,6 +50,24 @@ data class FileEntry(
      */
     val hasSubdirs: Boolean = false,
     /**
+     * 评级（`unknown` / `safe` / `questionable` / `explicit`），由媒体索引提供。
+     *
+     * 前端据此给 `explicit` / `questionable` 的项加遮罩（见 `doc/media-index-design.md` §10.3）。
+     * **数据库不可用时恒为 `unknown`** —— 列目录本身不依赖库，这是有意的降级。
+     */
+    val rating: String = "unknown",
+    /** 是否已被媒体索引登记；未登记的项属性页只给得出通用信息。 */
+    val indexed: Boolean = false,
+    /**
+     * 8×8 采样：每像素 4 位十六进制（RGB565 大端），共 256 字符；没有则为空串。
+     *
+     * 前端把它画成 8×8 的图铺满格子：既当**缩略图加载出来之前的占位**，
+     * 也当**敏感内容的遮罩底图**（露骨图默认不下发原图）。
+     */
+    val sample: String = "",
+    /** 拍摄时刻（毫秒，UTC）；没探测到为 0。 */
+    val takenAt: Long = 0,
+    /**
      * 直链签名的过期时间戳（毫秒）与签名值；只由 `files/list` / `files/detail` 填充
      * （`files/dirs` 只喂目录树，用不上）。
      *

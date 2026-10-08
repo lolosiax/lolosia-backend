@@ -13,6 +13,7 @@ import moe.lolosia.web.dto.FileListResult
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.image.Image
 import moe.lolosia.web.util.log.Log
+import moe.lolosia.web.util.media.isMediaName
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import okio.FileMetadata
@@ -175,6 +176,55 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
             } else if (isImageName(child.name)) {
                 out.add(toEntry(child.name, childOf(relative, child.name), meta, checkThumb = false))
             }
+        }
+    }
+
+    /**
+     * 递归收集 [relative] 子树下的**媒体**条目（图片 / 视频 / 音频，用于媒体索引的全量扫描）。
+     *
+     * 与 [collectImages] 同构：每层让出一次、跳过隐藏目录、不算缩略图存在性。
+     */
+    suspend fun collectMedia(relative: String): List<FileEntry> {
+        val out = ArrayList<FileEntry>()
+        collectMediaInto(resolve(rootPath, relative), relative, out)
+        return out
+    }
+
+    private suspend fun collectMediaInto(dir: Path, relative: String, out: MutableList<FileEntry>) {
+        val children = fs.listOrNull(dir).orEmpty().sortedBy { it.name.lowercase() }
+        for (child in children) {
+            if (child.name.startsWith(".")) continue
+            val meta = fs.metadataOrNull(child) ?: continue
+            if (meta.isDirectory) {
+                delay(1)
+                collectMediaInto(child, childOf(relative, child.name), out)
+            } else if (isMediaName(child.name)) {
+                out.add(toEntry(child.name, childOf(relative, child.name), meta, checkThumb = false))
+            }
+        }
+    }
+
+    /**
+     * 递归列出 [relative] 子树下的**目录**相对路径（含自身），跳过 `.` 开头的隐藏目录。
+     *
+     * 媒体索引用它做「本轮扫描没见到哪些已登记的文件」的逐目录比对（`doc/media-index-design.md` §5.3）。
+     */
+    suspend fun collectDirs(relative: String): List<String> {
+        val out = ArrayList<String>()
+        out.add(relative)
+        collectDirsInto(resolve(rootPath, relative), relative, out)
+        return out
+    }
+
+    private suspend fun collectDirsInto(dir: Path, relative: String, out: MutableList<String>) {
+        val children = fs.listOrNull(dir).orEmpty().sortedBy { it.name.lowercase() }
+        for (child in children) {
+            if (child.name.startsWith(".")) continue
+            if (fs.metadataOrNull(child)?.isDirectory != true) continue
+            val childRelative = childOf(relative, child.name)
+            out.add(childRelative)
+            delay(1)
+            collectDirsInto(child, childRelative, out)
         }
     }
 
