@@ -35,7 +35,8 @@ webdav:
 ```
 
 - 挂载点在 `/api` 之外：**不套 `{code,msg,data}` 信封、也不走会话鉴权**，鉴权是 HTTP Basic（客户端要原样状态码与 207 XML）。
-- 存储层 `service/dav/DavStore.kt` 把 URL 分段逐段校验（拒 `.` / `..` / 空段 / 含分隔符与 NUL 的段）后落盘，因此请求必然落在 `root` 内。
+- 存储层 `service/dav/DavStore.kt` 把 URL 分段逐段校验（拒 `.` / `..` / 空段 / 含分隔符与 NUL 的段，**以及一切以 `.` 开头的段**）后落盘，因此请求必然落在 `root` 内。
+  - 拒 `.` 开头（解析与列举都跳）是为了让在线文件管理器的缩略图缓存 `<root>/.cache`（见 §3）在 WebDAV 客户端里彻底不可见，不会混进机械盘的正常目录树；**代价是用户自己建的隐藏目录 / 隐藏文件也一并看不到了**。
 - 覆盖 `OPTIONS / PROPFIND / PROPPATCH / GET(含 Range→206) / HEAD / PUT / DELETE / MKCOL / COPY / MOVE / LOCK / UNLOCK`；`Depth: infinity` 直接 403。
 
 ### 2.2 端口与对外暴露（板子实测）
@@ -57,7 +58,76 @@ webdav:
 - 即便服务端回了 `DAV:quota-available-bytes` / `DAV:quota-used-bytes` 且状态 200，资源管理器显示的仍是**本地系统盘（C:）的容量**（`DriveInfo` 实测数值等于 C 盘）。
 - 结论：**Windows 内置客户端忽略 RFC 4331，改服务端无效**（当时的临时探针已完整回滚）。
 
-## 3. 部署要点（systemd）
+## 3. 在线文件管理器
+
+把与 WebDAV **同一块机械盘**（`files.root`，留空回退 `webdav.root`）以**只读**方式做成网页端的目录浏览 + 缩略图，挂在 `/api/files/*`。
+和 WebDAV 的分工：WebDAV 是给系统文件管理器用的读写协议；在线文件管理器只读，是给「在网页上翻相册」用的。
+
+### 3.1 配置与权限
+
+```yaml
+files:
+  root: ""              # 留空回退 webdav.root
+  signKey: ""           # 留空则每次启动随机生成 —— 重启后页面上已下发的直链全部失效
+  signTtlSeconds: 900
+  thumbnail:
+    enabled: false      # ⚠️ 开发机与线上机只能开一台
+    sizes: [256, 512, 1024]
+    quality: 80
+    scanIntervalSeconds: 600
+    maxSourceBytes: 67108864
+```
+
+- 权限节点 `lolosia.files.read` **只给 `admin` 及以上**：浏览的是整块机械盘，不对普通用户开放。前端菜单按角色隐藏，直连 `/files` 对无权用户落 404。
+- 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v1`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`，版本号一改旧缓存整体作废）。**该目录对 WebDAV 隐藏**，见 §2.1。
+- `signKey` 未配置时启动日志会打一条 WARN。线上建议显式配一个固定随机串，否则每次重启后旧直链失效（不影响功能，前端重新列目录会拿到新签名）。
+- `thumbnail.enabled` 只能在一台机器上开：两台同时写同一份缓存会互相覆盖，也会把机械盘两头都拖慢。
+
+### 3.2 直链为什么走 URL 签名而不是会话
+
+`<img src>` 由浏览器原生发起，**带不了 `Authorization` 头**。于是 `/api/files/{thumb,raw}` 放进 `AuthInterceptor`
+白名单，改为校验 URL 签名：`exp` + `sig` 由 `files/list` / `files/detail` 下发，
+`sig = HMAC-SHA256(key, "相对路径|过期时间")`（okio 自带 `hmacSha256` / `hex`，没有自研加密）。
+
+白名单只免掉「没登录就 401」，鉴权责任因此落回控制器自己 —— 这与 `/api/user/avatar` 自己判登录态是同一类做法。
+
+实测（本机 mingw + 本地库，真实走链路）：
+
+| 请求 | 结果 |
+| --- | --- |
+| `thumb?path=…&size=256&exp=…&sig=…`（合法、未过期） | `200`，`image/webp`，7790 字节 |
+| 同一条 URL 篡改 `sig` | `403` |
+| 只带 `path`、不带 `exp`/`sig` | `403` |
+| 完全不带任何请求头 | 不是 401（证明确实在白名单里，是签名在把关） |
+
+SSE 事件 `files:thumb` 的负载里带的是 `path` + **新签发的签名**，所以只推给有 `lolosia.files.read` 的连接
+（`SseService.broadcast` 增加授权判定，匿名连接一律不推）—— 否则等于把机械盘的读权限白送给所有人。
+
+### 3.3 Windows 中文文件名：进程代码页
+
+mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 时，**中文文件名会被解错并直接丢弃**。
+症状很隐蔽 —— 目录里「看着少文件」，且只在含中文的路径上出现。
+
+修法：`classpath/mingw/app.manifest`（`activeCodePage=UTF-8`）由 `classpath.rc` 以 `RT_MANIFEST` 引用，
+随 `classpath.res` 一起链进 exe（`NativeClasspath.kt` 已把 `app.manifest` 声明为 windres 任务的输入，改它同样会触发重新链接）。
+
+### 3.4 目录列举的实测性能
+
+`files/list` / `files/dirs` 对每个**子目录**都要多一次目录枚举：前端得知道「里面有没有东西」（`hasChildren`）与
+「有没有子目录」（`hasSubdirs`）—— 后者是**独立标志位**，判定它还要再过一遍子项的 stat。这些都是纯元数据操作、
+不碰文件内容，但串行在 WebDAV 映射盘上就是「子目录个数」次往返。
+
+| 被列的目录 | 子目录数 | 耗时 |
+| --- | --- | --- |
+| 根 | 2 | ~35 ms |
+| 下一层 | 2 | ~80 ms |
+| 再下一层 | 14 | ~700 ms（并发改造前 **1348 ms**） |
+
+**14 个子目录那档是差得最明显的**：每个子目录一次往返，串行就是 14 次累加。改法是让 `list` / `dirs`
+变成 `suspend`，内部 `withContext(Dispatchers.Default) + coroutineScope + async/awaitAll`（native 上没有
+`Dispatchers.IO`），于是只等最慢的那一个。
+
+## 4. 部署要点（systemd）
 
 - 服务**以 `lolosia` 用户运行**：远端 `/srv/lolosia-backend/lolosia-backend-native.service` 的 `[Service]` 段手工加了 `User=lolosia` / `Group=lolosia`。
   - 原因：WebDAV 若以 root 运行，它新建的目录会属 `root:root 755`，SMB 侧（`lolosia`）写不进去 —— 表现为「局域网里往共享复制文件失败」。
@@ -65,13 +135,13 @@ webdav:
   - ⚠️ 仓库里的 `lolosia-backend-native.service` 模板**不含** `User=`：新机器首次部署后需要手工补，否则会重现上面的属主问题。
 - 磁盘配置 `/srv/lolosia-backend/application.yaml` 与内嵌 `application.json` 相互独立，改配置不用重编二进制。
 
-## 4. 旁路服务
+## 5. 旁路服务
 
 - **Samba**：`/etc/samba/smb.conf` 里的 `include = /etc/samba/conf.d/*.conf` 必须放在 `[global]` 段**末尾**（紧邻 Share Definitions 之前）。
   放在段开头，include 展开的 `[hdd1]` 之后的所有全局参数都会被解析进服务段，日志狂刷 `Global parameter ... found in service section!`；改完用 `testparm -s` 复核（应只回 `Loaded services file OK.`）。
 - 共享 `[hdd1]` → `/mnt/hdd1`：`read only = no`、`valid users = lolosia`、`write list = lolosia`、`create mask = 0664` / `directory mask = 0775`。
 
-## 5. 网络与吞吐实测（2026-10）
+## 6. 网络与吞吐实测（2026-10）
 
 | 路径 | 实测 |
 | --- | --- |

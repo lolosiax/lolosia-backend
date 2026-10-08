@@ -41,7 +41,7 @@
 - Ktor 的 `Application` 装配在 `configuration/AppConfigure.kt` 的 `Application.configureApplication(koin)`。
 - **各目标源集不再有 `main`，也不再有 `startServer`**：不要新增「由各目标入口传入 lambda」的写法。
 
-**平台差异只有四处 `expect/actual`**：`installPlatformClasspath()`、`envOrNull()`、`platformModule()`，以及图像能力 [`Image`](src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt)（编解码要绑 C 静态库，`actual` 只能落在 nativeMain）。
+**平台差异只有五处 `expect/actual`**：`installPlatformClasspath()`、`envOrNull()`、`platformModule()`，以及图像能力 [`Image`](src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt) 与缩略图生成 [`ThumbnailGenerator`](src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailGenerator.kt)（这两个要绑内嵌的 C 静态库，`actual` 只能落在 nativeMain）。
 
 **KSP 生成的注册表跨源集可见**
 
@@ -134,6 +134,9 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   必须原样的响应（如 SSE 握手）给 call 打 `EnvelopeSkipKey`。
 - **鉴权分两层，别混为一谈**：`AuthInterceptor`（`-3`）只管「**是否登录**」，「**这个接口你能不能调**」由路由级的 `@Permission`（§3）负责。
   白名单只免掉「没登录就 401」，**不免权限** —— 白名单里的接口若标了 `@Permission`，会因无会话而判失败。
+- 白名单里的接口可以**自己校验另一种凭据**，文件管理器就是这么做的：`/api/files/{thumb,raw}` 是给 `<img src>` 直接访问的
+  （浏览器原生标签带不了 `Authorization`），于是放进白名单、改为校验 **URL 签名**（`exp` + `sig`，HMAC 覆盖「相对路径 + 过期时间」，
+  由列表接口下发，见 `service/files/FileSigner.kt`）。同类先例是 `/api/user/avatar` 自己判登录态 —— 加白名单前先想清楚「那谁来把关」。
 - **WebDAV 挂在 `/api` 之外**（默认 `/dav`，见 `util/ktor/WebDavRouting.kt`）：既不经会话鉴权、也不套信封，鉴权走 HTTP Basic ——
   WebDAV 客户端（Windows「映射网络驱动器」）要的是原样状态码与 207 多状态 XML。**不要**把它挪进 `/api`，也不要给它套信封。
 
@@ -143,11 +146,19 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - `Classpath` 的来源标识：`scheme`（`file` / `classpath` / `empty`）与 `origin`（供日志展示）。
   - 内嵌 `classpath.zip` 默认 **DEFLATED**（`classpath { compressed = true }`），读取端 `ZipClasspath` 用 `platform.zlib` 做 inflate；STORED 也支持。
   - ⚠️ **改了 `resources/**` 必须重新链接**：`buildSrc/NativeClasspath.kt` 已把 `classpath.res` / `classpath.o` 声明为链接任务的输入，只改资源内容也会触发 `classpathZip → windres/objcopy → link`；若发现改动没生效，先看 link 任务是不是被判了 UP-TO-DATE。
+- **Windows 进程代码页**：`classpath/mingw/app.manifest`（`activeCodePage=UTF-8`）由 `classpath.rc` 以 `RT_MANIFEST` 引用，随 `classpath.res` 一起链进 exe。
+  没有它，okio 走的 CRT 窄字符 API 会把中文文件名解错而**直接丢弃** —— 症状是目录里「看着少文件」，排查时先怀疑代码页。
 - **默认权限注册表**是内嵌资源 `permissions.yaml`（`classpath` 根下），由 `loadPermissionRegistry` 在 `appModule` 里解析成 `PermissionRegistry` 单例；改它同样要重新编译。
 - **运行期资源目录**（不在二进制内）：`/res/resources/**` → `work/resources/**`，用 `FileStoreClasspath` 把 `FileStore` 的子目录挂给 `staticClasspath`（前端 landing 页背景图走这条）。
   带 `?webp` 时按旧版语义转 WebP 并落盘缓存 `work/cache/webp/{源文件内容md5}.webp`；不支持解码的格式（bmp / tiff）或转换失败一律回退原图（`service/WebpCache.kt` 落盘，转码走 `util/image/Image.kt`）。
 - **WebDAV**：`AppSettings.webdav`（`enabled` / `path` / `root` / `username` / `password` / `realm`）把 `root` 目录（如挂载的机械盘 `/mnt/hdd1`）挂到 `path` 下；
   协议层在 `util/ktor/WebDavRouting.kt`、存储层在 `service/dav/`。挂载点在 `/api` 之外（规则见 §6），鉴权用 HTTP Basic。
+  ⚠️ `DavStore` 会**跳过一切 `.` 开头的段**（解析与列举都跳）—— 这是为了让文件管理器的缩略图缓存（`<root>/.cache`）在 WebDAV 客户端里彻底不可见，代价是用户自己建的隐藏目录/文件也看不到。
+- **在线文件管理器**：`AppSettings.files`（`root` 留空回退 `webdav.root`、`signKey`、`signTtlSeconds`、`thumbnail.*`）把 `root` 以**只读**方式列成目录树并出缩略图；
+  接口在 `controller/FileController.kt`，实现全在 `service/files/`。`thumb` / `raw` 走 URL 签名而非会话（见 §6），其余接口挂 `lolosia.files.read`（默认只给 `admin` 及以上）。
+  - 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v1`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`），版本号一改旧缓存整体作废。
+  - 生成是**单工作协程串行**的（机械盘并发解码只会更慢），`files.thumbnail.enabled` **只能在一台机器上开**，否则两边同时写同一份缓存。
+  - `FileEntry` 的 `hasChildren`（是否为空）与 `hasSubdirs`（是否有子目录）是**两个独立标志位**，前者由 `files/list` 与 `files/dirs` 填、后者只有 `files/dirs` 填（判定它要多一轮 stat 扫描）。
 - **第三方 C 库**（图像编解码）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `src/nativeInterop/cinterop/*.def`。
   - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/build-libs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
   - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` 收发，不把 C 指针泄漏给调用方。
@@ -197,11 +208,11 @@ src/commonMain/kotlin/moe/lolosia/web/
   configuration/AppModule.kt     Koin：appModule / serviceModule（手写逃生口）/ startAppKoin / platformModule(expect)
   generated/GeneratedRegistries.kt  6 个生成注册表的 expect 签名（actual 由 router-ksp 生成）
   api/package.kt                 对外 HTTP 客户端（Ktor Client；引擎按目标选 curl / winhttp），含 sse / ws / streamingRequest
-  controller/                    LoginController / SseController / OssController / Classpath（运维探针）/ system/{User,Role,UserRole,Menu,Permission}
+  controller/                    LoginController / SseController / OssController / FileController / Classpath（运维探针）/ system/{User,Role,UserRole,Menu,Permission}
   database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
-  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos / PermissionDtos
+  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos / FileDtos / PermissionDtos
   interceptor/                   Traffic → Ctx → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
-  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）/ permission/（RBAC：PermissionRegistry · PermissionResolver · PermissionService）
+  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）/ permission/（RBAC：PermissionRegistry · PermissionResolver · PermissionService）/ files/（在线文件管理器：FileBrowser · FileSigner · FileTypes · ThumbnailCache·Generator·Service）
   service/system/                UserService / RoleService / UserRoleService / QuerySupport
   settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
   util/captcha/                 自研图形验证码（点阵字 + 算式）
@@ -220,7 +231,7 @@ src/commonMain/kotlin/moe/lolosia/web/
 src/commonMain/resources/       application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ static/home/ / hello.txt
 src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspath(Image) / EmptyClasspath、
                                 installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*、
-                                util/image/Image.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
+                                util/image/Image.kt(actual)、service/files/ThumbnailGenerator.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
 src/nativeInterop/cinterop/     第三方 C 库的绑定定义（zlib / png / webp / jpeg / gif 各一个 .def）
 src/linuxMain/kotlin/…/          两个 linux 目标共享的平台实现（.linux.kt）：
                                 api/ApiClient / classpath/EmbeddedClasspath / fs/Mkdir / proc/Shell
@@ -237,7 +248,7 @@ sql/                            建表脚本（9 表，含 sys_role.parent_id �
 
 | 文档 | 内容 |
 | --- | --- |
-| [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) | **本派生项目**自身的差异与运行事实（更名 / WebDAV / 部署 / 网络实测）；上游模板那份 md 不动，差异都记在这里 |
+| [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) | **本派生项目**自身的差异与运行事实（更名 / WebDAV / 在线文件管理器 / 部署 / 网络实测）；上游模板那份 md 不动，差异都记在这里 |
 | [doc/rbac-design.md](doc/rbac-design.md) | RBAC 权限体系：组 + 点分权限（`±通配`）+ 用户直授 + `@Permission` 的设计、判定口径与已实现落点 |
 | [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 / 工程形态（运行层面） |
 | [doc/native-migration-plan.md](doc/native-migration-plan.md) | JVM → Kotlin/Native 迁移详设与实测记录（历史） |

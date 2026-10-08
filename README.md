@@ -4,7 +4,7 @@
 
 - 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB**
 - 目标平台：**`mingwX64`**（Windows 本地开发调试）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**不保留 JVM 目标**
-- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）、**WebDAV 服务**（手写协议层，把机械盘挂到 `/dav`，见 `service/dav`、`util/ktor/WebDavRouting.kt`）、**RBAC 权限体系**（组 + 点分权限 + `@Permission`，见 `service/permission`、`doc/rbac-design.md`）
+- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）、**WebDAV 服务**（手写协议层，把机械盘挂到 `/dav`，见 `service/dav`、`util/ktor/WebDavRouting.kt`）、**在线文件管理器**（只读浏览机械盘 + WebP 缩略图 + 签名直链，见 `service/files`、`controller/FileController.kt`）、**RBAC 权限体系**（组 + 点分权限 + `@Permission`，见 `service/permission`、`doc/rbac-design.md`）
 
 > 项目风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 冒烟 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
 > JVM → Kotlin/Native 的迁移详设与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)。
@@ -25,6 +25,7 @@
 - **统一响应信封** `{code,msg,data}`：由 `EnvelopeInterceptor` 在 send pipeline 上按**响应 MIME** 统一包装（只认 `/api/` 下的 JSON；`text/plain` 与文件流/SSE 原样放行，要强制包一段 JSON 文本就返回 `dto.RawJson`）
 - **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
 - **接口级权限**：`@Permission("a.b.c")` 由 KSP 生成 `call.requirePermission(...)`（失败回 `403`）；权限来自「组链（自身组 + 继承的祖先组）+ 用户直授」，规则是 `±a.b.c` / `a.b.*` / `*` 形式的点分串，**负号优先、未命中拒绝**，`owner` 组兜底放行；内置组（`owner` / `admin` / `user` / `guest`）的**默认权限登记在内嵌资源 `permissions.yaml`**，库为空时兜底生效（OSS 文件的读写就是 `user` 组的默认权限）—— 见 [doc/rbac-design.md](doc/rbac-design.md)
+- **在线文件管理器**：以 `files.root`（留空回退 `webdav.root`）为浏览根，**只读**地列目录 / 目录树 / 详情，并出三档 WebP 缩略图（`/api/files/{list,dirs,detail,scan}`，挂 `lolosia.files.read`，默认只给 `admin` 及以上）。缩略图由后台**单工作协程**按 `files.thumbnail.scanIntervalSeconds` 周期扫描生成，用户打开目录时可插队；缓存落在 `<root>/.cache/lolosia/thumb/v1`（该目录对 WebDAV 隐藏）。`<img src>` 带不了 `Authorization`，所以 `/api/files/{thumb,raw}` 走 **URL 签名**（`exp` + `sig`，HMAC-SHA256 覆盖「相对路径 + 过期时间」）而不是会话鉴权 —— 见 `service/files/`
 - **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
 - **WebDAV 服务**：把 `webdav.root`（如挂载的机械盘 `/mnt/hdd1`）以 WebDAV 挂在 `webdav.path`（默认 `/dav`）下，覆盖 `OPTIONS / PROPFIND / PROPPATCH / GET(含 Range) / PUT / DELETE / MKCOL / COPY / MOVE / LOCK / UNLOCK`，HTTP Basic 鉴权。挂载点在 `/api` 之外，**不套 `{code,msg,data}` 信封、也不走会话鉴权** —— Windows「映射网络驱动器」这类客户端要的是原样状态码与 207 多状态 XML
 - **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件、或挂进基础镜像由 docker 托管（两种都自动留 `.previous` 回滚文件）
@@ -58,12 +59,12 @@
 │   ├── commonMain/kotlin/moe/lolosia/web/
 │   │   ├── Main.kt               # main（唯一入口：classpath → 配置 → Koin → CIO 引擎）
 │   │   ├── configuration/        # AppConfigure（Ktor Application 装配）/ AppModule（Koin 容器 + platformModule expect）
-│   │   ├── controller/           # 业务（Login / User / Role / UserRole / Menu）+ Demo / Classpath（插件验证用）
+│   │   ├── controller/           # 业务（Login / Sse / Oss / File）+ system/（User / Role / UserRole / Menu / Permission）+ Classpath（运维探针）
 │   │   ├── database/             # Database（sqlx4k 驱动）+ repository 各 @Repository + model 实体
 │   │   ├── dto/                  # ApiResult（{code,msg,data} 信封）/ RawJson / SystemDtos / LoginDtos
 │   │   ├── generated/            # GeneratedRegistries.kt（6 个 expect 签名；actual 由 router-ksp 生成到各目标）
 │   │   ├── interceptor/          # Traffic / Ctx / Auth / Envelope 四层（顺序由 @Interceptor 经 KSP 生成）
-│   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService / WebpCache / oss / dav（WebDAV）/ permission（RBAC 注册表·解析·管理）
+│   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService / WebpCache / oss / dav（WebDAV）/ files（在线文件管理器：浏览·签名·缩略图）/ permission（RBAC 注册表·解析·管理）
 │   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
 │   │   ├── settings/             # AppSettings（@Serializable）+ 多级覆盖 SettingsLoader
 │   │   └── util/                 # captcha / classpath / crypto(BCrypt) / image(Image) / json / koin / ktor / log / router / session / time
@@ -72,6 +73,7 @@
 │   ├── mingwX64Main/kotlin/…/    # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
 │   └── linuxMain/kotlin/…/       # 两个 linux 目标共享的 ApiClient / EmbeddedClasspath / Mkdir / Shell 实现（无入口）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
+├── classpath/mingw/app.manifest  # 应用清单（RT_MANIFEST）：把进程代码页切成 UTF-8，否则中文文件名会被 okio 丢弃
 ├── sql/                          # 建表脚本（9 张表 + view_user_role 视图）+ migrate_rbac_groups.sql（历史库组模型迁移）
 ├── lolosia-backend-native.service # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
@@ -203,9 +205,9 @@ object ExampleController {
 - 服务层**不要用 `ctx.call`**：需要客户端 IP / UA / 请求头时由控制器抽成普通参数传下去
 - 审计列的操作者（`created_by` / `updated_by`）仍**显式传 `operatorId`**，不从 `ctx.userId` 隐式取 —— 注册链路没有登录态
 
-业务接口（路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`、`/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`；
+业务接口（路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`、`/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`、`/api/files/{list,dirs,detail,scan}`（在线文件管理器，需 `lolosia.files.read`）；
 权限管理：`/api/role/permission/{list,save}`（组规则）、`/api/user/permission/{list,save}`（用户直授）、`/api/permission/my`（当前用户生效权限）、`/api/permission/catalog`（`@Permission` 节点目录）。
-这些接口（以及探针里的 `/api/classpath/*`）默认都要鉴权：`POST` + `Authorization: Bearer <sessionId>`；免鉴权白名单是 `/api/login`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse` 与取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）—— **`/api/logout` 不在白名单里**，它要带有效 token（否则 401）。
+这些接口（以及探针里的 `/api/classpath/*`）默认都要鉴权：`Authorization: Bearer <sessionId>`；免鉴权白名单是 `/api/login`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse`、取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）以及 `/api/files/thumb`、`/api/files/raw` —— 后两个是给 `<img src>` 用的（原生标签带不了 `Authorization`），它们**自己校验 URL 签名**（`exp` + `sig`），拿不到签名一律 `403`；**`/api/logout` 不在白名单里**，它要带有效 token（否则 401）。
 
 模板另留一个资源探针 `/api/classpath/{list,read}`（列出/读取内嵌资源，需鉴权），用于运维排障。
 
@@ -239,6 +241,18 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
     "password": "",
     "realm": "lolosia-webdav"
   },
+  "files": {
+    "root": "",
+    "signKey": "",
+    "signTtlSeconds": 900,
+    "thumbnail": {
+      "enabled": false,
+      "sizes": [256, 512, 1024],
+      "quality": 80,
+      "scanIntervalSeconds": 600,
+      "maxSourceBytes": 67108864
+    }
+  },
   "logLevel": "INFO"
 }
 ```
@@ -246,6 +260,9 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 > `webdav.password` 为空时**拒绝一切请求**（服务端不会退化到匿名），启动日志会打一条 WARN。
 > WebDAV 的鉴权是 **HTTP Basic**：Windows 内置客户端只在 HTTPS 上才肯发 Basic，所以对外要经 TLS 反代（如 Caddy）；
 > 局域网里直接用 `http://<主机>:<端口>/dav` 即可（手机等第三方客户端不受这条限制）。
+
+> 在线文件管理器：`files.root` 留空回退 `webdav.root`；`files.signKey` 留空则本次启动随机生成（**重启后旧直链全部失效**，要跨重启就配一个固定随机串）；
+> `files.thumbnail.enabled` **开发机与线上机只能开一台** —— 两边同时写同一份缓存会互相覆盖，也会把机械盘两头都拖慢。
 
 > 其它环境变量：`KTOR_CLASSPATH_DIR` 指向磁盘资源目录，开发期改前端/资源不必重编二进制。
 > 加配置项 = 改 `AppSettings`（+ 必要时改 `envOverrides`），不要另起一套读取逻辑；磁盘 JSON 带 BOM 也能解析（解析失败会记 WARN 而不是静默忽略）。
@@ -296,7 +313,7 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 
 > P0 已收尾（临时探针 `DemoController` / `DEV_PROBES` 已删），进入 P1。
 
-- **P1（进行中）**：✅ 图形验证码 · ✅ 头像上传/读取 · ✅ SSE 事件总线（含开发板实机回归）· ✅ OSS 文件服务（`/api/oss/{list,getMetas,fileCheck,upload,get}`）· ✅ WebDAV（机械盘挂载到 `/dav`）· ✅ `classpath.zip` 改 DEFLATED；待办：WebP 转换（前端当前未用）、gzip/br 压缩交给 Nginx、前端工程与契约副本对齐
+- **P1（进行中）**：✅ 图形验证码 · ✅ 头像上传/读取 · ✅ SSE 事件总线（含开发板实机回归）· ✅ OSS 文件服务（`/api/oss/{list,getMetas,fileCheck,upload,get}`）· ✅ WebDAV（机械盘挂载到 `/dav`）· ✅ 在线文件管理器（机械盘只读浏览 + 三档 WebP 缩略图 + 签名直链，`/api/files/*`）· ✅ `classpath.zip` 改 DEFLATED；待办：WebP 转换（前端当前未用）、gzip/br 压缩交给 Nginx、前端工程与契约副本对齐
 - **P2**：AI 相关按需改为纯 Ktor Client 直连 LLM HTTP API（不引入 AI 框架）
 
 ## 📜 License

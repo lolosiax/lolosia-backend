@@ -92,6 +92,7 @@ lolosia.user.read
 lolosia.user.write
 lolosia.role.permission
 lolosia.oss.file.read
+lolosia.files.read
 ```
 
 节点**大小写不敏感**（统一按小写比较），存库保留原文。
@@ -166,6 +167,9 @@ groups:
 ```
 
 （实际文件是等价的展开写法，含逐条注释。）
+
+> 在线文件管理器的 `lolosia.files.read`（机械盘只读浏览）就是被 `admin` 的 `+lolosia.*` 覆盖到的，`user` / `guest` 都拿不到 ——
+> 这正是因为节点放在 `lolosia.files.*` 而不是 `lolosia.oss.*`：OSS 是「用户自己的云存储」，机械盘不是，两者的授权对象不同。
 
 **两条来源的优先级**（这是「默认」二字的全部含义）：
 
@@ -420,6 +424,8 @@ POST /api/permission/catalog  → [ { "node": "lolosia.user.write", "title": "�
 | `/api/oss/list`、`/getMetas`、`/fileCheck` | `lolosia.oss.file.read` |
 | `/api/oss/upload` | `lolosia.oss.file.write` |
 | `/api/oss/get/{user}/{md5}`、`/show/*`（取件，白名单） | 不加注解（匿名可取） |
+| `/api/files/{list,dirs,detail,scan}` | `lolosia.files.read` |
+| `/api/files/{thumb,raw}`（直链，白名单） | 不加注解（控制器校验 URL 签名 `exp` + `sig`） |
 | `/api/classpath/*`（运维探针） | `lolosia.system.classpath` |
 | `/api/menu/config` | 不加（前端守卫必经） |
 | `/api/login` `/logout` `/captcha` `/verify` `/register` `/sse*` | 不加（登录态之前 / 长连接） |
@@ -523,9 +529,9 @@ POST /api/permission/catalog  → [ { "node": "lolosia.user.write", "title": "�
 | 装配 | `configuration/AppModule.kt`（注册表进 Koin）、`configuration/AppConfigure.kt`（连库后 `syncRegistryGroups`） |
 | 接口 | `controller/system/PermissionController.kt`、`dto/PermissionDtos.kt` |
 
-**已标注 `@Permission` 的存量接口**：`/api/user/{list,searching,get}` 与 `/api/userRole/getByUserId` → `lolosia.user.read`；`/api/user/{create,edit,delete}` → `lolosia.user.write`；`/api/role/{list,queryRoleByPage}` → `lolosia.role.read`；`/api/role/{create,update,destroy}` → `lolosia.role.write`；`/api/oss/{list,getMetas,fileCheck}` → `lolosia.oss.file.read`；`/api/oss/upload` → `lolosia.oss.file.write`；`/api/classpath/{list,read}` → `lolosia.system.classpath`。
+**已标注 `@Permission` 的存量接口**：`/api/user/{list,searching,get}` 与 `/api/userRole/getByUserId` → `lolosia.user.read`；`/api/user/{create,edit,delete}` → `lolosia.user.write`；`/api/role/{list,queryRoleByPage}` → `lolosia.role.read`；`/api/role/{create,update,destroy}` → `lolosia.role.write`；`/api/oss/{list,getMetas,fileCheck}` → `lolosia.oss.file.read`；`/api/oss/upload` → `lolosia.oss.file.write`；`/api/files/{list,dirs,detail,scan}` → `lolosia.files.read`；`/api/classpath/{list,read}` → `lolosia.system.classpath`。
 
-**刻意不标的**：`/api/login` `/logout` `/captcha` `/verify` `/register` `/sse*` `/menu/config`（登录态之前 / 长连接 / 前端守卫必经）；`/api/user/{myInfo,myRole,updatePassword,avatar,avatar/get/{id}}`（自服务；头像与改密码在白名单里，标了会因无会话判失败）；`/api/oss/get/{user}/{md5}`（匿名取件）。
+**刻意不标的**：`/api/login` `/logout` `/captcha` `/verify` `/register` `/sse*` `/menu/config`（登录态之前 / 长连接 / 前端守卫必经）；`/api/user/{myInfo,myRole,updatePassword,avatar,avatar/get/{id}}`（自服务；头像与改密码在白名单里，标了会因无会话判失败）；`/api/oss/get/{user}/{md5}`（匿名取件）；`/api/files/{thumb,raw}`（给 `<img src>` 用，在白名单里、改为校验 URL 签名 `exp` + `sig`，标了同样会因无会话判失败 —— 它自带一套独立的凭据）。
 
 **实测**（本机 mingw + 本地库，真实走链路）：
 
