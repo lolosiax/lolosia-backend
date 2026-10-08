@@ -18,6 +18,7 @@ import moe.lolosia.web.dto.ApiResult
 import moe.lolosia.web.generated.configureInterceptors
 import moe.lolosia.web.generated.generatedRoutes
 import moe.lolosia.web.generated.registerInjectables
+import moe.lolosia.web.service.AppSettingService
 import moe.lolosia.web.service.WebpCache
 import moe.lolosia.web.service.dav.DavLockManager
 import moe.lolosia.web.service.dav.DavStore
@@ -144,8 +145,10 @@ fun Application.configureApplication(koin: Koin) {
 
         // WebDAV：把机械盘挂到配置的路径下（可选）。不走 `/api`，因此既不被会话鉴权拦截，
         // 响应也不会被 JSON 信封包装 —— Windows 的 WebDAV 客户端要的是原样状态码与 207 多状态 XML。
+        // 「是否允许访问隐藏文件」是运行时可改的（设置面板 → sys_cache），所以按回调取值而不是定死
         koin.get<AppSettings>().webdav.takeIf { it.enabled }?.let { cfg ->
-            webDav(cfg, DavStore(cfg.root), DavLockManager())
+            val appSetting = koin.get<AppSettingService>()
+            webDav(cfg, DavStore(cfg.root) { appSetting.allowHiddenFiles }, DavLockManager())
         }
 
         // 自研路由插件生成：全部 @Controller
@@ -162,9 +165,11 @@ fun Application.configureApplication(koin: Koin) {
     koin.get<MediaIndexService>().start()
 
     // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用。
-    // 连上后顺带把权限注册表声明的组继承同步进 sys_role.parent_id（幂等；规则不落库，见 service.permission）
+    // 连上后顺带把权限注册表声明的组继承同步进 sys_role.parent_id（幂等；规则不落库，见 service.permission），
+    // 以及把落库的运行时设置（WebDAV 隐藏文件开关）读回内存。
     val database = koin.get<Database>()
     database.startReconnectLoop(this) {
         syncRegistryGroups(database.driver, koin.get<PermissionRegistry>(), koin.get<SysRoleRepository>())
+        koin.get<AppSettingService>().load()
     }
 }

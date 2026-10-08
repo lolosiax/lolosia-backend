@@ -12,20 +12,28 @@ import okio.buffer
  *
  * 路径**逐段校验**，拒绝 `.` / `..` / 空段 / 含分隔符与 NUL 的段，因此解析结果必然落在根内
  * （目录穿越防护）。另外隐藏名（见 `isHiddenName`：`.` 开头，以及文件系统自建的 `lost+found`）
- * 一律被拒（`resolve` 返回 `null` → 403），目录列举也会跳过它们：这样 `.cache`（缩略图缓存）
+ * 默认一律被拒（`resolve` 返回 `null` → 403），目录列举也会跳过它们：这样 `.cache`（缩略图缓存）
  * 与 `lost+found` 在 WebDAV 客户端里完全不可见，不会混进机械盘的正常目录树。
+ *
+ * [allowHidden] 返回 `true` 时上面的隐藏规则失效 —— 开发机把线上机的 `/dav` 映射成网络驱动器
+ * 当本地盘用时，缩略图缓存要落在 `<root>/.cache` 下，客户端得能建目录、能读写。取值走回调而不是
+ * 构造参数，是为了让设置面板改了立刻生效（见 `AppSettingService`）。
  *
  * 文件系统访问走 `FileSystem.SYSTEM`，native 与 Windows 同一套 API。
  *
  * @param root 根目录绝对路径，如 `/mnt/hdd1`
+ * @param allowHidden 是否允许访问隐藏项；默认一律拒绝
  * @author 洛洛希雅Lolosia
  */
-class DavStore(val root: String) {
+class DavStore(val root: String, private val allowHidden: () -> Boolean = { false }) {
 
     private val fs: FileSystem = FileSystem.SYSTEM
 
     /** 根路径。 */
     val rootPath: Path = root.toPath()
+
+    /** 该名字当前是否算不可见项。 */
+    private fun hidden(name: String): Boolean = !allowHidden() && isHiddenName(name)
 
     /** 相对路径分段（已 URL 解码）→ 真实路径；任一段非法返回 `null`。 */
     fun resolve(segments: List<String>): Path? {
@@ -33,8 +41,8 @@ class DavStore(val root: String) {
         for (seg in segments) {
             if (seg.isEmpty() || seg == "." || seg == "..") return null
             if (seg.any { it == '/' || it == '\\' || it == '\u0000' }) return null
-            // 隐藏项（`.cache` 缓存目录、`lost+found` 保留目录）对 WebDAV 不暴露：列举不显示，直连路径也拒绝
-            if (isHiddenName(seg)) return null
+            // 隐藏项（`.cache` 缓存目录、`lost+found` 保留目录）默认对 WebDAV 不暴露：列举不显示，直连路径也拒绝
+            if (hidden(seg)) return null
             path = path.resolve(seg)
         }
         return path
@@ -46,7 +54,7 @@ class DavStore(val root: String) {
 
     /** 目录项，按名字排序（输出稳定，便于客户端对比）；隐藏项跳过。 */
     fun children(path: Path): List<Path> =
-        fs.listOrNull(path).orEmpty().filterNot { isHiddenName(it.name) }.sortedBy { it.name.lowercase() }
+        fs.listOrNull(path).orEmpty().filterNot { hidden(it.name) }.sortedBy { it.name.lowercase() }
 
     /** 新建目录；父目录不存在按 409 处理（与 WebDAV 语义一致，不隐式建父）。 */
     fun createDirectory(path: Path) {

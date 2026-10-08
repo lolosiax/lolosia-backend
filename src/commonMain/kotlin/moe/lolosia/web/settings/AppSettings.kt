@@ -83,6 +83,17 @@ data class AppSettings(
         val password: String = "",
         /** 401 挑战里显示的 realm。 */
         val realm: String = "lolosia-webdav",
+        /**
+         * 是否允许客户端访问**隐藏项**（`.` 开头的名字，以及文件系统自建的 `lost+found`）。
+         *
+         * 默认关闭，与在线文件管理器口径一致：`.cache`（缩略图缓存）之类不该混进机械盘的正常目录树。
+         * 但有例外场景需要打开 —— 开发机把线上机的 `/dav` 映射成网络驱动器当本地盘用时，
+         * 缩略图缓存就落在 `<root>/.cache` 下，不开这个开关客户端连建目录都会被拒（403）。
+         *
+         * 这里只是**配置文件里的初值**；面板上改过的值存在 `sys_cache`，以库里的为准
+         * （见 `AppSettingService`）。
+         */
+        val allowHidden: Boolean = false,
     )
 
     /**
