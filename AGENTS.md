@@ -151,7 +151,11 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
 - **资源一律走 `classpath` 中间层**，不要用文件系统路径：`src/<源集>/resources/**` 就是 classpath 根，运行时 `classpath.read("static/home/index.html")`。
   - `Classpath` 的来源标识：`scheme`（`file` / `classpath` / `empty`）与 `origin`（供日志展示）。
   - 内嵌 `classpath.zip` 默认 **DEFLATED**（`classpath { compressed = true }`），读取端 `ZipClasspath` 用 `platform.zlib` 做 inflate；STORED 也支持。
-  - ⚠️ **改了 `resources/**` 必须重新链接**：`buildSrc/NativeClasspath.kt` 已把 `classpath.res` / `classpath.o` 声明为链接任务的输入，只改资源内容也会触发 `classpathZip → windres/objcopy → link`；若发现改动没生效，先看 link 任务是不是被判了 UP-TO-DATE。
+  - **按构建类型分两条链路**（`NativeBuildType`，与 mingw / linux 那对目标是两回事）：`release` 并入 vite 产物；
+    `debug` **不建到 `viteJar` 的依赖、也不并前端产物**（调试时前端走 vite dev server），只嵌 `resources/**` —— 即 `permissions.yaml`、
+    `media-rules.yaml` 与仓库里的占位 `static/home/index.html`。两条链路各有 `classpathZip<Target>[Debug]` 与
+    `windres|objcopyClasspath<Target>[Debug]`，产物分放在 `build/generated/classpath/<目标>[/debug]`（zip 同名，混放会互相覆盖）。
+  - ⚠️ **改了 `resources/**` 必须重新链接**：`buildSrc/NativeClasspath.kt` 已把 `classpath.res` / `classpath.o` 声明为链接任务的输入，只改资源内容也会触发 `classpathZip → windres/objcopy → link`；若发现改动没生效，先看 link 任务是不是被判了 UP-TO-DATE（debug 认 `windresClasspath<Target>Debug` / `objcopyClasspath<Target>Debug`）。
 - **Windows 进程代码页**：`classpath/mingw/app.manifest`（`activeCodePage=UTF-8`）由 `classpath.rc` 以 `RT_MANIFEST` 引用，随 `classpath.res` 一起链进 exe。
   没有它，okio 走的 CRT 窄字符 API 会把中文文件名解错而**直接丢弃** —— 症状是目录里「看着少文件」，排查时先怀疑代码页。
 - **默认权限注册表**是内嵌资源 `permissions.yaml`（`classpath` 根下），由 `loadPermissionRegistry` 在 `appModule` 里解析成 `PermissionRegistry` 单例；改它同样要重新编译。
@@ -198,9 +202,11 @@ gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
 - **本机跑起来**（改完代码冒烟用）：
   - **建库导表**：本机 MariaDB 直接导 `sql/` 里的脚本即可（库 `lolosia-backend`）。客户端不在 `PATH`（本机在 `D:\Program Files\MariaDB 12.1\bin\`），且 `cmd /c` 重定向会被工具策略拦，
     改用客户端自带的 `source`：`& "<...>\bin\mysql.exe" -u root -p<弱口令> -e "source <脚本的绝对路径>.sql"`。
-  - **启动后端**：`gradlew runReleaseExecutableMingwX64`，**cwd 必须是 `backend` 根目录** —— 磁盘 `application.yaml` 按工作目录找，换个 cwd 就退回内嵌默认配置。
+  - **启动后端**：`gradlew runDebugExecutableMingwX64`，**cwd 必须是 `backend` 根目录** —— 磁盘 `application.yaml` 按工作目录找，换个 cwd 就退回内嵌默认配置。
+    调试版不跑 `vite build`、也不嵌前端产物，重启只等编译 + 链接；前端另开 `pnpm dev`（5005）连过来。
+    只有要连前端一起验（例如确认内嵌 `static/home` 真能打开）才用 `runReleaseExecutableMingwX64` —— 它每次重启都会先重跑一遍 `vite build`。
   - **重启**：先杀旧的 `lolosia-backend.exe`（`Get-Process lolosia-backend | Stop-Process -Force`）再跑；
-    否则 `linkReleaseExecutableMingwX64` 会因 exe 被旧进程占用报 `AccessDeniedException`。
+    否则链接会因 exe 被旧进程占用报 `AccessDeniedException`。
 
 - 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64` / `linkReleaseExecutableLinuxX64`；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。

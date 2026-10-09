@@ -9,6 +9,7 @@ import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Exec
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.api.tasks.bundling.ZipEntryCompression
@@ -17,6 +18,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
 import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import java.io.File
 
 /**
@@ -30,6 +32,12 @@ import java.io.File
  * 也就是说 commonMain 是所有 target 共享的公共资源，目标源集可覆盖同名文件。
  * 其它 task 产生的资源目录可通过 `lolosia.classpath.resources(...)` 注入，
  * vite 前端产物则在 `lolosia.classpath.includeViteJar` 打开时自动并入。
+ *
+ * **按构建类型分两条链路**（[NativeBuildType]，与 mingw / linux 那对目标是两回事）：
+ * - `release`：并入 vite 产物，线上跑的就是它；
+ * - `debug`：不建到 `viteJar` 的依赖、也不并 vite 产物 —— 本地调试时前端走 vite dev server
+ *   （见 `.env.serve-dev`），省掉每次重启都要重跑一遍 `vite build` 的十几秒。
+ *   其余资源（`permissions.yaml` 等）照常嵌入，调试时的权限判定才有依据。
  *
  * 嵌入方式按目标族区分：
  * - mingw* ：windres 编译成 PE 资源（.res），作为链接输入；
@@ -50,11 +58,51 @@ internal fun Project.configureNativeClasspath(lolosia: LolosiaExtension) {
 
 private fun Project.configureTargetClasspath(target: KotlinNativeTarget, extension: ClasspathExtension) {
     val suffix = target.name.replaceFirstChar { it.uppercaseChar() }
-    val embedDir = layout.buildDirectory.dir("generated/classpath/${target.name}")
 
-    val zipTask = tasks.register("classpathZip$suffix", Zip::class.java) {
+    // 任务名沿用旧的无后缀命名（release），debug 那条补「Debug」后缀以示区分
+    val release = registerClasspath(target, suffix, "", extension, includeVite = true)
+    val debug = registerClasspath(target, suffix, "Debug", extension, includeVite = false)
+
+    target.binaries.withType<Executable>().configureEach {
+        val embed = if (buildType == NativeBuildType.DEBUG) debug else release
+        linkTaskProvider.configure {
+            dependsOn(embed.steps)
+            // 资源是经 linkerOpts 以路径形式交给链接器的，Gradle 看不见它的内容变化 ——
+            // 不显式声明成输入，只改资源（如 permissions.yaml）不会触发重新链接，跑的还是旧二进制。
+            // 用 inputs.files 而非 inputs.file：文件尚未产出时不至于判定输入校验失败。
+            inputs.files(embed.artifact)
+        }
+        linkerOpts(*embed.linkerArgs.toTypedArray())
+    }
+}
+
+/** 一条 classpath 嵌入链路：链接前要跑完的任务、交给链接器的输入文件、追加的链接参数。 */
+private class ClasspathEmbed(
+    val steps: TaskProvider<*>,
+    val artifact: File,
+    val linkerArgs: List<String>,
+)
+
+/**
+ * 建出某条链路（[includeVite] 区分 release / debug）的 classpath.zip 与嵌入任务。
+ *
+ * 两条链路的产物分开放（debug 落在 `<目标>/debug/`）：zip 同名，混在一个目录里会互相覆盖。
+ */
+private fun Project.registerClasspath(
+    target: KotlinNativeTarget,
+    suffix: String,
+    flavorSuffix: String,
+    extension: ClasspathExtension,
+    includeVite: Boolean,
+): ClasspathEmbed {
+    val embedDir = layout.buildDirectory.dir(
+        "generated/classpath/${target.name}" + if (includeVite) "" else "/debug"
+    )
+
+    val zipTask = tasks.register("classpathZip$suffix$flavorSuffix", Zip::class.java) {
         group = "classpath"
         description = "把 ${target.name} 各源集的 resources 合并成 classpath.zip"
+
         archiveFileName.set(CLASSPATH_ZIP_NAME)
         destinationDirectory.set(embedDir)
 
@@ -65,15 +113,24 @@ private fun Project.configureTargetClasspath(target: KotlinNativeTarget, extensi
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
 
-        includeViteJar(extension)
+        // 只有 release 这条才并 vite 产物：debug 链连依赖都不建，`runDebugExecutable*` 就不会去跑 vite build
+        if (includeVite) includeViteJar(extension)
         resourceSourceSetsOf(target).forEach { sourceSet -> from(sourceSet.resources) }
         extension.additionalResources.forEach { from(it) }
     }
 
-    when {
-        target.name.startsWith("mingw") -> embedAsWindowsResource(target, suffix, zipTask, embedDir)
-        target.name.startsWith("linux") -> embedAsLinuxObject(target, suffix, zipTask, embedDir, extension)
-        else -> logger.warn("classpath 资源嵌入暂不支持目标 ${target.name}：其 resources 不会进入可执行文件")
+    return when {
+        target.name.startsWith("mingw") ->
+            embedAsWindowsResource(suffix, flavorSuffix, zipTask, embedDir)
+
+        target.name.startsWith("linux") ->
+            embedAsLinuxObject(target, suffix, flavorSuffix, zipTask, embedDir, extension)
+
+        else -> {
+            logger.warn("classpath 资源嵌入暂不支持目标 ${target.name}：其 resources 不会进入可执行文件")
+            val zip = embedDir.get().asFile.resolve(CLASSPATH_ZIP_NAME)
+            ClasspathEmbed(zipTask, zip, emptyList())
+        }
     }
 }
 
@@ -109,19 +166,19 @@ private fun Zip.includeViteJar(extension: ClasspathExtension) {
 // ===== Windows：windres 把 .rc 编译成 .res，再交给链接器 =====
 
 private fun Project.embedAsWindowsResource(
-    target: KotlinNativeTarget,
     suffix: String,
-    zipTask: Provider<Zip>,
+    flavorSuffix: String,
+    zipTask: TaskProvider<Zip>,
     embedDir: Provider<Directory>,
-) {
-    val prepareRc = tasks.register("prepareClasspathRc$suffix", Copy::class.java) {
+): ClasspathEmbed {
+    val prepareRc = tasks.register("prepareClasspathRc$suffix$flavorSuffix", Copy::class.java) {
         group = "classpath"
         description = "把 classpath.rc 与 app.manifest 放到 classpath.zip 同级目录，供 windres 使用"
         from(layout.projectDirectory.dir("classpath/mingw"))
         into(embedDir)
     }
 
-    val windres = tasks.register("windresClasspath$suffix", Exec::class.java) {
+    val windres = tasks.register("windresClasspath$suffix$flavorSuffix", Exec::class.java) {
         group = "classpath"
         description = "把 classpath.zip 编译成 PE 资源对象"
         dependsOn(zipTask, prepareRc)
@@ -142,16 +199,8 @@ private fun Project.embedAsWindowsResource(
         environment("PATH", "${binDir.absolutePath}${File.pathSeparator}${System.getenv("PATH")}")
     }
 
-    target.binaries.withType<Executable>().configureEach {
-        linkTaskProvider.configure {
-            dependsOn(windres)
-            // 资源是经 linkerOpts 以路径形式交给链接器的，Gradle 看不见它的内容变化 ——
-            // 不显式声明成输入，只改资源（如 permissions.yaml）不会触发重新链接，跑的还是旧二进制。
-            // 用 inputs.files 而非 inputs.file：文件尚未产出时不至于判定输入校验失败。
-            inputs.files(embedDir.get().asFile.resolve(CLASSPATH_RES))
-        }
-        linkerOpts(embedDir.get().asFile.resolve(CLASSPATH_RES).absolutePath)
-    }
+    val resource = embedDir.get().asFile.resolve(CLASSPATH_RES)
+    return ClasspathEmbed(windres, resource, listOf(resource.absolutePath))
 }
 
 /** Kotlin/Native 自带的 mingw 工具链目录（windres 在其中，无需另装 MinGW）。 */
@@ -171,21 +220,23 @@ private fun konanMingwBinDir(): File {
 private fun Project.embedAsLinuxObject(
     target: KotlinNativeTarget,
     suffix: String,
-    zipTask: Provider<Zip>,
+    flavorSuffix: String,
+    zipTask: TaskProvider<Zip>,
     embedDir: Provider<Directory>,
     extension: ClasspathExtension,
-) {
+): ClasspathEmbed {
+    val embedPath = embedDir.get().asFile
     val objcopy = objcopyConfigFor(target.name)
     if (objcopy == null) {
         logger.warn("未配置 ${target.name} 的 objcopy 工具链：其 resources 不会进入可执行文件")
-        return
+        return ClasspathEmbed(zipTask, embedPath.resolve(CLASSPATH_ZIP_NAME), emptyList())
     }
 
     // Windows 宿主上没有任何 objcopy 能产出 aarch64 ELF（konan 自带的那个是 ELF 二进制、
     // mingw 的只支持 x86-64），只把这一步借道 WSL；编译与链接仍然在 Windows 上跑。
     val useWsl = Os.isFamily(Os.FAMILY_WINDOWS)
 
-    val objcopyTask = tasks.register("objcopyClasspath$suffix", Exec::class.java) {
+    val objcopyTask = tasks.register("objcopyClasspath$suffix$flavorSuffix", Exec::class.java) {
         group = "classpath"
         description = "把 classpath.zip 转成可链接的目标文件（需 ${objcopy.tool}）"
         dependsOn(zipTask)
@@ -213,18 +264,13 @@ private fun Project.embedAsLinuxObject(
         }
     }
 
-    target.binaries.withType<Executable>().configureEach {
-        linkTaskProvider.configure {
-            dependsOn(objcopyTask)
-            // 同 mingw 分支：资源以路径形式进 linkerOpts，须显式声明成输入才会因资源变化重新链接
-            inputs.files(embedDir.get().asFile.resolve(CLASSPATH_OBJECT))
-        }
-        linkerOpts(
-            // 让 objcopy 产生的符号进入动态符号表，平台侧才能用 dlsym 查到
-            "-Wl,--export-dynamic",
-            embedDir.get().asFile.resolve(CLASSPATH_OBJECT).absolutePath,
-        )
-    }
+    val obj = embedPath.resolve(CLASSPATH_OBJECT)
+    return ClasspathEmbed(
+        objcopyTask,
+        obj,
+        // 让 objcopy 产生的符号进入动态符号表，平台侧才能用 dlsym 查到
+        listOf("-Wl,--export-dynamic", obj.absolutePath),
+    )
 }
 
 private fun wslOptions(extension: ClasspathExtension): List<String> = buildList {
