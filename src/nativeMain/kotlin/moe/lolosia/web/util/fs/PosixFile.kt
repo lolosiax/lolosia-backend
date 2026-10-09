@@ -3,6 +3,8 @@ package moe.lolosia.web.util.fs
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import platform.posix.*
 
 /**
@@ -52,3 +54,12 @@ fun makeDirectories(dir: String) {
     }
     makeDirectory(dir)
 }
+
+/**
+ * 文件最后修改时间（epoch 毫秒）；不存在或取不到返回 `null`。
+ *
+ * 走 okio 的 metadata 而不是 posix `stat`：mingw 与 linux 的 `struct stat` 字段布局不同，
+ * 直接调得为每个目标各写一份，okio 已经把这类差异吃掉了。
+ */
+fun fileLastModifiedMillis(absPath: String): Long? =
+    FileSystem.SYSTEM.metadataOrNull(absPath.toPath())?.lastModifiedAtMillis

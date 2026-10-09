@@ -28,6 +28,14 @@ class FileStoreClasspath(
 
     override fun list(prefix: String): List<String> = emptyList()
 
+    /** 外部资源用文件真实 mtime（见 [Classpath.lastModified]）。 */
+    override fun lastModified(path: String): Long? {
+        val rel = normalizeClasspathPath(path)
+        if (rel.isEmpty()) return null
+        val full = listOf(root.trim('/'), rel).filter { it.isNotEmpty() }.joinToString("/")
+        return store.lastModified(full)
+    }
+
     override val scheme: String = "file"
 
     override val origin: String get() = "$scheme://${root.trim('/')}"

@@ -30,7 +30,6 @@ import moe.lolosia.web.service.permission.syncRegistryGroups
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.classpath.FileStoreClasspath
 import moe.lolosia.web.util.classpath.StaticClasspathConfig
-import moe.lolosia.web.util.classpath.classpath
 import moe.lolosia.web.util.fs.FileStore
 import moe.lolosia.web.util.ktor.staticClasspath
 import moe.lolosia.web.util.ktor.webDav
@@ -116,15 +115,12 @@ fun Application.configureApplication(koin: Koin) {
         // 路径取自 generateConstants 依 viteJar 平台生成的常量，不写死字符串
         staticClasspath("/$VITE_DEFAULT", "static/$VITE_DEFAULT") {
             index = "index.html"
-            cacheControl = "max-age=60"
-            fallback = { _ ->
-                val index = classpath.read("static/$VITE_DEFAULT/index.html")
-                if (index != null) {
-                    respondBytes(index, ContentType.Text.Html)
-                } else {
-                    respond(HttpStatusCode.NotFound, ApiResult.err<Unit>(404, "前端资源缺失"))
-                }
-            }
+            // 入口文件名不带构建哈希（`index.html` / `index.js`），按 `max-age` 缓存的话，
+            // 重新部署后浏览器会拿旧入口去请求已被删掉的 chunk，页面直接白屏 —— 手机上又没有强刷。
+            // 一律回源校验：内容没变就是 304，变了立刻换新（见 Classpath.lastModified）。
+            cacheControl = "no-cache"
+            spaFallback = true
+            fallback = { _ -> respond(HttpStatusCode.NotFound, ApiResult.err<Unit>(404, "前端资源缺失")) }
         }
         get("/") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
         get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }

@@ -19,4 +19,12 @@ interface FileStore {
 
     /** 覆盖写入；父目录不存在时逐级创建。写入失败返回 `false`。 */
     fun write(path: String, bytes: ByteArray): Boolean
+
+    /**
+     * 文件最后修改时间（epoch 毫秒）；不存在或取不到返回 `null`。
+     *
+     * 给 `FileStoreClasspath` 下发 `Last-Modified` 用：外部资源用**文件真实时间**，
+     * 与内嵌 classpath 统一用进程启动时间不同（见 `Classpath.lastModified`）。
+     */
+    fun lastModified(path: String): Long?
 }

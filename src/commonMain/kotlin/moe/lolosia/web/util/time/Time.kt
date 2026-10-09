@@ -19,6 +19,14 @@ fun nowLocal(): LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.curr
 /** 当前 epoch 毫秒（非库时间，如会话的「最后访问时间」）。 */
 fun nowEpochMs(): Long = Clock.System.now().toEpochMilliseconds()
 
+/**
+ * 进程启动时刻（epoch 毫秒）。
+ *
+ * 内嵌 classpath 资源没有各自的时间戳，拿它当 `Last-Modified`：重启一次就视为「所有内嵌资源都变过」，
+ * 客户端手上的条件请求必然落空、拿到新二进制里的内容（见 `Classpath.lastModified`）。
+ */
+val PROCESS_START_MS: Long = nowEpochMs()
+
 /** 接口里时间字段的展示时区：固定 `+08:00`（与旧 JVM 版的 `@JsonFormat(timezone = "GMT+8")` 一致）。 */
 val DISPLAY_ZONE: TimeZone = TimeZone.of("+08:00")
 

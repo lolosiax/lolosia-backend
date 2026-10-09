@@ -15,6 +15,8 @@ class PosixFileStore(private val root: String) : FileStore {
     override fun write(path: String, bytes: ByteArray): Boolean =
         resolve(path)?.let { writeFileBytes(it, bytes) } ?: false
 
+    override fun lastModified(path: String): Long? = resolve(path)?.let(::fileLastModifiedMillis)
+
     /** 拼出绝对路径；空路径或含 `..` 的路径视为非法。 */
     private fun resolve(path: String): String? {
         val rel = path.trimStart('/')

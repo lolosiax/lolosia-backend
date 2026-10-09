@@ -3,6 +3,7 @@ package moe.lolosia.web.util.classpath
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import moe.lolosia.web.util.fs.fileLastModifiedMillis
 import platform.posix.*
 
 /**
@@ -20,6 +21,13 @@ class DiskClasspath(private val root: String) : Classpath {
         val rel = normalizeClasspathPath(path)
         if (rel.isEmpty() || rel.contains("..")) return null
         return readFileBytes("${root.trimEnd('/')}/$rel")
+    }
+
+    /** 磁盘条目用文件真实 mtime（见 [Classpath.lastModified]）。 */
+    override fun lastModified(path: String): Long? {
+        val rel = normalizeClasspathPath(path)
+        if (rel.isEmpty() || rel.contains("..")) return null
+        return fileLastModifiedMillis("${root.trimEnd('/')}/$rel")
     }
 
     override fun list(prefix: String): List<String> = emptyList()

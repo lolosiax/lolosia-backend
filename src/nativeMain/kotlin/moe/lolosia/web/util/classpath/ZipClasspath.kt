@@ -13,6 +13,7 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.sizeOf
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.usePinned
+import moe.lolosia.web.util.time.PROCESS_START_MS
 import platform.zlib.Z_FINISH
 import platform.zlib.Z_OK
 import platform.zlib.Z_STREAM_END
@@ -64,6 +65,10 @@ class ZipClasspath private constructor(private val data: ByteArray) : Classpath 
         val p = normalizeClasspathPath(prefix)
         return byName.keys.filter { p.isEmpty() || it.startsWith(p) }.sorted()
     }
+
+    /** zip 条目没有各自的时间戳，统一取进程启动时间（见 [Classpath.lastModified]）。 */
+    override fun lastModified(path: String): Long? =
+        if (byName.containsKey(normalizeClasspathPath(path))) PROCESS_START_MS else null
 
     override val scheme: String = "classpath"
 
