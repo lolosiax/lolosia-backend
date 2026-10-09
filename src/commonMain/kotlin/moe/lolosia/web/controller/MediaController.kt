@@ -4,9 +4,11 @@ import moe.lolosia.web.dto.MediaDetail
 import moe.lolosia.web.dto.MediaIndexScanReq
 import moe.lolosia.web.dto.MediaPropertyApplyReq
 import moe.lolosia.web.dto.MediaPropertyReq
+import moe.lolosia.web.dto.MediaTagItem
 import moe.lolosia.web.dto.MediaTagsReq
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.service.files.normalizeRelative
+import moe.lolosia.web.service.media.FolderTagService
 import moe.lolosia.web.service.media.MEDIA_INDEX_EVENT
 import moe.lolosia.web.service.media.MEDIA_READ
 import moe.lolosia.web.service.media.MEDIA_WRITE
@@ -88,6 +90,38 @@ object MediaController {
         property: MediaPropertyService,
         @Body req: MediaTagsReq,
     ): MessageResult = property.denyTags(ctx, req)
+
+    /**
+     * **文件夹**标签：读。
+     *
+     * 目录不在 `media_asset` 里，属性页那套（`media/detail` 与 `media/tags/…`）挂不到它身上，
+     * 所以这条单独按相对路径取（`folder_tag` 表）。`path` 为空串表示浏览根。
+     */
+    @GET("/media/folder-tags")
+    @Permission(MEDIA_READ)
+    suspend fun folderTags(
+        ctx: Context,
+        folderTags: FolderTagService,
+        @Query path: String?,
+    ): List<MediaTagItem> = folderTags.list(ctx, path)
+
+    /** 文件夹标签：打上（来源 `manual`，标签不存在则按需建）。 */
+    @POST("/media/folder-tags/attach")
+    @Permission(MEDIA_WRITE)
+    suspend fun attachFolderTags(
+        ctx: Context,
+        folderTags: FolderTagService,
+        @Body req: MediaTagsReq,
+    ): MessageResult = folderTags.attach(ctx, req)
+
+    /** 文件夹标签：解除关联（只摘关联，不删词表里的标签）。 */
+    @POST("/media/folder-tags/detach")
+    @Permission(MEDIA_WRITE)
+    suspend fun detachFolderTags(
+        ctx: Context,
+        folderTags: FolderTagService,
+        @Body req: MediaTagsReq,
+    ): MessageResult = folderTags.detach(ctx, req)
 
     /**
      * 请求本地索引扫描：`path` 为空表示整个浏览根。

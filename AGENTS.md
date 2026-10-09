@@ -269,7 +269,7 @@ router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller�
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、
                                 NativeClasspath.kt（zip 合并 + windres/objcopy 嵌入 + 链接参数）、extension/
-sql/                            建表脚本（9 表，含 sys_role.parent_id 与权限规则两表；无种子规则 —— 默认值在 permissions.yaml）+ migrate_rbac_groups.sql（历史库一次性迁移）
+sql/                            建表脚本（15 表，含 sys_role.parent_id 与权限规则两表、媒体库五表与 folder_tag；无种子规则 —— 默认值在 permissions.yaml）+ migrate_rbac_groups.sql（历史库一次性迁移）
 ```
 
 ## 11. 深度材料

@@ -74,7 +74,7 @@
 │   └── linuxMain/kotlin/…/       # 两个 linux 目标共享的 ApiClient / EmbeddedClasspath / Mkdir / Shell 实现（无入口）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── classpath/mingw/app.manifest  # 应用清单（RT_MANIFEST）：把进程代码页切成 UTF-8，否则中文文件名会被 okio 丢弃
-├── sql/                          # 建表脚本（9 张表 + view_user_role 视图）+ migrate_rbac_groups.sql（历史库组模型迁移）
+├── sql/                          # 建表脚本（15 张表 + view_user_role 视图）+ migrate_rbac_groups.sql（历史库组模型迁移）
 ├── lolosia-backend-native.service # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```

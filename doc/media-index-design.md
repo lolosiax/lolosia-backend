@@ -183,6 +183,7 @@
 | `media_asset_tag` | 文件 ↔ 标签关联，带 `source` / `provider` / `confidence` / `negative` | 文件数 × 5~20 |
 | `media_tag_rule` | 目录 / 文件名 → 标签（或评级）的规则 | 几十 |
 | `media_embedding` | 向量**索引**（本体在 `.cache` 的 `.f32` 文件里） | = 有向量的文件数 × 模型数 |
+| `folder_tag` | **目录** ↔ 标签关联（目录不在 `media_asset` 里）：给文件管理器记展示开关，如 `feature:日期分组` / `feature:自动分组-月份` | 目录数 × 0~3 |
 
 > 元数据**不单开 EAV 表**：能建索引的字段提升成 `media_asset` 的列，长尾原文进 `metadata_json`。理由见 §4.7。
 
@@ -1001,6 +1002,9 @@ v1 不做：文件管理器当前只给 `admin`，§10.4 的签名已经够；�
 | `POST /api/media/tags/attach` | `{ path, tags: [ {namespace,name} ] }` | `MessageResult` | `lolosia.media.write` |
 | `POST /api/media/tags/detach` | `{ path, tags: [...] }` | `MessageResult` | `lolosia.media.write` |
 | `POST /api/media/tags/deny` | `{ path, tags: [...] }` | `MessageResult` | `lolosia.media.write`（写 `negative = 1`） |
+| `GET /api/media/folder-tags` | `path` | `List<MediaTagItem>`（该**目录**的标签） | `lolosia.media.read` |
+| `POST /api/media/folder-tags/attach` | `{ path, tags: [...] }` | `MessageResult` | `lolosia.media.write` |
+| `POST /api/media/folder-tags/detach` | `{ path, tags: [...] }` | `MessageResult` | `lolosia.media.write` |
 | `POST /api/media/property/save` | `{ path, rating?, analysisSkip?, caption?, tagIds?[] }` | `MessageResult`（属性页一次性提交） | `lolosia.media.write` |
 | `POST /api/media/property/apply` | `{ path, recursive, rating?, analysisSkip? }` | `MessageResult`（批量定级） | `lolosia.media.write` |
 | `POST /api/media/search` | `{ q?, tags?[], rating?[], cameraModel?, isoMin?, apertureMax?, takenFrom?, takenTo?, hasGps?, mode: "filter"\|"semantic", cursor?, size? }` | 条目（含 `path`/`rating`/`caption`/`tags`/`score`/`exp`/`sig`）+ `nextCursor` | `lolosia.media.read` |
@@ -1093,8 +1097,8 @@ v1 不做：文件管理器当前只给 `admin`，§10.4 的签名已经够；�
 
 | 层 | 文件 |
 | --- | --- |
-| SQL | `sql/media_asset.sql` / `media_tag.sql` / `media_asset_tag.sql` / `media_tag_rule.sql` / `media_embedding.sql` |
-| 实体 | `database/model/MediaAssetEntity.kt` / `MediaTagEntity.kt` / `MediaAssetTagEntity.kt` / `MediaTagRuleEntity.kt` / `MediaEmbeddingEntity.kt` |
+| SQL | `sql/media_asset.sql` / `media_tag.sql` / `media_asset_tag.sql` / `media_tag_rule.sql` / `media_embedding.sql` / `folder_tag.sql` |
+| 实体 | `database/model/MediaAssetEntity.kt` / `MediaTagEntity.kt` / `MediaAssetTagEntity.kt` / `MediaTagRuleEntity.kt` / `MediaEmbeddingEntity.kt` / `FolderTagEntity.kt` |
 | 仓库 | `database/repository/Media*Repository.kt`（全 `@Query` 单语句；`@Repository` + `@Injectable`） |
 | 身份与哈希 | `util/media/QuickId.kt` / `ContentHash.kt`（`okio.HashingSink`，见下）/ `MediaKinds.kt` / `package.kt` |
 | EXIF | `util/exif/ExifReader.kt`（IFD 解析）/ `ExifTags.kt` / `ExifValue.kt` / `Gps.kt` / `package.kt` |

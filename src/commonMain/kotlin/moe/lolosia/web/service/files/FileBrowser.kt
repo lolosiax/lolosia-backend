@@ -81,6 +81,20 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
         return relative to resolve(rootPath, relative)
     }
 
+    /**
+     * 校验 [path] 确实是一个**存在的目录**（含浏览根），返回归一化后的相对路径。
+     *
+     * 只做一次 stat，不枚举子项 —— 机械盘上列一次目录很贵，给文件夹打标签这类操作不该顺手把
+     * 目录列一遍（[list] / [dirs] 都做不到「只校验不枚举」）。
+     */
+    fun requireDir(path: String?): String {
+        val (relative, dir) = requirePath(path)
+        if (fs.metadataOrNull(dir)?.isDirectory != true) {
+            throw ApiException(404, "目录不存在：${relative.ifEmpty { "/" }}")
+        }
+        return relative
+    }
+
     /** 列目录。 */
     suspend fun list(path: String?, sort: String?, order: String?): FileListResult {
         val (relative, dir) = requirePath(path)
