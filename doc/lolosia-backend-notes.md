@@ -157,3 +157,63 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 - 板子两块网卡：`eth0`（接光猫）+ `wlan0`（接路由器 Wi-Fi）；经路由器 NAT 进来的 SMB 客户端，在板子上显示为**路由器 WAN 侧的地址**。
 - 域名**只有 AAAA 记录、没有 A 记录**时，不支持纯 IPv6 的客户端（部分手机 WebDAV App）会连不上 —— 局域网内改用板子 IP 直连即可绕开。
 - SMB 写入慢先看**客户端那一侧**：板子侧 4 核基本空闲、`smbd` 只占单核约 1/4、磁盘写入几乎为零（数据在 page cache），这些都不是瓶颈。
+
+## 7. 仓库 · 远端 · 分支布局（2026-10-09 迁至 Gitee）
+
+> 上游 [development-notes.md](./development-notes.md) §7「工程形态」记的是**旧机器**的路径与仓库名（`E:\Dev\…`、`ktor-template`），
+> 本机实际布局以本节为准。
+
+### 7.1 远端
+
+| remote | 地址 | 说明 |
+| --- | --- | --- |
+| `origin` | `https://gitee.com/lolosia/lolosia-project.git` | **主力远端**（2026-10-09 由 GitHub 迁来） |
+| `github` | `https://github.com/lolosiax/lolosia-backend.git` | 旧远端，仅存档 |
+
+迁移动作：原 `origin` 改名 `github` → `git remote add origin <gitee>` → 各分支上游改指 `origin`。原 `ktor-template` / `template` 两个 remote 已删除。
+
+### 7.2 分支
+
+| 分支 | 提交 | 形态 | 上游 | 说明 |
+| --- | --- | --- | --- | --- |
+| `native` | `cf1df5e` | **Kotlin/Native（KMP）** | `origin/native` | **当前主线、最新版**；`doc/` 五个笔记都在这条线上 |
+| `master` | `b579347` | Spring Boot（WebFlux） | `origin/master` | Spring 时代的存档 |
+| `spring` | `b579347` | 同上 | 无 | 与 `master` 同提交的本地指针 |
+| `dev/avif` | `3124713` | Spring Boot | `origin/dev/avif` | 仅多一个「资源图片 avif 支持」提交 |
+| `dev/ktor-jvm` | `a3eade3` | **JVM + Ktor（已废弃）** | `origin/dev/ktor-jvm` | 见下 |
+
+- ⚠️ **`dev/ktor-jvm` 已废弃**：它由 `master` 合入 `ktor-template` 得到，是 JVM 版 Ktor 实现；同期 `native` 已用 Kotlin/Native 重写且功能远超（WebDAV、在线文件管理器、RBAC、媒体索引…）。除翻历史外不要基于它开发。
+  - 其历史里含 `ktor-template` 仓库的 4 个提交（`808466a` `fabb41a` `48d4509` `5b218f3`），推 Gitee 时被一并带入。
+- **不入库的本机文件**（`.gitignore` 覆盖，含**明文凭据**，别往里塞）：`application.yaml`（数据库 / 邮件口令）、`platforms.json`（服务器口令）、`.idea/`、`work/`。
+
+### 7.3 本机路径
+
+| 内容 | 路径 |
+| --- | --- |
+| 后端仓库 | `F:\Develop\Kotlin\lolosia-backend` |
+| 前端仓库 | `F:\Develop\Node\lolosia-web` |
+| Trae 工作区 | `F:\Develop\Trae\lolosia-home`（`backend/`、`web/` 均为 junction 指向上表两处） |
+
+### 7.4 版本控制踩坑
+
+| 症状 | 根因 / 处理 |
+| --- | --- |
+| 工作区里**一批未提交改动凭空消失**、`git status` 变干净 | 执行过 `git checkout [--no-overlay] <ref> -- .`：它用 `<ref>` 整棵树**覆盖索引与工作区**，`--no-overlay` 还会**删掉 `<ref>` 里没有的文件**。2026-10-09 实测：`git checkout --no-overlay origin/native -- .` 相对 HEAD 造成 248 增 / 13 改 / 201 删，把 `build.gradle.kts` 等处的未提交改动覆盖掉了。**探查某个 ref 的内容，只用 `git status` / `git diff <ref>` / `git show <ref>:<path>` / `git ls-tree <ref>`，不要用 checkout。** |
+| 想从 git 里捞回被覆盖的内容 | `git fsck --lost-found` 只捞得到**曾暂存过**的 blob（已进对象库）；**未暂存（worktree-only）的修改 git 不留痕**，只能靠 IDE 本地历史（IntelliJ：右键文件 → Local History → Show History；VS Code：Timeline）。本次实测捞出的 97 个 dangling blob 全是 `com.zxce.igame` / `top.lolosia` 老包名时期的历史对象，与丢失内容无关。 |
+| 分支改名后仍指向旧远端 | 上游跟着旧 remote 走（`native` 由 `master` 改名而来，上游一度仍是 `github/master`）→ 改名后立刻 `git branch --set-upstream-to=origin/<分支>`，或 `git config --unset branch.<名>.remote`。 |
+
+## 8. 数据库迁移备注（2026-10-09，搬到 TSP-1M）
+
+把 Spring 版数据从**远程那台雨云库**（主机 / 端口 / 口令见本地 `platforms.json`，按 [AGENTS.md](../AGENTS.md) §9 不入库）搬到开发板 `TSP-1M`（MariaDB 10.6.23 / aarch64 / 无 Docker）：
+
+- 目标库 `lolosia-backend`；账号 `lolosia@localhost` 与 `lolosia@%`，按需求给 **SUPER + 该库 ALL**（不建子账号）。
+- 导入命令（管道直连，不落中间文件）：
+
+  ```bash
+  mysqldump -h <源库主机> -P <端口> -u lolosia -p'…' --routines --triggers --add-drop-table lolosia-backend \
+    | sed 's/utf8mb4_uca1400_ai_ci/utf8mb4_unicode_ci/g' \
+    | mysql -u lolosia -p'…' lolosia-backend
+  ```
+
+- ⚠️ **collation 坑**：源库（MariaDB 11.x）默认 `utf8mb4_uca1400_ai_ci`，目标 10.6 **不认**（`ERROR 1273 Unknown collation`）→ 必须用上面的 `sed` 换成 `utf8mb4_unicode_ci`。不换会导到一半报错中断。
+- 结果：8 张表 —— `sys_user` 4 行、`sys_role` 5 行、`sys_user_roles` 3 行、`sys_sessions` 33 行，`sys_cache` / `oss_user_file` 为 0 行，另含 `sys_logs` 与视图 `view_user_role`。
