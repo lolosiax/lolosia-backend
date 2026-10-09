@@ -162,7 +162,7 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   ⚠️ `DavStore` 会**跳过一切 `.` 开头的段**（解析与列举都跳）—— 这是为了让文件管理器的缩略图缓存（`<root>/.cache`）在 WebDAV 客户端里彻底不可见，代价是用户自己建的隐藏目录/文件也看不到。
 - **在线文件管理器**：`AppSettings.files`（`root` 留空回退 `webdav.root`、`signKey`、`signTtlSeconds`、`thumbnail.*`）把 `root` 以**只读**方式列成目录树并出缩略图；
   接口在 `controller/FileController.kt`，实现全在 `service/files/`。`thumb` / `raw` 走 URL 签名而非会话（见 §6），其余接口挂 `lolosia.files.read`（默认只给 `admin` 及以上）。
-  - 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v1`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`），版本号一改旧缓存整体作废。
+  - 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v2`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`），版本号一改旧缓存整体作废。
   - 生成是**单工作协程串行**的（机械盘并发解码只会更慢），`files.thumbnail.enabled` **只能在一台机器上开**，否则两边同时写同一份缓存。
   - `FileEntry` 的 `hasChildren`（是否为空）与 `hasSubdirs`（是否有子目录）是**两个独立标志位**，前者由 `files/list` 与 `files/dirs` 填、后者只有 `files/dirs` 填（判定它要多一轮 stat 扫描）。
 - **第三方 C 库**（图像编解码）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `src/nativeInterop/cinterop/*.def`。

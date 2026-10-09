@@ -8,6 +8,7 @@ import moe.lolosia.thirdparty.gif.Gif
 import moe.lolosia.thirdparty.jpeg.Jpeg
 import moe.lolosia.thirdparty.png.Png
 import moe.lolosia.thirdparty.webp.Webp
+import moe.lolosia.web.util.exif.ExifReader
 import moe.lolosia.web.util.image.Image
 import moe.lolosia.web.util.image.ImageFormat
 
@@ -20,7 +21,8 @@ import moe.lolosia.web.util.image.ImageFormat
  * 缩放用**面积平均（box filter）**手写实现：库里没有任何缩放 API，而面积平均在缩小时质量稳定、
  * 只需一趟遍历，适合缩略图场景。
  *
- * 已知局限：不解析 EXIF 方向，手机竖拍照片可能方向不对（要修需在解码前读 EXIF Orientation 旋转）。
+ * EXIF Orientation 在解码后立即摆正（见 [reoriented]）：解码器给的是传感器原始朝向，而重新编码
+ * 出的 WebP 不带 EXIF，不转正的话手机竖拍的照片会躺倒 90°。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -56,13 +58,57 @@ actual object ThumbnailGenerator {
 
     actual fun sample(bytes: ByteArray): String? = decode(bytes)?.sampleRgb565()
 
-    /** 按文件头识别格式后分派到对应门面解码。 */
-    private fun decode(bytes: ByteArray): RgbaImage? = when (Image.typeOf(bytes)) {
-        ImageFormat.PNG -> Png.decode(bytes)
-        ImageFormat.JPEG -> Jpeg.decode(bytes)
-        ImageFormat.GIF -> Gif.decode(bytes)
-        ImageFormat.WEBP -> Webp.decode(bytes)
-        ImageFormat.UNKNOWN -> null
+    /** 按文件头识别格式后分派到对应门面解码，并把 EXIF 方向摆正。 */
+    private fun decode(bytes: ByteArray): RgbaImage? {
+        val image = when (Image.typeOf(bytes)) {
+            ImageFormat.PNG -> Png.decode(bytes)
+            ImageFormat.JPEG -> Jpeg.decode(bytes)
+            ImageFormat.GIF -> Gif.decode(bytes)
+            ImageFormat.WEBP -> Webp.decode(bytes)
+            ImageFormat.UNKNOWN -> null
+        } ?: return null
+        return image.reoriented(ExifReader.read(bytes)?.orientation)
+    }
+
+    /**
+     * 按 EXIF Orientation 摆正像素。
+     *
+     * 解码器给的是**传感器原始朝向**：手机横放竖拍时像素是 6000×4000 的横向图，方向只写在 EXIF 里，
+     * 查看器（浏览器看原图）会自己转正。缩略图要重新编码成 WebP，而这一版 WebP 不带 EXIF，
+     * 所以必须在这里把像素转过来，否则前端拿到的就是躺倒 90° 的图。
+     *
+     * 5~8 是「带旋转的镜像 / 旋转」，宽高与原图相反；值非法（`null` / 越界）或本身正立（1）时原样返回。
+     */
+    private fun RgbaImage.reoriented(orientation: Int?): RgbaImage {
+        if (orientation == null || orientation <= 1 || orientation > 8) return this
+        val swapped = orientation >= 5
+        val outWidth = if (swapped) height else width
+        val outHeight = if (swapped) width else height
+        val src = pixels
+        val out = ByteArray(outWidth * outHeight * 4)
+        for (y in 0 until outHeight) {
+            for (x in 0 until outWidth) {
+                // 目标像素 (x, y) 落在源图上的哪一点：各方向互为逆映射
+                val sx: Int
+                val sy: Int
+                when (orientation) {
+                    2 -> { sx = width - 1 - x; sy = y }
+                    3 -> { sx = width - 1 - x; sy = height - 1 - y }
+                    4 -> { sx = x; sy = height - 1 - y }
+                    5 -> { sx = y; sy = x }
+                    6 -> { sx = y; sy = height - 1 - x }
+                    7 -> { sx = width - 1 - y; sy = height - 1 - x }
+                    else -> { sx = width - 1 - y; sy = x }
+                }
+                val s = (sy * width + sx) * 4
+                val o = (y * outWidth + x) * 4
+                out[o] = src[s]
+                out[o + 1] = src[s + 1]
+                out[o + 2] = src[s + 2]
+                out[o + 3] = src[s + 3]
+            }
+        }
+        return RgbaImage(outWidth, outHeight, out)
     }
 
     /** 等比缩到最长边不超过 [maxEdge]；本来就够小则原样返回（不放大）。 */

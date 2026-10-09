@@ -14,7 +14,7 @@ import okio.Path.Companion.toPath
  *
  * 目录结构（`<浏览根>/.cache/lolosia/thumb/v<版本>/`，该目录对 WebDAV 隐藏）：
  * ```
- * v1/
+ * v2/
  *   ab/ab12…ef.json           源文件的缓存元数据（大小 / 修改时间 / 尺寸 / 已生成档位）
  *   ab/ab12…ef.256.webp       最长边 256 的缩略图
  *   ab/ab12…ef.1024.webp

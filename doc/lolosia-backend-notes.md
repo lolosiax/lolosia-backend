@@ -79,7 +79,7 @@ files:
 ```
 
 - 权限节点 `lolosia.files.read` **只给 `admin` 及以上**：浏览的是整块机械盘，不对普通用户开放。前端菜单按角色隐藏，直连 `/files` 对无权用户落 404。
-- 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v1`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`，版本号一改旧缓存整体作废）。**该目录对 WebDAV 隐藏**，见 §2.1。
+- 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v2`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`，版本号一改旧缓存整体作废）。**该目录对 WebDAV 隐藏**，见 §2.1。
 - `signKey` 未配置时启动日志会打一条 WARN。线上建议显式配一个固定随机串，否则每次重启后旧直链失效（不影响功能，前端重新列目录会拿到新签名）。
 - `thumbnail.enabled` 只能在一台机器上开：两台同时写同一份缓存会互相覆盖，也会把机械盘两头都拖慢。
 

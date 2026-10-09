@@ -25,7 +25,7 @@ val IMAGE_EXTENSIONS: Set<String> = setOf("png", "jpg", "jpeg", "gif", "webp")
 fun isHiddenName(name: String): Boolean = name.startsWith(".") || name == "lost+found"
 
 /** 共享的缩略图缓存版本号：规格或算法变更时递增，旧缓存整体失效（目录名带版本）。 */
-const val THUMBNAIL_CACHE_VERSION: Int = 1
+const val THUMBNAIL_CACHE_VERSION: Int = 2
 
 /** 缩略图缓存相对浏览根的目录（对 WebDAV 隐藏，见 `DavStore`）。 */
 const val CACHE_DIR: String = ".cache/lolosia/thumb"
