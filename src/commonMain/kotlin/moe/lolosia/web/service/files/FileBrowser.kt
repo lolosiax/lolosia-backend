@@ -11,6 +11,8 @@ import moe.lolosia.web.dto.FileDetail
 import moe.lolosia.web.dto.FileEntry
 import moe.lolosia.web.dto.FileListResult
 import moe.lolosia.web.dto.FileOpResult
+import moe.lolosia.web.dto.FileTransferItem
+import moe.lolosia.web.dto.FileTransferResult
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.image.Image
 import moe.lolosia.web.util.log.Log
@@ -184,6 +186,85 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
         }
         log.info { "已新建目录：$targetRelative" }
         return FileOpResult(targetRelative, name)
+    }
+
+    /**
+     * 把 [paths] 里的项**复制**或**移动**到 [dest] 目录下（`copy = true` 为复制）。
+     *
+     * 移动走 [FileSystem.atomicMove]（浏览根是同一挂载点，不跨文件系统）；复制是递归复制，
+     * 每进一层让出一次，免得在机械盘上长时间独占 IO。目标目录里重名时**自动加序号**
+     * （与上传同一套口径，见 [uniqueName]）—— 既覆盖不了用户的东西，也不必为一次粘贴先想名字。
+     *
+     * 单个项失败不中断整批，原因逐条收集到 [FileTransferResult.failed]；
+     * 把目录搬进它自己（含等于目标目录本身）会被拒绝，否则复制会无限递归、移动会把整棵树弄丢。
+     *
+     * 移动后源文件路径的缩略图缓存就地失效（与 [rename] 同理）；**目录**内部的缓存
+     * 与媒体索引仍是被动的：前者成为孤儿，后者靠下一轮扫描用 `quick_id` 认回。
+     */
+    suspend fun transfer(paths: List<String>, dest: String?, copy: Boolean): FileTransferResult {
+        val (destRelative, destPath) = requirePath(dest)
+        if (fs.metadataOrNull(destPath)?.isDirectory != true) {
+            throw ApiException(404, "目标目录不存在：${destRelative.ifEmpty { "/" }}")
+        }
+
+        val items = ArrayList<FileTransferItem>()
+        val failed = ArrayList<String>()
+        for (raw in paths) {
+            val relative = normalizeRelative(raw)
+            if (relative.isNullOrEmpty()) {
+                failed.add("${raw.ifEmpty { "/" }}：路径非法")
+                continue
+            }
+            val source = resolve(rootPath, relative)
+            val meta = fs.metadataOrNull(source)
+            if (meta == null) {
+                failed.add("$relative：源已不存在")
+                continue
+            }
+            if (destRelative == relative || destRelative.startsWith("$relative/")) {
+                failed.add("$relative：不能${if (copy) "复制" else "移动"}到它自己的里面")
+                continue
+            }
+
+            val name = uniqueName(destRelative, nameOf(relative))
+            val targetRelative = childOf(destRelative, name)
+            val target = resolve(rootPath, targetRelative)
+            runCatching {
+                if (copy) copyRecursive(source, target) else fs.atomicMove(source, target)
+            }.onFailure {
+                log.warn(it) { "${if (copy) "复制" else "移动"}失败：$relative -> $targetRelative" }
+                failed.add("$relative：${it.message ?: "未知错误"}")
+                continue
+            }
+            // 复制不动源，只有移动会让源路径下的缩略图缓存变成孤儿
+            if (!copy && !meta.isDirectory) cache.invalidate(relative)
+            items.add(FileTransferItem(relative, targetRelative, name))
+        }
+
+        val verb = if (copy) "复制" else "移动"
+        val hint = if (failed.isEmpty()) "" else "，${failed.size} 项失败"
+        log.info { "已$verb ${items.size} 项到 ${destRelative.ifEmpty { "/" }}$hint" }
+        return FileTransferResult(items, failed)
+    }
+
+    /**
+     * 递归复制文件或整棵目录树。
+     *
+     * 隐藏项（见 [isHiddenName]）一律跳过：它们在文件管理器里本来就看不见，
+     * 一并搬过去只会让用户莫名其妙多出一份 `.cache`。
+     */
+    private suspend fun copyRecursive(source: Path, target: Path) {
+        val meta = fs.metadataOrNull(source) ?: error("源已不存在：$source")
+        if (!meta.isDirectory) {
+            fs.copy(source, target)
+            return
+        }
+        fs.createDirectory(target)
+        for (child in fs.listOrNull(source).orEmpty()) {
+            if (isHiddenName(child.name)) continue
+            delay(1)
+            copyRecursive(child, target.resolve(child.name))
+        }
     }
 
     /**

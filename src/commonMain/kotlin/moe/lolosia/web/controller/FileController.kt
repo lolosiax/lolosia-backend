@@ -14,6 +14,8 @@ import moe.lolosia.web.dto.FileMkdirReq
 import moe.lolosia.web.dto.FileOpResult
 import moe.lolosia.web.dto.FileRenameReq
 import moe.lolosia.web.dto.FileScanReq
+import moe.lolosia.web.dto.FileTransferReq
+import moe.lolosia.web.dto.FileTransferResult
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.service.files.FileBrowser
 import moe.lolosia.web.service.files.FileSigner
@@ -28,7 +30,7 @@ import moe.lolosia.web.util.session.Context
 private const val UPLOAD_BUFFER_SIZE = 64 * 1024
 
 /**
- * 在线文件管理器接口：列目录、看详情、取缩略图与原图，以及**改名 / 新建目录 / 删除 / 上传**。
+ * 在线文件管理器接口：列目录、看详情、取缩略图与原图，以及**改名 / 新建目录 / 删除 / 上传 / 复制 / 移动**。
  *
  * 路径一律用**相对浏览根的路径**做查询参数（`?path=a/b/c.jpg`），根目录是空串。
  *
@@ -36,7 +38,7 @@ private const val UPLOAD_BUFFER_SIZE = 64 * 1024
  * 所以它们**不走会话鉴权**（在 [moe.lolosia.web.interceptor.installAuthInterceptor] 的白名单里），
  * 改为校验 URL 签名：`exp` + `sig` 由 `list` / `detail` 下发，签名覆盖「路径 + 过期时间」，
  * 光知道路径猜不出签名（见 [FileSigner]）。其余接口都要求 `lolosia.files.read`；
- * 写操作（`rename` / `mkdir` / `delete` / `upload`）额外要求 `lolosia.files.write`。
+ * 写操作（`rename` / `mkdir` / `delete` / `upload` / `copy` / `move`）额外要求 `lolosia.files.write`。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -99,6 +101,22 @@ object FileController {
     @Permission("lolosia.files.write")
     suspend fun delete(browser: FileBrowser, @Body req: FileDeleteReq): FileOpResult =
         browser.delete(req.path)
+
+    /**
+     * 把一批项**复制**到目标目录（多选后粘贴的实现，见 [FileBrowser.transfer]）。
+     *
+     * 目标目录里重名时自动加序号，不覆盖；单项失败不中断整批，逐条报在结果里。
+     */
+    @POST("/files/copy")
+    @Permission("lolosia.files.write")
+    suspend fun copy(browser: FileBrowser, @Body req: FileTransferReq): FileTransferResult =
+        browser.transfer(req.paths, req.dest, copy = true)
+
+    /** 把一批项**移动**到目标目录（剪切后粘贴的实现），语义与 [copy] 一致，只是搬走源。 */
+    @POST("/files/move")
+    @Permission("lolosia.files.write")
+    suspend fun move(browser: FileBrowser, @Body req: FileTransferReq): FileTransferResult =
+        browser.transfer(req.paths, req.dest, copy = false)
 
     /**
      * 上传**单个文件**：`path` 是目标目录的相对路径（空串 = 浏览根），`name` 是原始文件名，

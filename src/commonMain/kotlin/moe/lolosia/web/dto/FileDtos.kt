@@ -126,6 +126,32 @@ data class FileDeleteReq(val path: String? = null)
 data class FileOpResult(val path: String, val name: String)
 
 /**
+ * 复制 / 移动请求：把 [paths] 里的每一项放到 [dest] 目录下（`dest` 为空串表示浏览根）。
+ *
+ * 一次带一批而不是一项：多选之后复制粘贴就是一次操作，逐个发请求会让前端自己
+ * 拼「哪些成功哪些失败」，而后端本来就能在一次调用里给出完整结果。
+ */
+@Serializable
+data class FileTransferReq(val paths: List<String> = emptyList(), val dest: String? = null)
+
+/** 成功搬到目标目录的一项：从哪里来、落到哪个相对路径、最终名字（重名时自动加过序号）。 */
+@Serializable
+data class FileTransferItem(val from: String, val path: String, val name: String)
+
+/**
+ * 复制 / 移动的结果。
+ *
+ * 单一项失败**不中断**整批（拖了一批文件，其中一个被别的进程占着，不该让其余的全不动），
+ * 失败原因逐条收集在 [failed] 里给用户看。
+ */
+@Serializable
+data class FileTransferResult(
+    val items: List<FileTransferItem> = emptyList(),
+    /** 给人看的失败原因，形如 `旧路径：原因`。 */
+    val failed: List<String> = emptyList(),
+)
+
+/**
  * 一个**已签名**的相对路径：`exp` / `sig` 与 [FileEntry] 里的同名字段同义。
  *
  * [FileThumbEvent] 用它而不是裸路径，是因为 `<img>` 换源必须走签名直链，
