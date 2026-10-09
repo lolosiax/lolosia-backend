@@ -6,7 +6,6 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.utils.io.readAvailable
-import io.ktor.utils.io.writeFully
 import moe.lolosia.web.service.dav.DAV_XML
 import moe.lolosia.web.service.dav.DavException
 import moe.lolosia.web.service.dav.DavLockManager
@@ -219,19 +218,11 @@ private suspend fun ApplicationCall.davGet(path: Path, store: DavStore, head: Bo
     val contentType = ContentType.defaultForFilePath(path.name)
     respondBytesWriter(contentType, status, contentLength = length) {
         if (head) return@respondBytesWriter
-        val source = store.source(path)
+        val handle = store.openReadOnly(path)
         try {
-            if (offset > 0) source.skip(offset)
-            val buffer = ByteArray(BUF_SIZE)
-            var remaining = length
-            while (remaining > 0) {
-                val read = source.read(buffer, 0, minOf(BUF_SIZE.toLong(), remaining).toInt())
-                if (read == -1) break
-                writeFully(buffer, 0, read)
-                remaining -= read
-            }
+            writeRange(handle, offset, length, this@respondBytesWriter)
         } finally {
-            source.close()
+            handle.close()
         }
     }
 }

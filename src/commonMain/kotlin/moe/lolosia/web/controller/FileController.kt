@@ -222,7 +222,7 @@ object FileController {
             offset = offset,
             contentType = contentType,
             status = status,
-        ) { browser.openSource(relative) ?: throw ApiException(404, "读取失败") }
+        ) { browser.openHandle(relative) ?: throw ApiException(404, "读取失败") }
 
         return when (val range = parseRange(ctx.call.request.headers[HttpHeaders.Range], size)) {
             RangeParse.None -> content(0L, size, HttpStatusCode.OK)

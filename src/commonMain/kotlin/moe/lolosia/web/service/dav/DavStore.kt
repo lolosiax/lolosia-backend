@@ -72,8 +72,8 @@ class DavStore(val root: String, private val allowHidden: () -> Boolean = { fals
     /** 覆盖写入的 sink（自动补齐父目录；已存在则截断）；调用方负责 `close()`。 */
     fun sink(path: Path) = fs.sink(path).buffer()
 
-    /** 只读 source；调用方负责 `close()`。 */
-    fun source(path: Path) = fs.source(path).buffer()
+    /** 只读句柄；调用方负责 `close()`。`Range` 请求要靠它按偏移定位读，不能用流去 `skip`。 */
+    fun openReadOnly(path: Path) = fs.openReadOnly(path)
 
     /** 移动：目标已存在时由 [overwrite] 决定先删还是报 412。 */
     fun move(source: Path, target: Path, overwrite: Boolean) {

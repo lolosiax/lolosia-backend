@@ -20,7 +20,7 @@ import moe.lolosia.web.util.media.isMediaName
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import okio.BufferedSink
-import okio.BufferedSource
+import okio.FileHandle
 import okio.FileMetadata
 import okio.FileSystem
 import okio.Path
@@ -388,14 +388,15 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
     }
 
     /**
-     * 打开源文件的流式读取（原图 / 视频按 `Range` 分段下发用）；调用方负责 `close`。
+     * 打开源文件的只读句柄（原图 / 视频按 `Range` 分段下发用）；调用方负责 `close`。
      *
-     * 与 [readSource] 的区别是不把内容读进内存：视频动辄几百 MB，整读会把板子撑爆。
+     * 给的是 [FileHandle] 而不是流：`Range` 要的是「从第 N 字节起」，只有句柄的定位读能 O(1) 做到 ——
+     * 用流就得 `skip(offset)`，而那是「读出来丢掉」，几百 MB 的视频取一次尾部要几十秒。
      */
-    fun openSource(relative: String): BufferedSource? {
+    fun openHandle(relative: String): FileHandle? {
         val path = resolve(rootPath, relative)
         if (fs.metadataOrNull(path)?.isDirectory != false) return null
-        return runCatching { fs.source(path).buffer() }
+        return runCatching { fs.openReadOnly(path) }
             .onFailure { log.warn(it) { "打开文件失败：$relative" } }
             .getOrNull()
     }
