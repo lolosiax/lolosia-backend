@@ -104,18 +104,26 @@ data class FileDetail(
 @Serializable
 data class FileScanReq(val path: String? = null)
 
-/** 重命名请求：把 [path] 指向的目录在同级改名为 [name]（只改名，不移动）。 */
+/** 重命名请求：把 [path] 指向的项在同级改名为 [name]（只改名，不移动；目录与文件都可以）。 */
 @Serializable
 data class FileRenameReq(val path: String? = null, val name: String = "")
 
+/** 新建目录请求：在 [path] 目录下新建名为 [name] 的子目录（`path` 为空表示浏览根）。 */
+@Serializable
+data class FileMkdirReq(val path: String? = null, val name: String = "")
+
+/** 删除请求：删除 [path] 指向的文件或目录（目录连子内容一起递归删）。 */
+@Serializable
+data class FileDeleteReq(val path: String? = null)
+
 /**
- * 重命名结果：改名后的相对路径。
+ * 一次写操作（重命名 / 新建目录 / 删除 / 上传）之后的结果：涉及的相对路径与新名字。
  *
- * 前端拿它做两件事：如果**当前路径就在被改名的这个目录下**，用 [path] 换掉旧前缀；
- * 否则只重列当前目录。
+ * 前端拿它做两件事：如果**当前路径就在被改名的那个目录下**，用 [path] 换掉旧前缀；
+ * 否则只重列当前目录（删除与上传则只用来提示）。
  */
 @Serializable
-data class FileRenameResult(val path: String, val name: String)
+data class FileOpResult(val path: String, val name: String)
 
 /**
  * 一个**已签名**的相对路径：`exp` / `sig` 与 [FileEntry] 里的同名字段同义。

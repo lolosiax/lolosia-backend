@@ -23,8 +23,8 @@ groups:
     permissions:
       - "+lolosia.*"
 
-  # 普通用户：只读写自己的云存储文件（`lolosia.files.read` 只给 admin 及以上，
-  # 在线文件管理器浏览的是整块机械盘，不开放给普通用户）。
+  # 普通用户：只读写自己的云存储文件（`lolosia.files.*` 只给 admin 及以上，
+  # 在线文件管理器动的是整块机械盘，不开放给普通用户）。
   user:
     title: 普通用户
     extends:

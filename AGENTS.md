@@ -166,7 +166,12 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   ⚠️ `DavStore` 会**跳过一切 `.` 开头的段**（解析与列举都跳）—— 这是为了让文件管理器的缩略图缓存（`<root>/.cache`）在 WebDAV 客户端里彻底不可见，代价是用户自己建的隐藏目录/文件也看不到。
 - **在线文件管理器**：`AppSettings.files`（`root` 留空回退 `webdav.root`、`signKey`、`signTtlSeconds`、`thumbnail.*`）把 `root` 列成目录树并出缩略图；
   接口在 `controller/FileController.kt`，实现全在 `service/files/`。`thumb` / `raw` 走 URL 签名而非会话（见 §6），读接口挂 `lolosia.files.read`，
-  唯一的写接口 `files/rename`（同级重命名目录）挂 `lolosia.files.write` —— 两个节点默认都只给 `admin` 及以上（被 `+lolosia.*` 覆盖）。
+  写接口 `files/{mkdir,rename,delete,upload}` 挂 `lolosia.files.write` —— 两个节点默认都只给 `admin` 及以上（被 `+lolosia.*` 覆盖）。
+  - **上传走裸请求体**（`POST /files/upload?path=&name=`，body 就是文件本身），不是 multipart：`readForm()` 会把整个请求读进内存，
+    拖一个几 GB 的视频就能把板子撑爆；裸体则像 WebDAV 的 `PUT` 那样边收边写（见 `WebDavRouting.davPut`）。
+  - 上传**先写目标目录下的 `<名字>.<随机>.part` 再 `atomicMove`**成最终名，中途失败/断线不会留下半个可见文件；
+    重名时自动加序号（`照片 (1).jpg`）。临时文件**不能**放 `<root>/.cache/` 下 —— 开发机把线上 `/dav` 挂成 `Z:` 时，
+    线上 WebDAV 默认拒绝隐藏项访问，写 `.cache` 会被 403。
   - 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v2`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`），版本号一改旧缓存整体作废。
   - 生成是**单工作协程串行**的（机械盘并发解码只会更慢），`files.thumbnail.enabled` **只能在一台机器上开**，否则两边同时写同一份缓存。
   - `FileEntry` 的 `hasChildren`（是否为空）与 `hasSubdirs`（是否有子目录）是**两个独立标志位**，前者由 `files/list` 与 `files/dirs` 填、后者只有 `files/dirs` 填（判定它要多一轮 stat 扫描）。

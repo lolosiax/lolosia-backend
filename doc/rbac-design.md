@@ -168,7 +168,7 @@ groups:
 
 （实际文件是等价的展开写法，含逐条注释。）
 
-> 在线文件管理器的 `lolosia.files.read`（机械盘浏览）与 `lolosia.files.write`（目录改名）就是被 `admin` 的 `+lolosia.*` 覆盖到的，`user` / `guest` 都拿不到 ——
+> 在线文件管理器的 `lolosia.files.read`（机械盘浏览）与 `lolosia.files.write`（新建 / 改名 / 删除 / 上传）就是被 `admin` 的 `+lolosia.*` 覆盖到的，`user` / `guest` 都拿不到 ——
 > 这正是因为节点放在 `lolosia.files.*` 而不是 `lolosia.oss.*`：OSS 是「用户自己的云存储」，机械盘不是，两者的授权对象不同。
 
 **两条来源的优先级**（这是「默认」二字的全部含义）：
@@ -425,7 +425,7 @@ POST /api/permission/catalog  → [ { "node": "lolosia.user.write", "title": "�
 | `/api/oss/upload` | `lolosia.oss.file.write` |
 | `/api/oss/get/{user}/{md5}`、`/show/*`（取件，白名单） | 不加注解（匿名可取） |
 | `/api/files/{list,dirs,detail,scan}` | `lolosia.files.read` |
-| `/api/files/rename` | `lolosia.files.write` |
+| `/api/files/{mkdir,rename,delete,upload}` | `lolosia.files.write` |
 | `/api/files/{thumb,raw}`（直链，白名单） | 不加注解（控制器校验 URL 签名 `exp` + `sig`） |
 | `/api/classpath/*`（运维探针） | `lolosia.system.classpath` |
 | `/api/menu/config` | 不加（前端守卫必经） |

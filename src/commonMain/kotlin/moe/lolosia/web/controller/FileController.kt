@@ -2,13 +2,17 @@ package moe.lolosia.web.controller
 
 import io.ktor.http.*
 import io.ktor.http.content.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
+import io.ktor.utils.io.readAvailable
 import moe.lolosia.web.dto.ApiException
+import moe.lolosia.web.dto.FileDeleteReq
 import moe.lolosia.web.dto.FileDetail
 import moe.lolosia.web.dto.FileEntry
 import moe.lolosia.web.dto.FileListResult
+import moe.lolosia.web.dto.FileMkdirReq
+import moe.lolosia.web.dto.FileOpResult
 import moe.lolosia.web.dto.FileRenameReq
-import moe.lolosia.web.dto.FileRenameResult
 import moe.lolosia.web.dto.FileScanReq
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.service.files.FileBrowser
@@ -20,8 +24,11 @@ import moe.lolosia.web.util.ktor.*
 import moe.lolosia.web.util.router.*
 import moe.lolosia.web.util.session.Context
 
+/** 上传时读写请求体的缓冲区大小：一次 64 KiB，够大又不至于让每块都白占内存。 */
+private const val UPLOAD_BUFFER_SIZE = 64 * 1024
+
 /**
- * 在线文件管理器接口：列目录、看详情、取缩略图与原图，以及**重命名目录**。
+ * 在线文件管理器接口：列目录、看详情、取缩略图与原图，以及**改名 / 新建目录 / 删除 / 上传**。
  *
  * 路径一律用**相对浏览根的路径**做查询参数（`?path=a/b/c.jpg`），根目录是空串。
  *
@@ -29,7 +36,7 @@ import moe.lolosia.web.util.session.Context
  * 所以它们**不走会话鉴权**（在 [moe.lolosia.web.interceptor.installAuthInterceptor] 的白名单里），
  * 改为校验 URL 签名：`exp` + `sig` 由 `list` / `detail` 下发，签名覆盖「路径 + 过期时间」，
  * 光知道路径猜不出签名（见 [FileSigner]）。其余接口都要求 `lolosia.files.read`；
- * 唯一的写操作 `files/rename` 额外要求 `lolosia.files.write`。
+ * 写操作（`rename` / `mkdir` / `delete` / `upload`）额外要求 `lolosia.files.write`。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -72,14 +79,65 @@ object FileController {
     }
 
     /**
-     * 重命名目录（同级改名，不移动）。这是文件管理器里唯一的写操作，故单列一个权限节点。
+     * 重命名**目录或文件**（同级改名，不移动）。
      *
      * 返回改名后的相对路径：前端据此在「当前路径就在这个目录里」时换掉前缀。
      */
     @POST("/files/rename")
     @Permission("lolosia.files.write")
-    suspend fun rename(browser: FileBrowser, @Body req: FileRenameReq): FileRenameResult =
+    suspend fun rename(browser: FileBrowser, @Body req: FileRenameReq): FileOpResult =
         browser.rename(req.path, req.name)
+
+    /** 在某个目录下新建子目录。 */
+    @POST("/files/mkdir")
+    @Permission("lolosia.files.write")
+    suspend fun mkdir(browser: FileBrowser, @Body req: FileMkdirReq): FileOpResult =
+        browser.mkdir(req.path, req.name)
+
+    /** 删除文件或整个目录（含子内容）。 */
+    @POST("/files/delete")
+    @Permission("lolosia.files.write")
+    suspend fun delete(browser: FileBrowser, @Body req: FileDeleteReq): FileOpResult =
+        browser.delete(req.path)
+
+    /**
+     * 上传**单个文件**：`path` 是目标目录的相对路径（空串 = 浏览根），`name` 是原始文件名，
+     * **请求体就是这个文件本身**（不是 multipart）。
+     *
+     * 之所以不用 multipart：`readForm()` 会把整个请求读进内存，机械盘上随手拖一个几 GB 的视频
+     * 就能把板子撑爆。裸体会话体则能像 WebDAV 的 PUT 一样，边收边写进**目标目录下的临时文件**
+     * （见 `WebDavRouting.davPut`），内存占用与文件大小无关。
+     *
+     * 目标目录里已有同名文件时自动加序号，不覆盖（见 [FileBrowser.uploadTarget]）。
+     */
+    @POST("/files/upload")
+    @Permission("lolosia.files.write")
+    suspend fun upload(
+        ctx: Context,
+        browser: FileBrowser,
+        @Query path: String?,
+        @Query name: String?,
+    ): FileOpResult {
+        val target = browser.uploadTarget(path, name ?: throw ApiException(400, "缺少文件名参数 name"))
+        val channel = ctx.call.receiveChannel()
+        val sink = browser.openSink(target.temp)
+        var success = false
+        try {
+            val buffer = ByteArray(UPLOAD_BUFFER_SIZE)
+            while (true) {
+                val read = channel.readAvailable(buffer, 0, buffer.size)
+                if (read == -1) break
+                if (read > 0) sink.write(buffer, 0, read)
+            }
+            sink.flush()
+            success = true
+        } finally {
+            sink.close()
+            // 无论成败都要收尾：成功则把临时文件改名进目标目录，失败则把它删掉
+            browser.finishUpload(target, success)
+        }
+        return FileOpResult(target.relative, target.name)
+    }
 
     /**
      * 取缩略图（WebP）。`size` 不在配置档位里时回退到最小档。
