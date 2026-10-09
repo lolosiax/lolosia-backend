@@ -7,6 +7,8 @@ import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.FileDetail
 import moe.lolosia.web.dto.FileEntry
 import moe.lolosia.web.dto.FileListResult
+import moe.lolosia.web.dto.FileRenameReq
+import moe.lolosia.web.dto.FileRenameResult
 import moe.lolosia.web.dto.FileScanReq
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.service.files.FileBrowser
@@ -19,14 +21,15 @@ import moe.lolosia.web.util.router.*
 import moe.lolosia.web.util.session.Context
 
 /**
- * 在线文件管理器接口（只读）：列目录、看详情、取缩略图与原图。
+ * 在线文件管理器接口：列目录、看详情、取缩略图与原图，以及**重命名目录**。
  *
  * 路径一律用**相对浏览根的路径**做查询参数（`?path=a/b/c.jpg`），根目录是空串。
  *
  * `thumb` / `raw` 是给 `<img src>` 直接访问的，浏览器原生标签带不了 `Authorization` 头，
  * 所以它们**不走会话鉴权**（在 [moe.lolosia.web.interceptor.installAuthInterceptor] 的白名单里），
  * 改为校验 URL 签名：`exp` + `sig` 由 `list` / `detail` 下发，签名覆盖「路径 + 过期时间」，
- * 光知道路径猜不出签名（见 [FileSigner]）。其余接口都要求 `lolosia.files.read`。
+ * 光知道路径猜不出签名（见 [FileSigner]）。其余接口都要求 `lolosia.files.read`；
+ * 唯一的写操作 `files/rename` 额外要求 `lolosia.files.write`。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -67,6 +70,16 @@ object FileController {
         normalizeRelative(req.path)?.let { thumbs.prioritize(it) }
         return MessageResult("已排队")
     }
+
+    /**
+     * 重命名目录（同级改名，不移动）。这是文件管理器里唯一的写操作，故单列一个权限节点。
+     *
+     * 返回改名后的相对路径：前端据此在「当前路径就在这个目录里」时换掉前缀。
+     */
+    @POST("/files/rename")
+    @Permission("lolosia.files.write")
+    suspend fun rename(browser: FileBrowser, @Body req: FileRenameReq): FileRenameResult =
+        browser.rename(req.path, req.name)
 
     /**
      * 取缩略图（WebP）。`size` 不在配置档位里时回退到最小档。

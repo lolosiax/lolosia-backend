@@ -60,8 +60,8 @@ webdav:
 
 ## 3. 在线文件管理器
 
-把与 WebDAV **同一块机械盘**（`files.root`，留空回退 `webdav.root`）以**只读**方式做成网页端的目录浏览 + 缩略图，挂在 `/api/files/*`。
-和 WebDAV 的分工：WebDAV 是给系统文件管理器用的读写协议；在线文件管理器只读，是给「在网页上翻相册」用的。
+把与 WebDAV **同一块机械盘**（`files.root`，留空回退 `webdav.root`）做成网页端的目录浏览 + 缩略图 + 目录改名，挂在 `/api/files/*`。
+和 WebDAV 的分工：WebDAV 是给系统文件管理器用的读写协议；在线文件管理器以浏览为主（`lolosia.files.read`），仅额外提供目录改名（`lolosia.files.write`），是给「在网页上翻相册」用的。
 
 ### 3.1 配置与权限
 
@@ -78,7 +78,7 @@ files:
     maxSourceBytes: 67108864
 ```
 
-- 权限节点 `lolosia.files.read` **只给 `admin` 及以上**：浏览的是整块机械盘，不对普通用户开放。前端菜单按角色隐藏，直连 `/files` 对无权用户落 404。
+- 浏览权限节点 `lolosia.files.read`、目录改名 `lolosia.files.write` **只给 `admin` 及以上**：动的是整块机械盘，不对普通用户开放。前端菜单按角色隐藏，直连 `/files` 对无权用户落 404。
 - 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v2`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`，版本号一改旧缓存整体作废）。**该目录对 WebDAV 隐藏**，见 §2.1。
 - `signKey` 未配置时启动日志会打一条 WARN。线上建议显式配一个固定随机串，否则每次重启后旧直链失效（不影响功能，前端重新列目录会拿到新签名）。
 - `thumbnail.enabled` 只能在一台机器上开：两台同时写同一份缓存会互相覆盖，也会把机械盘两头都拖慢。

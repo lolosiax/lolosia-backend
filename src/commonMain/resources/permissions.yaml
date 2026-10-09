@@ -15,7 +15,7 @@ groups:
     permissions:
       - "+*"
 
-  # 管理员：整个 lolosia 域（含在线文件管理器的机械盘只读浏览），并继承普通用户的权限。
+  # 管理员：整个 lolosia 域（含在线文件管理器的机械盘浏览与目录改名），并继承普通用户的权限。
   admin:
     title: 管理员
     extends:

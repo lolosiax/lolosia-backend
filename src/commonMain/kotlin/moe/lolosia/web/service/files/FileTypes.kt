@@ -105,3 +105,18 @@ fun nameOf(relative: String): String = relative.substringAfterLast('/')
 
 /** 拼接子项相对路径。 */
 fun childOf(relative: String, name: String): String = if (relative.isEmpty()) name else "$relative/$name"
+
+/**
+ * 校验一个「新名字」（重命名用）：必须是单段名，不能带路径分隔符，不能是 `.` / `..`，
+ * 也不能是 [isHiddenName] —— 隐藏项在文件管理器里本来就看不见，改过去等于把自己弄丢。
+ *
+ * 返回 `null` 表示合法，否则返回给用户看的错误原因。
+ */
+fun validateEntryName(name: String): String? = when {
+    name.isEmpty() -> "名字不能为空"
+    name == "." || name == ".." -> "名字非法：$name"
+    name.any { it == '/' || it == '\\' } -> "名字不能含路径分隔符"
+    name.any { it.isISOControl() } -> "名字不能含控制字符"
+    isHiddenName(name) -> "名字不能以 `.` 开头"
+    else -> null
+}

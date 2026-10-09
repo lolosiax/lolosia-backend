@@ -104,6 +104,19 @@ data class FileDetail(
 @Serializable
 data class FileScanReq(val path: String? = null)
 
+/** 重命名请求：把 [path] 指向的目录在同级改名为 [name]（只改名，不移动）。 */
+@Serializable
+data class FileRenameReq(val path: String? = null, val name: String = "")
+
+/**
+ * 重命名结果：改名后的相对路径。
+ *
+ * 前端拿它做两件事：如果**当前路径就在被改名的这个目录下**，用 [path] 换掉旧前缀；
+ * 否则只重列当前目录。
+ */
+@Serializable
+data class FileRenameResult(val path: String, val name: String)
+
 /**
  * 一个**已签名**的相对路径：`exp` / `sig` 与 [FileEntry] 里的同名字段同义。
  *

@@ -10,6 +10,7 @@ import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.dto.FileDetail
 import moe.lolosia.web.dto.FileEntry
 import moe.lolosia.web.dto.FileListResult
+import moe.lolosia.web.dto.FileRenameResult
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.image.Image
 import moe.lolosia.web.util.log.Log
@@ -119,6 +120,37 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
         val meta = fs.metadataOrNull(resolve(rootPath, relative)) ?: return null
         if (isHiddenName(nameOf(relative))) return null
         return toEntry(nameOf(relative), relative, meta)
+    }
+
+    /**
+     * 重命名**目录**（同一父目录内改名，不支持跨目录移动），返回改名后的相对路径。
+     *
+     * 只放开目录：文件改名要连带处理缩略图缓存与媒体索引里的旧路径，等真有需求再说。
+     *
+     * 落盘走 [FileSystem.atomicMove] —— 同目录内的改名本来就是原子的，成功与否都只有两种状态，
+     * 不会留下「半个」目录。失败按原因分：重名 409、其余 500（盘只读、被占用等）。
+     *
+     * 缩略图缓存与媒体索引都按路径索引，改名后它们的旧记录成为孤儿：缓存在下次打开目录时
+     * 按新路径重新生成，索引由下一轮全量扫描按「本轮没见到的路径」清理（见 `doc/media-index-design.md`）。
+     */
+    fun rename(path: String?, newName: String): FileRenameResult {
+        val (relative, source) = requirePath(path)
+        if (relative.isEmpty()) throw ApiException(400, "不能重命名浏览根")
+        validateEntryName(newName)?.let { throw ApiException(400, it) }
+        if (fs.metadataOrNull(source)?.isDirectory != true) throw ApiException(400, "只能重命名目录：$relative")
+        val currentName = nameOf(relative)
+        if (newName == currentName) return FileRenameResult(relative, newName)
+
+        val targetRelative = childOf(parentOf(relative).orEmpty(), newName)
+        val target = resolve(rootPath, targetRelative)
+        if (fs.metadataOrNull(target) != null) throw ApiException(409, "同级已有同名项：$newName")
+
+        runCatching { fs.atomicMove(source, target) }.onFailure {
+            log.warn(it) { "重命名失败：$relative -> $targetRelative" }
+            throw ApiException(500, "重命名失败：${it.message ?: "未知错误"}")
+        }
+        log.info { "已重命名：$relative -> $targetRelative" }
+        return FileRenameResult(targetRelative, newName)
     }
 
     /** 单个文件的详情（预览面板用）：会在缓存元数据缺失时读一次文件头取原图尺寸。 */

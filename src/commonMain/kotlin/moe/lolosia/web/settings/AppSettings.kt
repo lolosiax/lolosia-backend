@@ -97,8 +97,9 @@ data class AppSettings(
     )
 
     /**
-     * 在线文件管理器：以 [root] 为浏览根（留空则回退 [WebdavConfig.root]），只读地列出目录与
-     * 生成缩略图。缩略图落在 `<root>/.cache/lolosia/thumb/v<版本>`，该目录对 WebDAV 隐藏
+     * 在线文件管理器：以 [root] 为浏览根（留空则回退 [WebdavConfig.root]），列出目录、生成
+     * 缩略图（浏览走 `lolosia.files.read`），并允许目录改名（走 `lolosia.files.write`）。
+     * 缩略图落在 `<root>/.cache/lolosia/thumb/v<版本>`，该目录对 WebDAV 隐藏
      * （见 `DavStore`），避免污染机械盘的正常目录树。
      *
      * 缩略图生成会在后台按 [ThumbnailConfig.scanIntervalSeconds] 周期扫描，也会在用户打开目录时
