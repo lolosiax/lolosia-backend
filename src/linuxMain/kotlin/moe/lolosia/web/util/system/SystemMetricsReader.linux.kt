@@ -1,6 +1,11 @@
 package moe.lolosia.web.util.system
 
-import moe.lolosia.web.util.fs.readFileBytes
+import kotlinx.cinterop.UnsafeNumber
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
+import platform.posix.fclose
+import platform.posix.fopen
+import platform.posix.fread
 
 /**
  * Linux 侧的系统指标采集：直接解析 `/proc`。
@@ -40,7 +45,31 @@ internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? 
     )
 }
 
-private fun readText(path: String): String? = readFileBytes(path)?.decodeToString()
+/**
+ * 读取一个 `/proc` 伪文件到 EOF。
+ *
+ * 不能用 `util.fs.readFileBytes`：它靠 `fseek(SEEK_END)` + `ftell` 求长度，而 `/proc` 文件的
+ * `st_size` 恒为 0，会被当成空文件直接返回 `null`（整条采样链因此恒判「本机不支持」）。
+ */
+@OptIn(UnsafeNumber::class)
+private fun readText(path: String): String? {
+    val file = fopen(path, "rb") ?: return null
+    try {
+        val chunk = ByteArray(16 * 1024)
+        var data = ByteArray(0)
+        while (true) {
+            val count = chunk.usePinned { pinned -> fread(pinned.addressOf(0), 1uL, chunk.size.toULong(), file).toLong() }
+            if (count <= 0L) break
+            val size = count.toInt()
+            val offset = data.size
+            data = data.copyOf(offset + size)
+            chunk.copyInto(data, offset, 0, size)
+        }
+        return data.decodeToString()
+    } finally {
+        fclose(file)
+    }
+}
 
 /** CPU：返回「(累计繁忙节拍, 累计总节拍)」。 */
 private fun parseCpu(text: String): Pair<Long, Long>? {
