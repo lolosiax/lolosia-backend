@@ -76,6 +76,13 @@ data class FileEntry(
      */
     val exp: Long = 0,
     val sig: String = "",
+    /**
+     * 该条目身上的标签，只带 `namespace` + `name`（够网格标心与将来的标签分组、筛选用）。
+     *
+     * 文件读 `media_asset_tag`（按来源优先级合并、剔除人工否决），目录读 `folder_tag`；
+     * 未索引或库不可用时为空表 —— 与 [rating] 一样是「列目录不依赖库」的降级。
+     */
+    val tags: List<MediaTagRef> = emptyList(),
 )
 
 /** 目录列表结果。 */
