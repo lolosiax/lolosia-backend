@@ -178,6 +178,9 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v2`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`），版本号一改旧缓存整体作废。
   - 生成是**单工作协程串行**的（机械盘并发解码只会更慢），`files.thumbnail.enabled` **只能在一台机器上开**，否则两边同时写同一份缓存。
   - `FileEntry` 的 `hasChildren`（是否为空）与 `hasSubdirs`（是否有子目录）是**两个独立标志位**，前者由 `files/list` 与 `files/dirs` 填、后者只有 `files/dirs` 填（判定它要多一轮 stat 扫描）。
+  - `files/list` 的条目还带索引侧字段 `rating` / `indexed` / `takenAt` / `sample` / `tags`（见 [media-index-design.md](doc/media-index-design.md) §11.1）：
+    `tags` **只给 `namespace` + `name`**（够网格标心 `feature:喜欢`、目录 `feature:` 分组开关与将来的标签分组 / 筛选）——
+    否决位与来源仍只在 `media/detail` 给全。**别往列表里塞标签正文**，列目录要能扛住大目录。
 - **第三方 C 库**（图像编解码）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `src/nativeInterop/cinterop/*.def`。
   - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/build-libs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
   - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` 收发，不把 C 指针泄漏给调用方。

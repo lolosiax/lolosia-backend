@@ -286,6 +286,7 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 2. `gradlew deploy<服务器名>`（或 `deploy`）→ 上传可执行文件 → `mv old old.previous` 再替换（避免覆盖运行中的文件报 `ETXTBSY`）→ 交给 systemd / docker 拉起
 
 **`mode: "systemd"`**：改写远端 `<名字>-native.service` 的 `ExecStart` 为可执行文件路径后重启服务。首次部署由插件生成单元文件；想自定义 `User=` / 资源限制，就在**服务器上**改，插件不会覆盖已有单元。
+仓库模板 `lolosia-backend-native.service` 已带 `LimitNOFILE=524288`（**必须给**：不写会继承软限制 1024，缩略图 / 索引 / WebDAV 并发一高就 `EMFILE` 崩在 `accept`）；老机器需手工补，详见 [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) §4。
 
 **`mode: "docker"`**：不构建镜像，产物以挂载方式注入基础镜像运行（JVM 项目另有那套 Dockerfile 流程，原生不用）。
 
@@ -313,7 +314,7 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 
 > P0 已收尾（临时探针 `DemoController` / `DEV_PROBES` 已删），进入 P1。
 
-- **P1（进行中）**：✅ 图形验证码 · ✅ 头像上传/读取 · ✅ SSE 事件总线（含开发板实机回归）· ✅ OSS 文件服务（`/api/oss/{list,getMetas,fileCheck,upload,get}`）· ✅ WebDAV（机械盘挂载到 `/dav`）· ✅ 在线文件管理器（机械盘只读浏览 + 三档 WebP 缩略图 + 签名直链，`/api/files/*`）· ✅ `classpath.zip` 改 DEFLATED；待办：WebP 转换（前端当前未用）、gzip/br 压缩交给 Nginx、前端工程与契约副本对齐
+- **P1（进行中）**：✅ 图形验证码 · ✅ 头像上传/读取 · ✅ SSE 事件总线（含开发板实机回归）· ✅ OSS 文件服务（`/api/oss/{list,getMetas,fileCheck,upload,get}`）· ✅ WebDAV（机械盘挂载到 `/dav`）· ✅ 在线文件管理器（机械盘只读浏览 + 三档 WebP 缩略图 + 签名直链，`/api/files/*`）· ✅ `classpath.zip` 改 DEFLATED · 🚧 媒体库（本地索引 / 标签体系 / 评级 / NSFW 遮罩，`/api/media/*`；设计与分阶段见 [doc/media-index-design.md](doc/media-index-design.md)）；待办：WebP 转换（前端当前未用）、gzip/br 压缩交给 Nginx、前端工程与契约副本对齐
 - **P2**：AI 相关按需改为纯 Ktor Client 直连 LLM HTTP API（不引入 AI 框架）
 
 ## 📜 License

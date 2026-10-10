@@ -128,12 +128,33 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 变成 `suspend`，内部 `withContext(Dispatchers.Default) + coroutineScope + async/awaitAll`（native 上没有
 `Dispatchers.IO`），于是只等最慢的那一个。
 
+### 3.5 标签、爱心与分组（`feature:` 命名空间）
+
+- 文件管理器的标签**复用媒体库那套表**：文件走 `media_asset_tag`、目录走 `folder_tag`，
+  读写接口是 `/api/media/{tags,folder-tags}/attach|detach`（权限沿用 `lolosia.media.read|write`，没有单开一套「文件管理器标签权限」）。
+- `feature:` 是**给文件管理器用的展示开关命名空间**（不描述画面）：
+
+  | 标签 | 挂在哪 | 作用 |
+  | --- | --- | --- |
+  | `feature:喜欢` | 文件（`media_asset_tag`） | 网格 / 列表角上的爱心，点击即打 / 取消 |
+  | `feature:日期分组` | 目录（`folder_tag`） | 工具栏出现「年份 / 月份」，按子项名字里的 `yyyyMMdd` 分组 |
+  | `feature:自动分组-年份\|月份` | 目录 | 进目录时默认选哪种日期分组 |
+  | `feature:喜欢优先` | 目录 | 聚出「喜欢 / 其他」两组；与日期分组同开时只在**各日期组内部**把爱心提前 |
+
+- **爱心只在目录与媒体文件（`image|video|audio`）上渲染**：非媒体文件永远挂不上标签，索性不出现；未索引的文件显示三点动画，悬浮提示「文件尚未索引」。
+- **排序在进目录时冻结**：进入时快照一份「已标心」集合，之后点心只换图标、条目**不会跳位**，要重排得点刷新。
+- 列表接口 `files/list` 的条目已带 `tags`（只 `namespace` + `name`，见 [media-index-design.md](./media-index-design.md) §11.1），
+  所以多选时右侧标签栏的聚合是**就地现算**的，不按选中数扇出 `media/detail`（选 100 个也只发 0 个）。
+
 ## 4. 部署要点（systemd）
 
 - 服务**以 `lolosia` 用户运行**：远端 `/srv/lolosia-backend/lolosia-backend-native.service` 的 `[Service]` 段手工加了 `User=lolosia` / `Group=lolosia`。
   - 原因：WebDAV 若以 root 运行，它新建的目录会属 `root:root 755`，SMB 侧（`lolosia`）写不进去 —— 表现为「局域网里往共享复制文件失败」。
   - 部署插件**不覆盖远端已存在的 unit**（只就地 patch `ExecStart` 行），所以这份手工改动能长期保留。
   - ⚠️ 仓库里的 `lolosia-backend-native.service` 模板**不含** `User=`：新机器首次部署后需要手工补，否则会重现上面的属主问题。
+- ⚠️ **`LimitNOFILE` 必须显式给**：单元不写它时进程继承 **systemd 的软限制 1024**（`DefaultLimitNOFILE` 只管硬上限，`/proc/<pid>/limits` 里是 `1024 524288`）；
+  缩略图解码 / 媒体索引 / WebDAV 并发一高就 `POSIX error 24: Too many open files`，**崩在 TCP `accept` 上**（systemd 拉起期间前置 nginx 回 502）。
+  仓库模板已带 `LimitNOFILE=524288`；**老机器**（远端 unit 一旦存在、部署就不再覆盖，同上）需手工补一行后 `systemctl daemon-reload && systemctl restart lolosia-backend-native.service`。
 - 磁盘配置 `/srv/lolosia-backend/application.yaml` 与内嵌 `application.json` 相互独立，改配置不用重编二进制。
 
 ## 5. 旁路服务

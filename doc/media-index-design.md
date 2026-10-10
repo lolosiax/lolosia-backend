@@ -183,7 +183,7 @@
 | `media_asset_tag` | 文件 ↔ 标签关联，带 `source` / `provider` / `confidence` / `negative` | 文件数 × 5~20 |
 | `media_tag_rule` | 目录 / 文件名 → 标签（或评级）的规则 | 几十 |
 | `media_embedding` | 向量**索引**（本体在 `.cache` 的 `.f32` 文件里） | = 有向量的文件数 × 模型数 |
-| `folder_tag` | **目录** ↔ 标签关联（目录不在 `media_asset` 里）：给文件管理器记展示开关，如 `feature:日期分组` / `feature:自动分组-月份` | 目录数 × 0~3 |
+| `folder_tag` | **目录** ↔ 标签关联（目录不在 `media_asset` 里）：给文件管理器记展示开关，如 `feature:日期分组` / `feature:自动分组-月份` / `feature:喜欢优先` | 目录数 × 0~3 |
 
 > 元数据**不单开 EAV 表**：能建索引的字段提升成 `media_asset` 的列，长尾原文进 `metadata_json`。理由见 §4.7。
 
@@ -571,6 +571,9 @@ namespace:name            object:巧克力
   `action` 单列是因为**「人物在做什么」与「画面里有什么」是两类检索意图**（「所有坐着的图」vs「所有含巧克力的图」）。
 - 层级用 `parent_id`（`character:Vtuber → character:白上吹雪`）。**只向下蕴含**：选 `Vtuber` 含全部成员。
 - `user` 命名空间保留给纯人工的自由标签（「我的壁纸」「待整理」这类），不参与模型打标。
+- `feature` 命名空间**不描述画面**，而是给**文件管理器**用的展示 / 标记开关：目录级的 `feature:日期分组` /
+  `feature:自动分组-年份|月份`（记在 `folder_tag`）、`feature:喜欢优先`（把已标心的项聚成「喜欢 / 其他」两组），
+  以及文件级的 `feature:喜欢`（人打的爱心，记在 `media_asset_tag`）。
 
 ### 7.2 `rating` 为什么单独成列，且**只由人工写**
 
@@ -976,7 +979,7 @@ v1 不做：文件管理器当前只给 `admin`，§10.4 的签名已经够；�
 
 ### 11.1 现有接口的增量
 
-`FileEntry`（`dto/FileDtos.kt`）加四个字段（都有默认值，老前端不受影响）：
+`FileEntry`（`dto/FileDtos.kt`）加以下字段（都有默认值，老前端不受影响）：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -984,11 +987,14 @@ v1 不做：文件管理器当前只给 `admin`，§10.4 的签名已经够；�
 | `indexed` | `Boolean = false` | 是否已被媒体索引（前端据此决定「未索引」样式） |
 | `takenAt` | `Long = 0` | 拍摄时刻（毫秒，UTC）；无则 0 |
 | `sample` | `String = ""` | 8×8 RGB565 采样（hex）；没有为空串。缩略图生成时顺带产出（§10.3） |
+| `tags` | `List<MediaTagRef> = []` | 该项身上的标签，**只带 `namespace` + `name`**（够网格标心与标签分组 / 筛选用） |
 
 `MediaDetail` 同样加 `sample`；`media:index` 事件也带它，好让网格在索引跑完时立刻拿到采样、不必重列。
 
-> **列表不带标签正文**：标签在 `/api/media/detail` 给全。
-> 若将来要在网格里显示标签角标，走同一目录的那条 join 查询即可（§4.8-1），不必改契约。
+> **列表带标签，但只带 `namespace` + `name`**：够网格标心（`feature:喜欢`）与标签分组 / 筛选用。
+> 文件的标签读 `media_asset_tag`（按来源优先级合并、剔除人工否决），目录读 `folder_tag`；库不可用时为空表 ——
+> 与 `rating` 一样是「列目录不依赖库」的降级。否决位（`negative`）与来源（`source`）仍只在 `/api/media/detail` 给全。
+> 实现：`MediaQueryService.enrich` 复用 §4.8-1 的两条单语句查询补上（目录的标签因 `folder_tag` 无批量 / `IN` 支持，按子目录循环单查）。
 
 > **标签项带来源与否决位**：`MediaTagItem` 除 `namespace` / `name` 外还给 `source`（同标签多来源里按
 > `manual > rule > model` 合并后生效的那条）与 `negative`。人工否决的标签**照列不隐藏** —— 属性页要把
@@ -1106,7 +1112,7 @@ v1 不做：文件管理器当前只给 `admin`，§10.4 的签名已经够；�
 | Worker | `service/media/worker/TaggingProvider.kt` / `HttpTaggingWorker.kt` / `NoopTaggingProvider.kt` / `AnalyzeDtos.kt` |
 | 直链 | `service/files/FileSigner.kt`（加 `flags`）/ `FileController.kt` + `MediaController.kt`（签发时算 flags） |
 | 缩略图 | `service/files/ThumbnailGenerator.kt`（解码一次 → 各档缩略图 + 8×8 采样）/ `ThumbnailService.kt`（生成后把采样回写 `media_asset`，并给老缓存回填）/ `ThumbnailCache.kt`（元数据带采样） |
-| DTO | `dto/MediaDtos.kt`；`dto/FileDtos.kt` 的 `FileEntry` 加 `rating` / `indexed` / `takenAt` / `sample` |
+| DTO | `dto/MediaDtos.kt`；`dto/FileDtos.kt` 的 `FileEntry` 加 `rating` / `indexed` / `takenAt` / `sample` / `tags` |
 | 接口 | `controller/MediaController.kt` |
 | 配置 | `settings/AppSettings.kt`（`FilesConfig.MediaConfig`）/ `resources/media-rules.yaml` / `resources/permissions.yaml` |
 | 装配 | `configuration/AppModule.kt`（provider 选择：URL 空 → Noop）/ `AppConfigure.kt`（`start()` 挂进应用作用域） |
