@@ -15,6 +15,7 @@ import moe.lolosia.web.service.media.MEDIA_WRITE
 import moe.lolosia.web.service.media.MediaIndexService
 import moe.lolosia.web.service.media.MediaPropertyService
 import moe.lolosia.web.service.media.MediaQueryService
+import moe.lolosia.web.service.media.TagQueryService
 import moe.lolosia.web.util.router.Body
 import moe.lolosia.web.util.router.Controller
 import moe.lolosia.web.util.router.GET
@@ -122,6 +123,28 @@ object MediaController {
         folderTags: FolderTagService,
         @Body req: MediaTagsReq,
     ): MessageResult = folderTags.detach(ctx, req)
+
+    /**
+     * 标签选择器：全量词表（带命名空间），供控件按段浏览。
+     *
+     * 控件只在获得焦点时拉，不在页面加载时拉（见 `TagQueryService.vocabulary`）。
+     */
+    @GET("/media/tags")
+    @Permission(MEDIA_READ)
+    suspend fun tagVocabulary(ctx: Context, tags: TagQueryService): List<MediaTagItem> =
+        tags.vocabulary(ctx)
+
+    /**
+     * 标签选择器：某个目录里**已经在用**的标签（目录下文件用过的 + 目录自己的），
+     * 给控件把「这个文件夹用过的」顶到最前面。`path` 为空串表示浏览根。
+     */
+    @GET("/media/dir-tags")
+    @Permission(MEDIA_READ)
+    suspend fun directoryTags(
+        ctx: Context,
+        tags: TagQueryService,
+        @Query path: String?,
+    ): List<MediaTagItem> = tags.directoryTags(ctx, path)
 
     /**
      * 请求本地索引扫描：`path` 为空表示整个浏览根。
