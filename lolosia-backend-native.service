@@ -10,6 +10,9 @@ WorkingDirectory=/srv/lolosia-backend
 ExecStart=/srv/lolosia-backend/lolosia-backend
 Restart=on-failure
 RestartSec=5
+# systemd 的软限制默认是 1024：缩略图解码 / 媒体索引 / WebDAV 并发一高就会 EMFILE，
+# 崩在 TCP accept 上（POSIX error 24）。显式抬到硬上限，与 DefaultLimitNOFILE 对齐。
+LimitNOFILE=524288
 
 [Install]
 WantedBy=multi-user.target
