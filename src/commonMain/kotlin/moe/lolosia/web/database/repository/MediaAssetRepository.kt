@@ -229,4 +229,12 @@ interface MediaAssetRepository : CrudRepository<MediaAssetEntity> {
         updatedAt: Instant,
         updatedBy: String?,
     ): Result<Long>
+
+    /** 仪表盘「最近新增」：按登记时间倒序取若干条。 */
+    @Query("select * from media_asset where deleted = 0 order by created_at desc limit :limit")
+    suspend fun findAllByCreatedAtOrderDesc(context: QueryExecutor, limit: Int): Result<List<MediaAssetEntity>>
+
+    /** 仪表盘「近期活跃」：按源文件修改时间倒序取若干条。 */
+    @Query("select * from media_asset where deleted = 0 order by mtime desc limit :limit")
+    suspend fun findAllByMtimeOrderDesc(context: QueryExecutor, limit: Int): Result<List<MediaAssetEntity>>
 }

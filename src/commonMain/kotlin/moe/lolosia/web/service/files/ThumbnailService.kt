@@ -13,9 +13,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.repository.MediaAssetRepository
+import moe.lolosia.web.database.repository.MediaAssetTagRepository
 import moe.lolosia.web.dto.FileThumbEvent
 import moe.lolosia.web.dto.SignedFile
 import moe.lolosia.web.service.SseService
+import moe.lolosia.web.service.media.NAMESPACE_FEATURE
+import moe.lolosia.web.service.media.TAG_NO_CROP
 import moe.lolosia.web.service.permission.PermissionResolver
 import moe.lolosia.web.service.permission.Permissions
 import moe.lolosia.web.settings.AppSettings
@@ -54,12 +57,20 @@ class ThumbnailService(
     private val db: Database,
     private val resolver: PermissionResolver,
     private val assets: MediaAssetRepository,
+    private val bindings: MediaAssetTagRepository,
 ) {
 
     private val log = Log.of("Thumb")
 
     private val config = settings.files.thumbnail
     private val cache = browser.cache
+
+    /**
+     * 自动裁边的**配置**（总开关 + 阈值）。
+     *
+     * 具体到某一个文件这次裁不裁，还要叠加它身上的 `feature:不裁剪` 标记 —— 见 [cropFor]。
+     */
+    private val autoCrop = config.autoCrop
 
     /** 待生成队列（队首优先）。 */
     private val mutex = Mutex()
@@ -109,6 +120,47 @@ class ThumbnailService(
     }
 
     /**
+     * 强制重算一批文件的缩略图：先删掉它们的全部缓存（含原始分辨率预览），再插到队首重算。
+     *
+     * 与 [prioritize] 的分工：那里是「没生成过才生成」，这里是**无条件重算** —— 用在缩略图与
+     * 当前配置对不上之后，比如刚把某张图标成 `feature:不裁剪`、或改过裁剪参数，想让旧图立刻跟上。
+     *
+     * 与 [prioritize] 同构：非阻塞、不抛异常（调用方是接口，不该因为扫描失败而失败）；未启用时空操作。
+     * 重建时 [process] 会**现查**「不裁剪」标记，所以标完再重建即可生效。
+     */
+    fun regenerate(paths: List<String>) {
+        if (!config.enabled || paths.isEmpty()) return
+        scope.launch {
+            val valid = paths.mapNotNull { normalizeRelative(it) }.filter { it.isNotEmpty() }.distinct()
+            if (valid.isEmpty()) return@launch
+            for (path in valid) cache.invalidate(path)
+            enqueue(valid, urgent = true)
+        }
+    }
+
+    /**
+     * 这张图这次该不该裁边。
+     *
+     * 全局开关关掉、或该文件被标了生效的 `feature:不裁剪`，都返回 `null`（不裁）；否则给出裁边参数。
+     * **每次生成时现查**，所以缓存升版重建、手动重新生成都能读到最新标记，与缓存版本号无关。
+     * 数据库不可用时按「要裁」处理 —— 不能因为库挂了就整库不裁。
+     */
+    private suspend fun cropFor(relative: String): AutoCrop? {
+        if (!autoCrop.enabled) return null
+        if (hasNoCropTag(relative)) return null
+        return AutoCrop(autoCrop.white, autoCrop.minRatio, autoCrop.maxRunRatio, autoCrop.maxTrimRatio)
+    }
+
+    /** 该文件是否带生效的 `feature:不裁剪` 标签（已打过、且未被否决）。库不可用视为没有。 */
+    private suspend fun hasNoCropTag(relative: String): Boolean {
+        val exec = runCatching { db.driver }.getOrNull() ?: return false
+        val links = runCatching {
+            bindings.findAllByPathAndTag(exec, relative, NAMESPACE_FEATURE, TAG_NO_CROP).getOrThrow()
+        }.getOrNull() ?: return false
+        return links.any { !it.negative }
+    }
+
+    /**
      * 取**原始分辨率**的 WebP 预览：命中缓存直接返回，没有就现生成一次并落盘。
      *
      * 与档位缩略图不同，它不进后台队列 —— 只有用户真的打开这张图，才付这一次「解码原图 +
@@ -137,7 +189,7 @@ class ThumbnailService(
         // 解码 + 全尺寸编码是纯 CPU 的重活，挪到默认调度器上跑，别占着请求线程
         return withContext(Dispatchers.Default) {
             val source = browser.readSource(relative) ?: return@withContext null
-            val set = ThumbnailGenerator.encodeFull(source, config.quality) ?: run {
+            val set = ThumbnailGenerator.encodeFull(source, config.quality, cropFor(relative)) ?: run {
                 log.info { "不是可解码的图片，跳过：$relative" }
                 return@withContext null
             }
@@ -250,7 +302,7 @@ class ThumbnailService(
         if (meta != null && !unchanged) cache.deleteFull(relative)
 
         val source = browser.readSource(relative) ?: return
-        val set = ThumbnailGenerator.generate(source, cache.orderedSizes, config.quality)
+        val set = ThumbnailGenerator.generate(source, cache.orderedSizes, config.quality, cropFor(relative))
         if (set == null) {
             log.info { "不是可解码的图片，跳过：$relative" }
             return

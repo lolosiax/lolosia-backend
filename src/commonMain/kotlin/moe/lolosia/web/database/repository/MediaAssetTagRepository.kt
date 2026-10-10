@@ -46,6 +46,25 @@ interface MediaAssetTagRepository : CrudRepository<MediaAssetTagEntity> {
     )
     suspend fun findAllByDirPath(context: QueryExecutor, dirPath: String): Result<List<MediaAssetTagEntity>>
 
+    /**
+     * 某个**文件**身上某个「命名空间:名字」标签的关联行（本表为驱动表 join 回 `media_asset`）。
+     *
+     * 供缩略图服务按 path 判断「不裁剪」用：生成时现查，所以缓存升版重建也能读到最新标记。
+     */
+    @Query(
+        "select t.* from media_asset_tag t " +
+            "join media_asset a on a.id = t.asset_id " +
+            "join media_tag mt on mt.id = t.tag_id " +
+            "where a.path = :path and a.deleted = 0 and t.deleted = 0 and mt.deleted = 0 " +
+            "and mt.namespace = :namespace and mt.name = :name"
+    )
+    suspend fun findAllByPathAndTag(
+        context: QueryExecutor,
+        path: String,
+        namespace: String,
+        name: String,
+    ): Result<List<MediaAssetTagEntity>>
+
     @Query(
         "insert into media_asset_tag(asset_id, tag_id, source, provider, confidence, negative, " +
             "created_at, created_by, updated_at, updated_by, deleted) " +

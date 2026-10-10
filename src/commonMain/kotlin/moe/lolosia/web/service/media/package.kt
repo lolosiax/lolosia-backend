@@ -45,6 +45,12 @@ const val SOURCE_MODEL: String = "model"
 /** `namespace` 里的元信息命名空间（`meta:explicit` 这类投影标签）。 */
 const val NAMESPACE_META: String = "meta"
 
+/** `namespace` 里的功能开关命名空间（`feature:喜欢`、`feature:不裁剪`…）。 */
+const val NAMESPACE_FEATURE: String = "feature"
+
+/** 「不裁剪」功能标签：带它的图片生成缩略图 / 预览时不裁白边（缩略图服务按 path 现查，见 `ThumbnailService`）。 */
+const val TAG_NO_CROP: String = "不裁剪"
+
 /** 评级投影成标签时的名字（§7.2：列是权威，标签是投影）。 */
 const val TAG_EXPLICIT: String = "explicit"
 

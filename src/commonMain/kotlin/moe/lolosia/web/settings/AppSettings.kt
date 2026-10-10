@@ -19,6 +19,7 @@ data class AppSettings(
     val ddns: DdnsConfig = DdnsConfig(),
     val webdav: WebdavConfig = WebdavConfig(),
     val files: FilesConfig = FilesConfig(),
+    val dashboard: DashboardConfig = DashboardConfig(),
     /** 日志级别：TRACE / DEBUG / INFO / WARN / ERROR / OFF */
     val logLevel: String = "INFO",
 ) {
@@ -174,6 +175,43 @@ data class AppSettings(
             val scanIntervalSeconds: Int = 600,
             /** 超过该字节数的源文件跳过（避免在小内存设备上解码爆内存）。 */
             val maxSourceBytes: Long = 64L * 1024 * 1024,
-        )
+            /** 自动裁边：识别并裁掉图片四边的近纯白装饰带（手机水印白条 / VRChat 白框）。 */
+            val autoCrop: AutoCropConfig = AutoCropConfig(),
+        ) {
+            /**
+             * 缩略图自动裁边的参数（判据见 [moe.lolosia.web.service.files.AutoCrop]）。
+             *
+             * 只裁「近纯白边带」，亮底照片与阴天亮区会被占比 / 连续段判据挡下；四边各自独立判定。
+             */
+            @Serializable
+            data class AutoCropConfig(
+                /** 是否启用。 */
+                val enabled: Boolean = true,
+                /** 每通道近白下限（0~255）：真白边是 255，阴天亮区多在 244 上下。 */
+                val white: Int = 246,
+                /** 行/列内近白像素占比下限。 */
+                val minRatio: Double = 0.55,
+                /** 行/列内非白像素最长连续段占比上限（文字是细笔画、成片内容会被挡下）。 */
+                val maxRunRatio: Double = 0.15,
+                /** 单边最大裁剪比例（防止亮底照片被整片误裁）。 */
+                val maxTrimRatio: Double = 0.35,
+            )
+        }
     }
+
+    /**
+     * 仪表盘：系统指标采样与访问统计。
+     *
+     * [enabled] 关掉时，采样循环、访问埋点全部空转（接口返回空数据）。
+     * 指标采集只在 Linux 上有效（解析 `/proc`），Windows 目标恒报「本机不支持」。
+     */
+    @Serializable
+    data class DashboardConfig(
+        /** 是否启用后台采样与访问统计。 */
+        val enabled: Boolean = false,
+        /** 系统指标采样间隔（秒），下限 1。 */
+        val sampleIntervalSeconds: Int = 2,
+        /** 指标落库的保留时长（小时），旧行按它清理。 */
+        val retainHours: Int = 48,
+    )
 }

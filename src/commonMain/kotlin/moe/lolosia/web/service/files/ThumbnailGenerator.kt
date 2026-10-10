@@ -44,8 +44,11 @@ expect object ThumbnailGenerator {
      * 把 [bytes] 解码后按 [sizes] 各缩一版，编码为有损 WebP（[quality] 取 1~100）。
      *
      * 格式不支持或解码失败返回 `null`；单档编码失败则该档位不出现在结果里，不抛异常。
+     *
+     * [crop] 非空时，在摆正方向之后、缩放之前先裁掉四边的近纯白装饰带（判据见 [AutoCrop]）；
+     * 返回的 [ThumbnailSet.sourceWidth]/[ThumbnailSet.sourceHeight] 是**裁剪后**的尺寸。
      */
-    fun generate(bytes: ByteArray, sizes: List<Int>, quality: Int): ThumbnailSet?
+    fun generate(bytes: ByteArray, sizes: List<Int>, quality: Int, crop: AutoCrop?): ThumbnailSet?
 
     /**
      * 把 [bytes] 解码后按**原始分辨率**换编码为有损 WebP（[quality] 取 1~100），不缩放。
@@ -55,8 +58,10 @@ expect object ThumbnailGenerator {
      * 其 `size` 记 0（表示「原分辨率」而不是某个档位），尺寸取自源图。
      *
      * 只在用户打开某张图时按需调用一次，结果落盘缓存，不进后台队列。
+     *
+     * [crop] 非空时同样先裁掉四边的近纯白装饰带。
      */
-    fun encodeFull(bytes: ByteArray, quality: Int): ThumbnailSet?
+    fun encodeFull(bytes: ByteArray, quality: Int, crop: AutoCrop?): ThumbnailSet?
 
     /**
      * 只取 8×8 RGB565 采样（hex，256 字符），不编码缩略图；解不出返回 `null`。
