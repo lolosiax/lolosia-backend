@@ -1,11 +1,16 @@
 package moe.lolosia.web.util.system
 
+import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import moe.lolosia.web.util.time.nowEpochMs
+import platform.posix.FILE
 import platform.posix.fclose
 import platform.posix.fopen
 import platform.posix.fread
+import platform.posix.pclose
+import platform.posix.popen
 
 /**
  * Linux 侧的系统指标采集：直接解析 `/proc`。
@@ -15,8 +20,8 @@ import platform.posix.fread
  * - `/proc/net/dev`：逐网卡累计收发字节（跳过 `lo`）；
  * - `/proc/diskstats`：逐设备累计读写扇区 × 512（跳过 `loop*` / `ram*` 伪设备）。
  *
- * **磁盘容量记为 0（降级）**：Kotlin/Native 的 `platform.posix` 未导出 `statvfs`，
- * 取不到挂载点容量，服务层据此把磁盘占用率算成 0；其余指标不受影响。
+ * **磁盘容量走 `df -Pk` 兜底**：Kotlin/Native 的 `platform.posix` 未导出 `statfs`/`statvfs`，
+ * 起一次 `df` 取挂载点用量，并按 [DISK_CACHE_MS] 低频缓存（采样每 2s 一次，不必每次起进程）。
  *
  * 任意一步解析失败都返回 `null`，不抛异常。
  */
@@ -30,14 +35,15 @@ internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? 
     val mem = parseMem(meminfo) ?: return null
     val net = parseNetDev(netdev)
     val io = parseDiskStats(diskstats)
+    val disk = readDiskCapacity(diskPath)
 
     return SystemMetricsSnapshot(
         cpuBusyTicks = cpu.first,
         cpuTotalTicks = cpu.second,
         memUsedBytes = mem.first,
         memTotalBytes = mem.second,
-        diskUsedBytes = 0L,
-        diskTotalBytes = 0L,
+        diskUsedBytes = disk.first,
+        diskTotalBytes = disk.second,
         netInBytes = net.first,
         netOutBytes = net.second,
         diskReadBytes = io.first,
@@ -51,25 +57,75 @@ internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? 
  * 不能用 `util.fs.readFileBytes`：它靠 `fseek(SEEK_END)` + `ftell` 求长度，而 `/proc` 文件的
  * `st_size` 恒为 0，会被当成空文件直接返回 `null`（整条采样链因此恒判「本机不支持」）。
  */
-@OptIn(UnsafeNumber::class)
 private fun readText(path: String): String? {
     val file = fopen(path, "rb") ?: return null
-    try {
-        val chunk = ByteArray(16 * 1024)
-        var data = ByteArray(0)
-        while (true) {
-            val count = chunk.usePinned { pinned -> fread(pinned.addressOf(0), 1uL, chunk.size.toULong(), file).toLong() }
-            if (count <= 0L) break
-            val size = count.toInt()
-            val offset = data.size
-            data = data.copyOf(offset + size)
-            chunk.copyInto(data, offset, 0, size)
-        }
-        return data.decodeToString()
+    return try {
+        readAllText(file)
     } finally {
         fclose(file)
     }
 }
+
+/** 把一个已打开的流（文件 / 管道）读到 EOF。 */
+@OptIn(UnsafeNumber::class)
+private fun readAllText(file: CPointer<FILE>): String {
+    val chunk = ByteArray(16 * 1024)
+    var data = ByteArray(0)
+    while (true) {
+        val count = chunk.usePinned { pinned -> fread(pinned.addressOf(0), 1uL, chunk.size.toULong(), file).toLong() }
+        if (count <= 0L) break
+        val size = count.toInt()
+        val offset = data.size
+        data = data.copyOf(offset + size)
+        chunk.copyInto(data, offset, 0, size)
+    }
+    return data.decodeToString()
+}
+
+// —— 磁盘容量：`df -Pk` 兜底 + 低频缓存 —— //
+
+/** `df` 结果的驻留时长，避免每 2s 采样都起进程。 */
+private const val DISK_CACHE_MS = 60_000L
+
+private var diskCachedAtMs = 0L
+private var diskCachedUsed = 0L
+private var diskCachedTotal = 0L
+
+/**
+ * 磁盘容量（已用 / 总量，字节）：`platform.posix` 未导出 `statfs`/`statvfs`，
+ * 退而用 `df -Pk` 取挂载点用量，并按 [DISK_CACHE_MS] 缓存；取不到时沿用上次结果。
+ */
+private fun readDiskCapacity(diskPath: String): Pair<Long, Long> {
+    val now = nowEpochMs()
+    if (diskCachedAtMs != 0L && now - diskCachedAtMs < DISK_CACHE_MS) return diskCachedUsed to diskCachedTotal
+    val parsed = runDf(diskPath) ?: return diskCachedUsed to diskCachedTotal
+    diskCachedAtMs = now
+    diskCachedUsed = parsed.first
+    diskCachedTotal = parsed.second
+    return parsed
+}
+
+/** 跑一次 `df -Pk <path>`，解析「已用 / 总量（字节）」；失败返回 `null`。 */
+@OptIn(UnsafeNumber::class)
+private fun runDf(diskPath: String): Pair<Long, Long>? {
+    val pipe = popen("df -Pk ${shellQuote(diskPath)} 2>/dev/null", "r") ?: return null
+    val output = try {
+        readAllText(pipe)
+    } finally {
+        pclose(pipe)
+    }
+    // POSIX 输出：「文件系统 1024-块 已用 可用 容量 挂载点」，取最后一行数据行
+    val line = output.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() && !it.startsWith("Filesystem") } ?: return null
+    val fields = line.split(' ').filter { it.isNotEmpty() }
+    if (fields.size < 3) return null
+    val total = fields[1].toLongOrNull()?.times(1024L) ?: return null
+    val used = fields[2].toLongOrNull()?.times(1024L) ?: return null
+    if (total <= 0L) return null
+    return used.coerceAtLeast(0L) to total
+}
+
+/** 单引号包裹并转义，供 shell 使用。 */
+private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
 /** CPU：返回「(累计繁忙节拍, 累计总节拍)」。 */
 private fun parseCpu(text: String): Pair<Long, Long>? {

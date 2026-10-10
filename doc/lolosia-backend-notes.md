@@ -275,7 +275,7 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 - **系统指标两端都采**：Linux 解析 `/proc`（`util/system/SystemMetricsReader.linux.kt`）；Windows 走未提权的 Win32 / NT API ——
   CPU `GetSystemTimes`、内存 `GlobalMemoryStatusEx`、系统盘容量 `GetDiskFreeSpaceW`、网络 `iphlpapi.GetIfTable`（动态 `LoadLibraryA`，platform.windows 未暴露该库）、
   磁盘读写 `ntdll.NtQuerySystemInformation(SystemPerformanceInformation)`（无需开启 diskperf、无需管理员）。任一端解析失败即 `available=false`。
-  注：Linux 侧磁盘容量恒为 0（Kotlin/Native 未导出 `statvfs`），Windows 侧磁盘容量是真值。
+  注：Linux 侧磁盘容量用 `df -Pk` 兜底（`platform.posix` 未导出 `statfs`/`statvfs`），按 60s 低频缓存；Windows 侧走 `GetDiskFreeSpaceW`。
 
 - 开关 `dashboard.enabled`（配 `sampleIntervalSeconds` / `retainHours`）；关掉时采样循环与埋点空转、接口返回空数据。
 - **访问统计是无例外的**：`AccessStatInterceptor`（`order = -8`，`Monitoring` 相位）在 `proceed()` **之前**记一次「来源 IP + Host」，
