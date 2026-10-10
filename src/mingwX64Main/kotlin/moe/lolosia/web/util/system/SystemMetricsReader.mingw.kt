@@ -10,7 +10,8 @@ import platform.windows.*
  * - CPU：`GetSystemTimes` 的 idle / kernel / user 累计 100ns 节拍（kernel 含 idle，故忙 = total - idle）；
  * - 内存：`GlobalMemoryStatusEx` 的物理内存总量与可用量（已用 = 总量 - 可用）；
  * - 磁盘容量：`GetDiskFreeSpaceW` 取系统盘（`SystemDrive`）的簇数 × 簇大小；
- * - 网络：动态加载 `iphlpapi.dll` 的 `GetIfTable`，逐网卡累计收发字节、跳过回环；
+ * - 网络：动态加载 `iphlpapi.dll` 的 `GetIfTable`，逐网卡累计收发字节、跳过回环，
+ *   并按物理地址去重（同一网卡会被 Windows 以多行别名返回，否则吞吐被成倍放大）；
  * - 磁盘读写：动态加载 `ntdll.dll` 的 `NtQuerySystemInformation(SystemPerformanceInformation)`，
  *   取系统累计 IO 传输字节（无需开启 diskperf 计数、无需管理员）。
  *
@@ -90,7 +91,7 @@ private fun diskRoot(): String {
     return if (drive.isNullOrBlank()) "C:\\" else "$drive\\"
 }
 
-/** 网络：返回「(累计入站字节, 累计出站字节)」，逐网卡求和、跳过回环。 */
+/** 网络：返回「(累计入站字节, 累计出站字节)」，逐网卡求和（按物理地址去重）、跳过回环。 */
 private fun readNet(): Pair<Long, Long> {
     val module = LoadLibraryA("iphlpapi.dll") ?: return 0L to 0L
     try {
@@ -108,9 +109,15 @@ private fun readNet(): Pair<Long, Long> {
             val entries = leU32(raw, 0)
             var inbound = 0L
             var outbound = 0L
+            // Windows 会为同一块网卡（同一物理地址）返回多行「别名」（WFP / 网络隔离层），
+            // 逐行相加会把同一份流量重复计 N 次（实测某机 12 次，吞吐被放大一个数量级）。
+            // 按物理地址去重，同一网卡只累加一次。
+            val seen = HashSet<Long>()
             for (index in 0 until entries.toInt()) {
                 val base = MIB_IFTABLE_HEADER + index * MIB_IFROW_SIZE
                 if (leU32(raw, base + MIB_IFROW_TYPE) == IF_TYPE_SOFTWARE_LOOPBACK) continue
+                val physLen = leU32(raw, base + MIB_IFROW_PHYS_ADDR_LEN).toInt().coerceIn(0, MIB_IFROW_PHYS_ADDR_MAX)
+                if (physLen > 0 && !seen.add(readPhysAddr(raw, base + MIB_IFROW_PHYS_ADDR, physLen))) continue
                 inbound += leU32(raw, base + MIB_IFROW_IN_OCTETS).toLong()
                 outbound += leU32(raw, base + MIB_IFROW_OUT_OCTETS).toLong()
             }
@@ -156,6 +163,13 @@ private fun leU64(bytes: ByteArray, offset: Int): Long {
     return value
 }
 
+/** 把物理地址（`bPhysAddr`，最多 [MIB_IFROW_PHYS_ADDR_MAX] 字节）折成一个去重用的 64 位键。 */
+private fun readPhysAddr(bytes: ByteArray, offset: Int, len: Int): Long {
+    var value = 0L
+    for (index in 0 until len) value = (value shl 8) or (bytes[offset + index].toLong() and 0xFFL)
+    return value
+}
+
 /** `MIB_IFTABLE` 头部（dwNumEntries）字节数。 */
 private const val MIB_IFTABLE_HEADER: Int = 4
 
@@ -164,6 +178,15 @@ private const val MIB_IFROW_SIZE: Int = 860
 
 /** `MIB_IFROW.dwType` 在行内偏移。 */
 private const val MIB_IFROW_TYPE: Int = 516
+
+/** `MIB_IFROW.dwPhysAddrLen` 在行内偏移。 */
+private const val MIB_IFROW_PHYS_ADDR_LEN: Int = 528
+
+/** `MIB_IFROW.bPhysAddr` 在行内偏移。 */
+private const val MIB_IFROW_PHYS_ADDR: Int = 532
+
+/** `MAXLEN_PHYSADDR`，物理地址最大字节数。 */
+private const val MIB_IFROW_PHYS_ADDR_MAX: Int = 8
 
 /** `MIB_IFROW.dwInOctets` 在行内偏移。 */
 private const val MIB_IFROW_IN_OCTETS: Int = 552
