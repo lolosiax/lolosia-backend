@@ -1,6 +1,8 @@
 package moe.lolosia.web.controller
 
 import kotlinx.serialization.Serializable
+import moe.lolosia.web.service.CacheManager
+import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.dashboard.AccessStatService
 import moe.lolosia.web.service.dashboard.DashboardQueryService
 import moe.lolosia.web.service.dashboard.SystemMetricService
@@ -54,6 +56,19 @@ object DashboardController {
         val range: String = "1h",
         val available: Boolean = false,
         val series: List<DashboardSeriesDto> = emptyList(),
+    )
+
+    /** 顶部状态胶囊：在线会话 / 今日请求 / 缓存命中。 */
+    @Serializable
+    data class DashboardStatusDto(
+        /** 内存中活跃的会话数。 */
+        val onlineSessions: Long = 0L,
+        /** 当天（本地时区）累计请求数。 */
+        val todayRequests: Long = 0L,
+        val cacheHits: Long = 0L,
+        val cacheMisses: Long = 0L,
+        /** 缓存命中率（0~100）；无访问时为 0。 */
+        val cacheHitRate: Double = 0.0,
     )
 
     /** top-ip 一行。 */
@@ -129,6 +144,25 @@ object DashboardController {
             DashboardSeriesDto(key = key, name = name, points = curves.getOrElse(index) { emptyList() })
         }
         return DashboardMetricsDto(range = window, available = curves.any { it.isNotEmpty() }, series = series)
+    }
+
+    /** 顶部胶囊统计：在线会话、今日请求与缓存命中率。 */
+    @GET("/dashboard/status")
+    @Permission("lolosia.dashboard.read")
+    suspend fun status(
+        ctx: Context,
+        stat: AccessStatService,
+        sessions: SessionManager,
+        cache: CacheManager,
+    ): DashboardStatusDto {
+        val cacheStats = cache.stats()
+        return DashboardStatusDto(
+            onlineSessions = sessions.size.toLong(),
+            todayRequests = stat.todayHits(ctx),
+            cacheHits = cacheStats.hits,
+            cacheMisses = cacheStats.misses,
+            cacheHitRate = cacheStats.hitRate,
+        )
     }
 
     /** 综合概览：访问来源、最近文件、热门标签与推荐。 */

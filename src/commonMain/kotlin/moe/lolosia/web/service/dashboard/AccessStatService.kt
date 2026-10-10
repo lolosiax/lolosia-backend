@@ -78,6 +78,15 @@ class AccessStatService(
             .sortedByDescending { it.second }
             .take(limit.coerceAtLeast(1))
 
+    /** 当天（本地时区，00 点起）的请求总数。 */
+    suspend fun todayHits(ctx: Context): Long {
+        val start = currentBucket(Clock.System.now()).substringBefore('T') + "T00"
+        return runCatching { stats.findAllByHourBucketAfter(ctx.db, start).getOrThrow() }
+            .getOrNull()
+            ?.sumOf { it.hits }
+            ?: 0L
+    }
+
     private suspend fun consumeLoop() {
         var lastFlush = nowEpochMs()
         while (scope.isActive) {

@@ -203,7 +203,7 @@ data class AppSettings(
      * 仪表盘：系统指标采样与访问统计。
      *
      * [enabled] 关掉时，采样循环、访问埋点全部空转（接口返回空数据）。
-     * 指标采集只在 Linux 上有效（解析 `/proc`），Windows 目标恒报「本机不支持」。
+     * 指标采集两端都支持：Linux 解析 `/proc`，Windows 走 Win32 / NT API（见 `util/system/SystemMetricsReader.*`）。
      */
     @Serializable
     data class DashboardConfig(

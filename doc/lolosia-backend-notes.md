@@ -263,13 +263,19 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 
 ## 9. 仪表盘与访问统计（2026-10-11）
 
-首页仪表盘的数据源。三个只读接口都挂 `lolosia.dashboard.read`（`admin` 及以上由 `+lolosia.*` 覆盖）：
+首页仪表盘的数据源。四个只读接口都挂 `lolosia.dashboard.read`（`admin` 及以上由 `+lolosia.*` 覆盖）：
 
 | 接口 | 内容 |
 | --- | --- |
-| `GET /api/dashboard/system` | 占用率 / 容量 / 运行时长；**Windows（mingw 目标）恒 `available=false`**（指标靠解析 `/proc` 采集） |
-| `GET /api/dashboard/metrics?range=1h` | 六条曲线：CPU / 内存 / 入站 / 出站 / 磁盘读 / 磁盘写 |
+| `GET /api/dashboard/system` | 占用率 / 容量 / 运行时长；本机采集不到时 `available=false` |
+| `GET /api/dashboard/metrics?range=1h` | 六条曲线：CPU / 内存 / 入站 / 出站 / 磁盘读 / 磁盘写（`range` 支持 `30m` / `1h` / `6h` / `24h`） |
+| `GET /api/dashboard/status` | 顶部胶囊：在线会话（内存活跃数）、今日请求（当天 `sys_access_stat` 合计）、缓存命中率（`CacheManager` 自进程启动累计） |
 | `GET /api/dashboard/overview` | top IP / top Host、最近新增 / 近期活跃、热门标签、为你推荐 / 受欢迎 |
+
+- **系统指标两端都采**：Linux 解析 `/proc`（`util/system/SystemMetricsReader.linux.kt`）；Windows 走未提权的 Win32 / NT API ——
+  CPU `GetSystemTimes`、内存 `GlobalMemoryStatusEx`、系统盘容量 `GetDiskFreeSpaceW`、网络 `iphlpapi.GetIfTable`（动态 `LoadLibraryA`，platform.windows 未暴露该库）、
+  磁盘读写 `ntdll.NtQuerySystemInformation(SystemPerformanceInformation)`（无需开启 diskperf、无需管理员）。任一端解析失败即 `available=false`。
+  注：Linux 侧磁盘容量恒为 0（Kotlin/Native 未导出 `statvfs`），Windows 侧磁盘容量是真值。
 
 - 开关 `dashboard.enabled`（配 `sampleIntervalSeconds` / `retainHours`）；关掉时采样循环与埋点空转、接口返回空数据。
 - **访问统计是无例外的**：`AccessStatInterceptor`（`order = -8`，`Monitoring` 相位）在 `proceed()` **之前**记一次「来源 IP + Host」，
