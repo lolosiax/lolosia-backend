@@ -21,7 +21,8 @@ import kotlin.time.Duration.Companion.hours
  * 对相邻两次求差得到占用率与速率，维护**内存环形缓冲**（保留最近约 1 小时），
  * 并把每分钟一条的降采样行落库、按 `dashboard.retainHours` 周期清理旧行。
  *
- * 采集走 [readSystemMetrics]：Linux 解析 `/proc`，Windows 恒返回 `null`（本机不支持）。
+ * 采集走 [readSystemMetrics]：Linux 解析 `/proc`，Windows 走 Win32 / NT API；
+ * 两边都采集不到时静默跳过，内存曲线与落库各自独立。
  * 数据库不可用时静默跳过落库（同 `ThumbnailService.syncSample` 的写法），不影响内存曲线。
  *
  * 对外两件事：[latest] 取最新一帧、[curve] 取六条曲线（CPU / 内存 / 入站 / 出站 / 读 / 写），
@@ -66,6 +67,8 @@ class SystemMetricService(
 
     private val log = Log.of("Dashboard")
     private val config = settings.dashboard
+    /** 统计磁盘容量的挂载点；留空回退根分区 `/`（Windows 忽略）。 */
+    private val diskPath = config.diskPath.ifBlank { "/" }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val intervalSeconds = config.sampleIntervalSeconds.coerceAtLeast(1)
@@ -156,7 +159,7 @@ class SystemMetricService(
     }
 
     private suspend fun sampleOnce() {
-        val snap = readSystemMetrics("/")
+        val snap = readSystemMetrics(diskPath)
         val nowMs = nowEpochMs()
         mutex.withLock {
             if (snap == null) {

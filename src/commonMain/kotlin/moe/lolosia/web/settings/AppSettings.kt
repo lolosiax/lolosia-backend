@@ -213,5 +213,10 @@ data class AppSettings(
         val sampleIntervalSeconds: Int = 2,
         /** 指标落库的保留时长（小时），旧行按它清理。 */
         val retainHours: Int = 48,
+        /**
+         * 统计磁盘容量用的挂载点（如 `/mnt/hdd1`）；留空则回退根分区 `/`。
+         * Windows 固定统计系统盘，忽略此值。
+         */
+        val diskPath: String = "/",
     )
 }
