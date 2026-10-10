@@ -77,10 +77,17 @@ files:
     quality: 80
     scanIntervalSeconds: 600
     maxSourceBytes: 67108864
+    autoCrop:           # 自动裁掉图片四边的近纯白装饰带（手机水印白条 / VRChat 白框），见 §3.6
+      enabled: true
+      white: 246        # 每通道近白下限（阴天亮区多在 244 上下，取 246 一刀切开）
+      minRatio: 0.55    # 行/列内近白像素占比下限
+      maxRunRatio: 0.15 # 行/列内非白像素最长连续段占比上限（文字是细笔画、成片内容会被挡下）
+      maxTrimRatio: 0.35# 单边最大裁剪比例（防亮底照片被整片误裁）
 ```
 
 - 浏览权限节点 `lolosia.files.read`、写操作 `lolosia.files.write`（新建目录 / 改名 / 删除 / 上传）**只给 `admin` 及以上**：动的是整块机械盘，不对普通用户开放。前端菜单按角色隐藏，直连 `/files` 对无权用户落 404。
-- 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v2`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`，版本号一改旧缓存整体作废）。**该目录对 WebDAV 隐藏**，见 §2.1。
+- 缩略图缓存落在 `<root>/.cache/lolosia/thumb/v3`（`CACHE_DIR` + `THUMBNAIL_CACHE_VERSION`，版本号一改旧缓存整体作废）。**该目录对 WebDAV 隐藏**，见 §2.1。
+  改裁剪算法/参数**不会**自动失效旧缓存（新鲜度只看源文件 size+mtime）——要让存量图跟上，得升版本号，或前端右键「重新生成缩略图」（见 §3.6）。
 - `signKey` 未配置时启动日志会打一条 WARN。线上建议显式配一个固定随机串，否则每次重启后旧直链失效（不影响功能，前端重新列目录会拿到新签名）。
 - `thumbnail.enabled` 只能在一台机器上开：两台同时写同一份缓存会互相覆盖，也会把机械盘两头都拖慢。
 
@@ -137,6 +144,7 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
   | 标签 | 挂在哪 | 作用 |
   | --- | --- | --- |
   | `feature:喜欢` | 文件（`media_asset_tag`） | 网格 / 列表角上的爱心，点击即打 / 取消 |
+  | `feature:不裁剪` | 文件（`media_asset_tag`） | 生成缩略图 / 预览时**不裁白边**（见 §3.6） |
   | `feature:日期分组` | 目录（`folder_tag`） | 工具栏出现「年份 / 月份」，按子项名字里的 `yyyyMMdd` 分组 |
   | `feature:自动分组-年份\|月份` | 目录 | 进目录时默认选哪种日期分组 |
   | `feature:喜欢优先` | 目录 | 聚出「喜欢 / 其他」两组；与日期分组同开时只在**各日期组内部**把爱心提前 |
@@ -145,6 +153,19 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 - **排序在进目录时冻结**：进入时快照一份「已标心」集合，之后点心只换图标、条目**不会跳位**，要重排得点刷新。
 - 列表接口 `files/list` 的条目已带 `tags`（只 `namespace` + `name`，见 [media-index-design.md](./media-index-design.md) §11.1），
   所以多选时右侧标签栏的聚合是**就地现算**的，不按选中数扇出 `media/detail`（选 100 个也只发 0 个）。
+
+### 3.6 缩略图自动裁白边 &「不裁剪」
+
+生成缩略图 / 全屏预览时，会自动裁掉图片四边的**近纯白装饰带**（手机水印白条、VRChat 白框）。
+判据在 native 侧 `service/files/ThumbnailGenerator.kt`：四边**各自独立**、都只从外沿向内推进，
+一行（列）里**近白像素占比够高、且非白像素不成片**才算装饰带；阈值即 §3.1 的 `files.thumbnail.autoCrop`。
+
+- 裁的是**缩略图与预览**，原图（`files/raw`）不动。
+- 参数 `white=246 / minRatio=0.55 / maxRunRatio=0.15 / maxTrimRatio=0.35` 经全量 dry-run 标定：阴天天空这类「均值很亮但每通道到不了 246」的亮区不会被误判（VRChat 白框里的水印文字靠「占比 + 非白连续段」两条一起挡下）。
+- 想给某张（或一批）图**关掉裁剪**：右键「不裁剪」——它其实就是打上 `feature:不裁剪` 标签（挂 `media_asset_tag`，与「喜欢」同一套表 / 接口 / 权限）。
+- 标记**只改索引、不动缩略图**；要让存量图立刻跟上，右键「重新生成缩略图」（`POST /api/files/thumb/regenerate`，body `{paths:[...]}`）——后端先删这几个文件的缓存，再插到队首重算。
+- 裁剪判定是**生成那一刻按 path 现查**该标记，与缓存版本号正交：以后升到 v4 全量重建时同样读得到最新标记，不会因为升级而丢失。
+- 前提：文件得**已被媒体索引登记**（和「喜欢」一样，未索引时后端返回「请先跑一轮索引扫描」）。
 
 ## 4. 部署要点（systemd）
 
@@ -239,3 +260,20 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 
 - ⚠️ **collation 坑**：源库（MariaDB 11.x）默认 `utf8mb4_uca1400_ai_ci`，目标 10.6 **不认**（`ERROR 1273 Unknown collation`）→ 必须用上面的 `sed` 换成 `utf8mb4_unicode_ci`。不换会导到一半报错中断。
 - 结果：8 张表 —— `sys_user` 4 行、`sys_role` 5 行、`sys_user_roles` 3 行、`sys_sessions` 33 行，`sys_cache` / `oss_user_file` 为 0 行，另含 `sys_logs` 与视图 `view_user_role`。
+
+## 9. 仪表盘与访问统计（2026-10-11）
+
+首页仪表盘的数据源。三个只读接口都挂 `lolosia.dashboard.read`（`admin` 及以上由 `+lolosia.*` 覆盖）：
+
+| 接口 | 内容 |
+| --- | --- |
+| `GET /api/dashboard/system` | 占用率 / 容量 / 运行时长；**Windows（mingw 目标）恒 `available=false`**（指标靠解析 `/proc` 采集） |
+| `GET /api/dashboard/metrics?range=1h` | 六条曲线：CPU / 内存 / 入站 / 出站 / 磁盘读 / 磁盘写 |
+| `GET /api/dashboard/overview` | top IP / top Host、最近新增 / 近期活跃、热门标签、为你推荐 / 受欢迎 |
+
+- 开关 `dashboard.enabled`（配 `sampleIntervalSeconds` / `retainHours`）；关掉时采样循环与埋点空转、接口返回空数据。
+- **访问统计是无例外的**：`AccessStatInterceptor`（`order = -8`，`Monitoring` 相位）在 `proceed()` **之前**记一次「来源 IP + Host」，
+  所以命中路由、404、抛异常、SSE / 长连接全都计入（若放 `finally`，SSE 这类不返回的请求要等连接断开才计数）。
+  来源 IP 取值：`X-Forwarded-For`（取第一段）→ `X-Real-IP` → `remoteHost`（线上经 Caddy 反代时 `remoteHost` 是回环）。
+- 落库两张表：`sys_metric_sample`（指标采样）、`sys_access_stat`（访问统计，按 IP / Host 聚合）。
+- 「受欢迎」优先取带 `feature:喜欢` 的资产，取不到再回退随机推荐；首页文件卡片带 `exp`/`sig` 直链签名，前端 `<img>` 直接拼 `files/thumb` 取缩略图。
