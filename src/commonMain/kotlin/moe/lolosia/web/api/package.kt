@@ -573,8 +573,8 @@ class WSConnection(
     }
 }
 
-/** 把字节流切成 SSE 帧（以空行为界）。 */
-private fun Flow<ByteArray>.toEventSourceFrames(): Flow<ByteArray> = flow {
+/** 把字节流切成 SSE 帧（以空行为界）。llm 包解析 chat.completion.chunk 时复用。 */
+internal fun Flow<ByteArray>.toEventSourceFrames(): Flow<ByteArray> = flow {
     var pending = ByteArray(0)
     collect { chunk ->
         pending += chunk

@@ -1,6 +1,7 @@
 package moe.lolosia.web.settings
 
 import kotlinx.serialization.Serializable
+import moe.lolosia.web.util.llm.LlmSettings
 import moe.lolosia.web.util.router.Injectable
 
 /**
@@ -20,6 +21,7 @@ data class AppSettings(
     val webdav: WebdavConfig = WebdavConfig(),
     val files: FilesConfig = FilesConfig(),
     val dashboard: DashboardConfig = DashboardConfig(),
+    val llm: LlmSettings = LlmSettings(),
     /** 日志级别：TRACE / DEBUG / INFO / WARN / ERROR / OFF */
     val logLevel: String = "INFO",
 ) {

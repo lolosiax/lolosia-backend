@@ -30,4 +30,4 @@ data class ApiResult<T>(
  *
  * 鉴权失败用 `401`：前端 `request.ts` 对 `401/403` 会清登录态并跳回登录页。
  */
-class ApiException(val status: Int, message: String) : RuntimeException(message)
+open class ApiException(val status: Int, message: String) : RuntimeException(message)

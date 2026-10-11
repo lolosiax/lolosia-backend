@@ -24,6 +24,7 @@ private const val ENV_LOG_LEVEL: String = "KTOR_LOG_LEVEL"
 private const val ENV_DB_URL: String = "KTOR_DB_URL"
 private const val ENV_DB_USERNAME: String = "KTOR_DB_USERNAME"
 private const val ENV_DB_PASSWORD: String = "KTOR_DB_PASSWORD"
+private const val ENV_LLM_API_KEY: String = "KTOR_LLM_API_KEY"
 
 private val settingsJson: Json = Json {
     ignoreUnknownKeys = true
@@ -83,9 +84,13 @@ private fun envOverrides(env: (String) -> String?): JsonObject {
         env(ENV_DB_USERNAME)?.let { put("username", it) }
         env(ENV_DB_PASSWORD)?.let { put("password", it) }
     }
+    val llm = buildJsonObject {
+        env(ENV_LLM_API_KEY)?.let { put("apiKey", it) }
+    }
     return buildJsonObject {
         if (server.isNotEmpty()) put("server", server)
         if (datasource.isNotEmpty()) put("datasource", datasource)
+        if (llm.isNotEmpty()) put("llm", llm)
         env(ENV_LOG_LEVEL)?.let { put("logLevel", it) }
     }
 }
