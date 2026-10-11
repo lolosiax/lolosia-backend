@@ -1,6 +1,6 @@
 # 原生 ChatClient 设计：多模态 + suspend 工具 + inspect 拦截 + 记忆
 
-> 状态：**方案（未实现）**。本文只给设计，不落代码。
+> 状态：**P1–P7 已实现**（落 `util/llm/`；与本文的有意偏差见 §10）。
 > 规范约定见 [AGENTS.md](../AGENTS.md)；`api/`（对外 HTTP 客户端）与 `interceptor/` 的写法照旧遵循它。
 > 对标实现（Spring AI，JVM）在隔壁 `med-agent` 的 `util/llm/`，仅作参照，不照搬其复杂度。
 
@@ -426,10 +426,10 @@ data class LlmSettings(
 
 ## 7. 文件落点
 
-落 **`moe.lolosia.web.llm`**（顶级包，与 `api/` 同级）。
+落 **`moe.lolosia.web.util.llm`**（与 `med-agent` 的 `util/llm/` 对齐；本仓库暂未拆包，先放这里）。
 
-理由：它是**出网基础设施 + 自有协议 DTO**，面向多业务复用，不是「扩展某个外部库」（故不满足 [AGENTS.md](../AGENTS.md) §1.6 的 `util/<库名>` 归属），也不是单一业务服务（故不放 `service/`）。
-> 备选：若希望与 `med-agent` 的 `util/llm/` 保持路径一致，可改落 `util/llm/`；但按本仓库约定 `util/` 是「外部库扩展域」，不推荐。此为**开放决策**（§10）。
+> 说明：它同时具备「出网基础设施 + 自有协议 DTO」与「业务工具」两面，按 [AGENTS.md](../AGENTS.md) §1.6 的严格口径
+> 更像顶级包（如 `api/`）；但当前先与 `med-agent` 路径保持一致，落 `util/llm/`，将来拆包时整目录平移即可。
 
 ```
 src/commonMain/kotlin/moe/lolosia/web/llm/
@@ -492,10 +492,12 @@ gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
 
 ---
 
-## 10. 开放问题（需你拍板）
+## 10. 决策记录（原开放问题）
 
-1. **包名**：`llm/`（推荐，与 `api/` 同级）还是 `util/llm/`（与 `med-agent` 对齐）？
-2. **`@Tool` 注解层是否纳入本期**：只做手写 `ChatTool`（P1–P6，工作量小），还是连 KSP 一起做（+P7，schema 推导与代码生成为主要复杂度）？
-3. **多模态粒度**：只支持「图片字节 / 外链」两式，还是要支持本地文件路径 / `FileStore` / 媒体库 `quick_id` 直取？
-4. **记忆回写时机**：轮次结束即写，还是整个流 `onCompletion` 才写？（影响取消时是否保留半截上下文。）
-5. **错误类型**：新开 `ChatException`，还是复用 `dto` 的 `ApiException`（便于走既有 `StatusPages` → 信封）？
+1. **包名**：落 `util/llm/`（与 `med-agent` 对齐；本仓库暂未拆包）。
+2. **`@Tool` 注解层**：本期一并实现（非可选）——`@Tool` / `@ToolParam` + `router-ksp` 的 `ToolProcessor` → `generatedTools()`。
+   与本文的偏差：`git` 分两轮提交（基础版 → 注解层）；schema 只支持标量参数（String / Int / Long / Double / Float / Boolean / 枚举，含可空）。
+3. **多模态粒度**：抽象为 `MediaResource`（对标 Spring 的 `Resource`），内置 `BytesMediaResource` / `UrlMediaResource` / `FileSystemMediaResource` 三个实现；未接媒体库 `quick_id`（需要时再加一个实现即可）。
+4. **记忆回写时机**：整轮对话**正常结束**或**报错中断**时回写一次；用户主动取消（`CancellationException`）不回写。
+5. **错误类型**：新增 `ChatException : ApiException`（因此把 `ApiException` 放开为 `open`），可走既有 `StatusPages` → 信封。
+6. **模型/服务商**：默认 `baseUrl = https://api.deepseek.com`、`model = deepseek-flash`；密钥经 `KTOR_LLM_API_KEY` 注入，不入库。

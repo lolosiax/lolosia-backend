@@ -1,3 +1,4 @@
 moe.lolosia.router.ksp.RouterProcessorProvider
 moe.lolosia.router.ksp.InterceptorProcessorProvider
 moe.lolosia.router.ksp.InjectionProcessorProvider
+moe.lolosia.router.ksp.ToolProcessorProvider
