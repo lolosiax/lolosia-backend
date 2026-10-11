@@ -54,6 +54,9 @@ const val NAMESPACE_FEATURE: String = "feature"
 /** 「不裁剪」功能标签：带它的图片生成缩略图 / 预览时不裁白边（缩略图服务按 path 现查，见 `ThumbnailService`）。 */
 const val TAG_NO_CROP: String = "不裁剪"
 
+/** 「喜欢」功能标签：足迹地图挑区域代表图时优先取它命中的图（见 `MediaFootprintService`）。 */
+const val TAG_FAVORITE: String = "喜欢"
+
 /** 评级投影成标签时的名字（§7.2：列是权威，标签是投影）。 */
 const val TAG_EXPLICIT: String = "explicit"
 

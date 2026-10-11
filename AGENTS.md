@@ -239,11 +239,11 @@ src/commonMain/kotlin/moe/lolosia/web/
   configuration/AppModule.kt     Koin：appModule / serviceModule（手写逃生口）/ startAppKoin / platformModule(expect)
   generated/GeneratedRegistries.kt  6 个生成注册表的 expect 签名（actual 由 router-ksp 生成）
   api/package.kt                 对外 HTTP 客户端（Ktor Client；引擎按目标选 curl / winhttp），含 sse / ws / streamingRequest
-  controller/                    LoginController / SseController / OssController / FileController / Classpath（运维探针）/ system/{User,Role,UserRole,Menu,Permission}
+  controller/                    LoginController / SseController / OssController / FileController / FootprintController（足迹地图）/ Classpath（运维探针）/ system/{User,Role,UserRole,Menu,Permission}
   database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
-  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos / FileDtos / PermissionDtos
+  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos / FileDtos / MediaDtos / FootprintDtos / PermissionDtos
   interceptor/                   Traffic → Ctx → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
-  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）/ permission/（RBAC：PermissionRegistry · PermissionResolver · PermissionService）/ files/（在线文件管理器：FileBrowser · FileSigner · FileTypes · ThumbnailCache·Generator·Service）
+  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）/ permission/（RBAC：PermissionRegistry · PermissionResolver · PermissionService）/ files/（在线文件管理器：FileBrowser · FileSigner · FileTypes · ThumbnailCache·Generator·Service）/ media/（媒体索引 + 足迹聚类：MediaIndex·Query·Analyze·Footprint 服务 · FootprintClusterer · MediaRule 等）
   service/system/                UserService / RoleService / UserRoleService / QuerySupport
   settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
   util/captcha/                 自研图形验证码（点阵字 + 算式）
@@ -272,7 +272,7 @@ router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller�
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、
                                 NativeClasspath.kt（zip 合并 + windres/objcopy 嵌入 + 链接参数）、extension/
-sql/                            建表脚本（15 表，含 sys_role.parent_id 与权限规则两表、媒体库五表与 folder_tag；无种子规则 —— 默认值在 permissions.yaml）+ migrate_rbac_groups.sql（历史库一次性迁移）
+sql/                            建表脚本（含 sys_role.parent_id 与权限规则两表、媒体库各表与 folder_tag / media_location_region 等；无种子规则 —— 默认值在 permissions.yaml）+ migrate_rbac_groups.sql（历史库一次性迁移）
 ```
 
 ## 11. 深度材料
@@ -282,5 +282,6 @@ sql/                            建表脚本（15 表，含 sys_role.parent_id �
 | [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) | **本派生项目**自身的差异与运行事实（更名 / WebDAV / 在线文件管理器 / 部署 / 网络实测）；上游模板那份 md 不动，差异都记在这里 |
 | [doc/rbac-design.md](doc/rbac-design.md) | RBAC 权限体系：组 + 点分权限（`±通配`）+ 用户直授 + `@Permission` 的设计、判定口径与已实现落点 |
 | [doc/media-index-design.md](doc/media-index-design.md) | 媒体库索引：文件身份（path / quick_id / sha256 三层）、标签体系与来源优先级、EXIF 等元数据抽取、评级与 NSFW 遮罩（直链签名折 flags）、embedding 与语义检索 |
+| [doc/footprint-map-design.md](doc/footprint-map-design.md) | 足迹地图：带 GPS / 拍摄时间的照片聚成热点与拍摄会话、人工画圈命名区域；聚类算法（DBSCAN + 相邻间隔切段）、接口契约、区域表、地图底图（高德）选型与替代方案 |
 | [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 / 工程形态（运行层面） |
 | [doc/native-migration-plan.md](doc/native-migration-plan.md) | JVM → Kotlin/Native 迁移详设与实测记录（历史） |

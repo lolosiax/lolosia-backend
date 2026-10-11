@@ -65,6 +65,22 @@ interface MediaAssetTagRepository : CrudRepository<MediaAssetTagEntity> {
         name: String,
     ): Result<List<MediaAssetTagEntity>>
 
+    /**
+     * 某个「命名空间:名字」标签（未否决）关联到的全部资产行；本表为驱动表 join `media_tag`。
+     *
+     * 供足迹地图挑区域代表图用：取「喜欢」标签命中的资产 id 集合（量级很小）。
+     */
+    @Query(
+        "select t.* from media_asset_tag t join media_tag mt on mt.id = t.tag_id " +
+            "where t.deleted = 0 and t.negative = 0 and mt.deleted = 0 " +
+            "and mt.namespace = :namespace and mt.name = :name"
+    )
+    suspend fun findAllByNamespaceAndName(
+        context: QueryExecutor,
+        namespace: String,
+        name: String,
+    ): Result<List<MediaAssetTagEntity>>
+
     @Query(
         "insert into media_asset_tag(asset_id, tag_id, source, provider, confidence, negative, " +
             "created_at, created_by, updated_at, updated_by, deleted) " +
