@@ -208,6 +208,12 @@ data class AppSettings(
                     val caption: Boolean = true,
                     /** 角色视觉属性（`attribute:粉发` …）。 */
                     val attributes: Boolean = true,
+                    /** 画面里的显著物件 / 道具 / 场景元素（`object:蛋糕` …）。 */
+                    val objects: Boolean = true,
+                    /** 场合 / 活动（`event:生日会` …）：主要依据路径与文件夹名推断，也可望文生义。 */
+                    val events: Boolean = true,
+                    /** 画面里正在做的事 / 动作（`action:比耶` …）。 */
+                    val actions: Boolean = true,
                     /** 角色识别（需参考库，V5，暂未实现；开了也不生效）。 */
                     val character: Boolean = false,
                 )

@@ -282,7 +282,10 @@
 | 构图 / 人数 | `scene:单人写真` `scene:双人` `scene:三人` `scene:多人` `scene:合影` | 复用 `scene`，**不加新命名空间** |
 | 有效性 | `meta:有效` / `meta:无效` | 无效图由**本地预筛**先判，模型兜底 |
 | 题材 | `series:VRChat`（已存在）/ `series:娃照` / `series:杂项` | 复用 `series` |
-| 角色属性 | **新增 `attribute` 命名空间**（`attribute:粉发`…） | 唯一新增的枚举项（**已定**）；若不新增只能塞 `object`，语义差 |
+| 角色属性 | **新增 `attribute` 命名空间**（`attribute:粉发`…） | 若不新增只能塞 `object`，语义差 |
+| 物件 / 道具 | `object:蛋糕` / `object:塔罗牌` … | **复用已有的 `object`**（§15） |
+| 场合 / 活动 | **新增 `event` 命名空间**（`event:生日会`…） | 主要依据路径 / 文件夹名推断，也可望文生义（§15） |
+| 动作 | `action:比耶` / `action:切蛋糕` … | **复用已有的 `action`**（§15） |
 | 角色名 | `character:*`（已存在） | 阶段 B |
 
 > 这只动**命名空间枚举常量**（`MediaTagService` 一侧 + 词表），不动表结构。
@@ -358,6 +361,8 @@ user:   [图0][图1]…[图5]   ← 6 个图（低清档），与 i 对齐
 - **要一句话描述（`d`），但禁止解释性长文**：`d` 落 `media_asset.caption`，供全局模糊查询与将来的 embedding；"为什么这么判"这类推理一律不要 —— **那才是输出 token 黑洞**。
 - 用 `ChatClient` 的 `.toolChoice(Named("submit"))` 可强制结构化（自研 `ChatTool.parameters` 接受任意 JsonObject）；若嫌重，直接解析 JSON 文本即可（首尾去掉 ```json 围栏）。
 - 阶段 B 才需要更长输出（角色名 / 更细属性），按需开启。
+
+> ⚠️ 实际契约已扩展为 `i/c/v/s/d/a` + 物件 `o` / 场合 `e` / 动作 `x`，并允许依据路径派生 `event` 标签 —— 见 §13.2 与 §15。
 
 ---
 
@@ -511,3 +516,38 @@ user:   [图0][图1]…[图5]   ← 6 个图（低清档），与 i 对齐
 - **仪表盘**：`/dashboard/status` 加 `todayTokens` / `totalCost`；`/dashboard/metrics` 加第 7 条 `token` 曲线（**今日累计**，阶梯状）。
   前端「实时监控」多一个 **Token** 指标（数字读数 = 今日累计 + 曲线），右上角多一个 **词元成本** 胶囊（**累计**、单位元）。
 - **口径**：实时监控区显示**今日**，屏幕右上角显示**累计**。
+
+---
+
+## 15. 物件 / 场合 / 动作三个新维度（路径派生标签）
+
+上线后暴露的问题：**路径确实传给了模型，但契约里没有承载它的出口**。以 `影集/VRChat/20260419-洛洛希雅生日会合影` 为例 —— 路径已含「生日会」，但该目录所有标签里**没有一个提到生日会**；模型识别到的「黑板 / 塔罗牌」也无处安放，只能塞进 `attribute`（如 `attribute:塔罗牌`）。
+
+> 事实核对：路径确实进了请求体 —— `MediaAnalyzeService.process()` 用 `path = row.path` 构造 `Item`（[L328-L338]），
+> `DeepSeekVisionProvider.tag()` 逐图 `spec.user(VisionPrompts.image(...))` + `spec.image(...)`（[L43-L50]），
+> `ChatRequestSpec.user()` 追加文本段、`stream()` 合成**单条** User 消息，`ChatProtocol.userContent()` 把它序列化成
+> `{"type":"text","text":"图N（路径：…）："}` 写进 `content` 数组。所以问题**不在有没有传，而在输出契约与命名空间**。
+
+**根因**（三处契约缺失）：
+
+1. system 提示只要求 `c/v/s/d/a` 五个维度，并且明确「路径与文件夹备注**不要写进描述**」——
+   模型**没有任何输出位置**放「生日会」这类路径线索。
+2. `VisionTags.kt` 只定义 `scene/series/meta/attribute`，落库映射也只认这四类 ——
+   **即使模型想输出 `object:黑板`，也没有字段可放、没有映射可落**。
+3. 模型只剩 `a`（角色视觉属性数组）能放名词 —— 于是「塔罗牌」这类**物件**被错误地塞进 `attribute`。
+
+**修复**：在输出契约里补三个维度，并落到对应命名空间（`namespace` 是自由字符串，**不改表结构**）：
+
+| 维度 | 短键 | 含义 | 命名空间 | 来源 |
+| --- | --- | --- | --- | --- |
+| 物件 | `o` | 画面里的显著物件 / 道具 / 场景元素 | **复用 `object`** | 纯视觉 |
+| 场合 / 活动 | `e` | 这场合 / 活动是什么（如「生日会」） | **新增 `event`** | **路径 / 文件夹名**为主 + 画面望文生义 |
+| 动作 | `x` | 画面里正在做的事（如「比耶」「切蛋糕」） | **复用 `action`** | 纯视觉（望文生义） |
+
+- **prompt**（`VisionPrompts.system`）：新增 `o`/`e`/`x` 三行；`e` 行下加引导 ——「路径与文件夹名是判断 `e` 的**重要依据**，
+  如路径含『生日会』就应给出 `e:["生日会"]`；也可结合画面里正在做的事望文生义补充」；同时把旧句「仅帮助理解上下文、不要写进描述」
+  改为「路径与文件夹备注**不要原样抄进描述**」，不再禁止它影响标签。
+- **配置**（`AnalyzeConfig`）：新增 `objects` / `events` / `actions` 三个开关，**默认 true**（`character` 仍默认 false）。
+- **解析 / 映射**：`DeepSeekVisionProvider.toResult` 解析 `o/e/x`；`MediaAnalyzeService.tagRefs` 分别映射到
+  `NAMESPACE_OBJECT` / `NAMESPACE_EVENT` / `NAMESPACE_ACTION`；`start()` 的维度日志同步加「物件 / 事件 / 动作」。
+- **代价**：每图输出多三项数组（多数为空 `[]`），输出 token 略增；这是「路径线索可检索」必须付的账。

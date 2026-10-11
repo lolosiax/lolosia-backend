@@ -41,7 +41,12 @@ class DeepSeekVisionProvider(
         val a = config.analyze
         var usage: ChatUsage? = null
         val spec = client.prompt()
-            .system(VisionPrompts.system(a.composition, a.validity, a.subject, a.caption, a.attributes))
+            .system(
+                VisionPrompts.system(
+                    a.composition, a.validity, a.subject, a.caption,
+                    a.attributes, a.objects, a.events, a.actions,
+                )
+            )
             .user(VisionPrompts.user(items.size))
         items.forEachIndexed { index, item ->
             // 图前先给路径与已有分析结果：模型据此决定沿用 / 增补标签、改写描述
@@ -78,6 +83,9 @@ class DeepSeekVisionProvider(
         subject = obj["s"].primitiveText(),
         caption = obj["d"].primitiveText()?.take(80),
         attributes = obj["a"].stringList(),
+        objects = obj["o"].stringList(),
+        events = obj["e"].stringList(),
+        actions = obj["x"].stringList(),
     )
 
     private fun asBoolean(text: String): Boolean? = when (text.lowercase()) {

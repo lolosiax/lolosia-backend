@@ -34,7 +34,10 @@ import moe.lolosia.web.service.files.ThumbnailGenerator
 import moe.lolosia.web.service.media.worker.DeepSeekVisionProvider
 import moe.lolosia.web.service.media.worker.META_INVALID
 import moe.lolosia.web.service.media.worker.META_VALID
+import moe.lolosia.web.service.media.worker.NAMESPACE_ACTION
 import moe.lolosia.web.service.media.worker.NAMESPACE_ATTRIBUTE
+import moe.lolosia.web.service.media.worker.NAMESPACE_EVENT
+import moe.lolosia.web.service.media.worker.NAMESPACE_OBJECT
 import moe.lolosia.web.service.media.worker.NAMESPACE_SCENE
 import moe.lolosia.web.service.media.worker.NAMESPACE_SERIES
 import moe.lolosia.web.service.media.worker.NoopTaggingProvider
@@ -140,6 +143,9 @@ class MediaAnalyzeService(
                     if (a.subject) add("题材")
                     if (a.caption) add("描述")
                     if (a.attributes) add("属性")
+                    if (a.objects) add("物件")
+                    if (a.events) add("事件")
+                    if (a.actions) add("动作")
                 }.joinToString("/")
         }
         scope.launch { resume() }
@@ -344,8 +350,12 @@ class MediaAnalyzeService(
         // 请求前用分词器预估文本 token（精确算文本侧，图片侧以响应 usage 为准，§6.3/§6.5）
         val estimatedText = if (provider is DeepSeekVisionProvider) {
             val a = config.analyze
-            tokenizer.count(VisionPrompts.system(a.composition, a.validity, a.subject, a.caption, a.attributes)) +
-                tokenizer.count(VisionPrompts.user(items.size))
+            tokenizer.count(
+                VisionPrompts.system(
+                    a.composition, a.validity, a.subject, a.caption,
+                    a.attributes, a.objects, a.events, a.actions,
+                )
+            ) + tokenizer.count(VisionPrompts.user(items.size))
         } else {
             0
         }
@@ -448,6 +458,9 @@ class MediaAnalyzeService(
         if (a.validity) result.valid?.let { out.add(NAMESPACE_META to if (it) META_VALID else META_INVALID) }
         if (a.subject) seriesTagOf(result.subject)?.let { out.add(NAMESPACE_SERIES to it) }
         if (a.attributes) result.attributes.forEach { out.add(NAMESPACE_ATTRIBUTE to it) }
+        if (a.objects) result.objects.forEach { out.add(NAMESPACE_OBJECT to it) }
+        if (a.events) result.events.forEach { out.add(NAMESPACE_EVENT to it) }
+        if (a.actions) result.actions.forEach { out.add(NAMESPACE_ACTION to it) }
         return out.distinct()
     }
 

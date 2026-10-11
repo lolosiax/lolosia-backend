@@ -3,9 +3,9 @@ package moe.lolosia.web.service.media.worker
 /**
  * 外发分析标签的命名空间与名字常量（`doc/vision-autotag-design.md` §7.2）。
  *
- * 构图 / 题材 / 有效性复用已有的 `scene` / `series` / `meta`；角色属性是本方案**唯一新增**的
- * `attribute` 命名空间（若不新增只能塞 `object`，语义差）。命名空间在库里是自由字符串，
- * 所以这里只是约定 + 集中书写，不需要改表结构。
+ * 构图 / 题材 / 有效性复用已有的 `scene` / `series` / `meta`；物件 / 动作复用固定枚举里已有的
+ * `object` / `action`；角色属性与场合（事件）是本方案**新增**的 `attribute` / `event` 两个命名空间。
+ * 命名空间在库里是自由字符串，所以这里只是约定 + 集中书写，不需要改表结构。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -18,6 +18,15 @@ const val NAMESPACE_SERIES: String = "series"
 
 /** 角色视觉属性（本方案新增）。 */
 const val NAMESPACE_ATTRIBUTE: String = "attribute"
+
+/** 画面里的显著物件 / 道具 / 场景元素（复用固定枚举里已有的 `object`）。 */
+const val NAMESPACE_OBJECT: String = "object"
+
+/** 场合 / 活动（如「生日会」）：主要依据路径与文件夹名推断，也可从画面望文生义（本方案新增）。 */
+const val NAMESPACE_EVENT: String = "event"
+
+/** 画面里正在做的事 / 动作（复用固定枚举里已有的 `action`）。 */
+const val NAMESPACE_ACTION: String = "action"
 
 /** 单人 → 写真。 */
 const val SCENE_SINGLE: String = "单人写真"

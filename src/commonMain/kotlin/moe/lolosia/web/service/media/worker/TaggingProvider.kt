@@ -56,6 +56,12 @@ interface TaggingProvider {
         val caption: String? = null,
         /** 角色视觉属性（如 `粉发`、`双马尾`、`和服`）。 */
         val attributes: List<String> = emptyList(),
+        /** 画面里的显著物件 / 道具 / 场景元素（如 `蛋糕`、`黑板`、`塔罗牌`）。 */
+        val objects: List<String> = emptyList(),
+        /** 场合 / 活动（如 `生日会`）：主要依据路径与文件夹名推断，也可望文生义。 */
+        val events: List<String> = emptyList(),
+        /** 画面里正在做的事 / 动作（如 `比耶`、`切蛋糕`）。 */
+        val actions: List<String> = emptyList(),
     )
 
     /** 一次分析的产物：逐图判定 + 本次 token 用量（来自响应 `usage`）。 */
