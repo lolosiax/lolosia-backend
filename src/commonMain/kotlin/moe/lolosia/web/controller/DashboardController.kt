@@ -6,6 +6,7 @@ import moe.lolosia.web.service.SessionManager
 import moe.lolosia.web.service.dashboard.AccessStatService
 import moe.lolosia.web.service.dashboard.DashboardQueryService
 import moe.lolosia.web.service.dashboard.SystemMetricService
+import moe.lolosia.web.service.dashboard.TokenUsageService
 import moe.lolosia.web.util.router.Controller
 import moe.lolosia.web.util.router.GET
 import moe.lolosia.web.util.router.Permission
@@ -58,7 +59,7 @@ object DashboardController {
         val series: List<DashboardSeriesDto> = emptyList(),
     )
 
-    /** 顶部状态胶囊：在线会话 / 今日请求 / 缓存命中。 */
+    /** 顶部状态胶囊：在线会话 / 今日请求 / 缓存命中 / token 用量。 */
     @Serializable
     data class DashboardStatusDto(
         /** 内存中活跃的会话数。 */
@@ -69,6 +70,10 @@ object DashboardController {
         val cacheMisses: Long = 0L,
         /** 缓存命中率（0~100）；无访问时为 0。 */
         val cacheHitRate: Double = 0.0,
+        /** 今日（北京时间）LLM token 累计用量。 */
+        val todayTokens: Long = 0L,
+        /** LLM 累计成本（元）；按每个小时桶的峰谷档位逐桶折算。 */
+        val totalCost: Double = 0.0,
     )
 
     /** top-ip 一行。 */
@@ -134,19 +139,24 @@ object DashboardController {
         )
     }
 
-    /** 指标曲线（六条：CPU / 内存 / 入站 / 出站 / 读 / 写）。 */
+    /** 指标曲线（七条：CPU / 内存 / 入站 / 出站 / 读 / 写 / Token）。 */
     @GET("/dashboard/metrics")
     @Permission("lolosia.dashboard.read")
-    suspend fun metrics(ctx: Context, metrics: SystemMetricService, @Query range: String?): DashboardMetricsDto {
+    suspend fun metrics(
+        ctx: Context,
+        metrics: SystemMetricService,
+        tokens: TokenUsageService,
+        @Query range: String?,
+    ): DashboardMetricsDto {
         val window = range ?: "1h"
-        val curves = metrics.curve(ctx, window)
+        val curves = metrics.curve(ctx, window) + listOf(tokens.curve(ctx, window))
         val series = SERIES.mapIndexed { index, (key, name) ->
             DashboardSeriesDto(key = key, name = name, points = curves.getOrElse(index) { emptyList() })
         }
         return DashboardMetricsDto(range = window, available = curves.any { it.isNotEmpty() }, series = series)
     }
 
-    /** 顶部胶囊统计：在线会话、今日请求与缓存命中率。 */
+    /** 顶部胶囊统计：在线会话、今日请求、缓存命中率与 token 用量（成本为累计值）。 */
     @GET("/dashboard/status")
     @Permission("lolosia.dashboard.read")
     suspend fun status(
@@ -154,6 +164,7 @@ object DashboardController {
         stat: AccessStatService,
         sessions: SessionManager,
         cache: CacheManager,
+        tokens: TokenUsageService,
     ): DashboardStatusDto {
         val cacheStats = cache.stats()
         return DashboardStatusDto(
@@ -162,6 +173,8 @@ object DashboardController {
             cacheHits = cacheStats.hits,
             cacheMisses = cacheStats.misses,
             cacheHitRate = cacheStats.hitRate,
+            todayTokens = tokens.todayTokens(ctx),
+            totalCost = tokens.totals(ctx).cost,
         )
     }
 
@@ -186,7 +199,7 @@ object DashboardController {
     private const val TAG_LIMIT: Int = 12
     private const val FILE_LIMIT: Int = 8
 
-    /** 曲线 key / 展示名，顺序与 `SystemMetricService.curve` 返回的六条一一对应。 */
+    /** 曲线 key / 展示名，顺序与 `SystemMetricService.curve` 的六条 + `TokenUsageService.curve` 的一条一一对应。 */
     private val SERIES: List<Pair<String, String>> = listOf(
         "cpu" to "CPU",
         "mem" to "内存",
@@ -194,5 +207,6 @@ object DashboardController {
         "netOut" to "出站",
         "read" to "磁盘读",
         "write" to "磁盘写",
+        "token" to "Token·今日",
     )
 }

@@ -495,3 +495,19 @@ user:   [图0][图1]…[图5]   ← 6 个图（低清档），与 i 对齐
 - **外发链路**：对 1 张未分析图（另建目录备注后）跑增量分析 —— `processed=1`、`failed=0`，
   caption 与 `model` 标签均落库（`provider=deepseek-flash@vision`），规则标签 `series:VRChat` 保留；
   日志 `本批 1 图：实测输入 638 token`（文本预估含新增的路径 / 备注上下文）。验证用的测试备注已清除。
+
+---
+
+## 14. Token 用量落库与仪表盘展示（后补）
+
+原 `TokenLedger` 只在**内存**里累加（进程重启即清零），且 `isPeak` **未考虑法定节假日**。现补齐：
+
+- **峰谷口径**（`LlmPricing`）：新增中国法定节假日**放假日期**列表；高峰 = 北京时间周一~周五、**非节假日**、9–12 / 14–17，
+  其余（含周末与节假日全天）谷段半价（周末即使调休上班也算谷段）。跨年需补录当年国务院通知。
+- **落库**：新增表 `sys_token_usage`（**北京时间小时桶** `hour_bucket` 唯一键，累加式 upsert，DDL 见 `sql/sys_token_usage.sql`）；
+  `service/dashboard/TokenUsageService` 按 `dashboard.sampleIntervalSeconds` 采样台账增量落库，
+  启动时把「今日」基线从库读回 —— 重启不归零。
+- **计价**：成本**不落库**，由 `LlmPricing.cost` 按**每个小时桶**当时的峰谷档位逐桶折算，再求和（比"按当前时段给今日全部用量定价"准确）。
+- **仪表盘**：`/dashboard/status` 加 `todayTokens` / `totalCost`；`/dashboard/metrics` 加第 7 条 `token` 曲线（**今日累计**，阶梯状）。
+  前端「实时监控」多一个 **Token** 指标（数字读数 = 今日累计 + 曲线），右上角多一个 **词元成本** 胶囊（**累计**、单位元）。
+- **口径**：实时监控区显示**今日**，屏幕右上角显示**累计**。
