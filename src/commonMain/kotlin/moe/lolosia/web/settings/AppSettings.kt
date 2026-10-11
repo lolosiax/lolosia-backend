@@ -151,6 +151,7 @@ data class AppSettings(
             /** 连续多少轮扫描都没见到才软删（按扫描间隔折算成时间）。 */
             val missingScanLimit: Int = 3,
             val rules: RulesConfig = RulesConfig(),
+            val vision: VisionConfig = VisionConfig(),
         ) {
             /** 规则打标（目录 / 文件名 → 标签或评级）。 */
             @Serializable
@@ -163,6 +164,87 @@ data class AppSettings(
                  */
                 val enabled: Boolean = true,
             )
+
+            /**
+             * 外发分析（视觉自动打标，见 `doc/vision-autotag-design.md`）。
+             *
+             * 与 [RulesConfig] 相反，它**会把素材交给外部服务**，故默认全关（`enabled = false`）；
+             * 必须由管理员显式开启并对某个范围点「分析」。密钥走 `AppSettings.llm.apiKey`
+             * （环境变量 `KTOR_LLM_API_KEY`），不在此重复。
+             */
+            @Serializable
+            data class VisionConfig(
+                /** 是否启用外发分析。关掉时所有入口为空操作。 */
+                val enabled: Boolean = false,
+                /** 打标后端：`deepseek` | `noop`。 */
+                val provider: String = "deepseek",
+                /** 模型名（覆盖 `llm.model`）。 */
+                val model: String = "deepseek-flash",
+                /** 每请求图片数（阶段 A 的批量）；批量是省 token 的主要杠杆。 */
+                val batchSize: Int = 6,
+                /** 图片细节级别：`low`（默认，缩到 512²）| `original`。 */
+                val detail: String = "low",
+                /** 并发批次数；机械盘 + 限速，默认压到 1。 */
+                val concurrency: Int = 1,
+                /** 要跑哪些维度。 */
+                val analyze: AnalyzeConfig = AnalyzeConfig(),
+                /** 本地预筛与去重（零 token，不出网）。 */
+                val prefilter: PreFilterConfig = PreFilterConfig(),
+                /** 预算拦截。 */
+                val budget: BudgetConfig = BudgetConfig(),
+                /** 分词器来源（用于文本 token 预估与成本台账）。 */
+                val tokenizer: TokenizerConfig = TokenizerConfig(),
+            ) {
+                /** 要跑哪些标注维度。 */
+                @Serializable
+                data class AnalyzeConfig(
+                    /** 构图 / 人数（`scene:*`）。 */
+                    val composition: Boolean = true,
+                    /** 是否有效内容（`meta:有效` / `meta:无效`）。 */
+                    val validity: Boolean = true,
+                    /** 题材（`series:VRChat` / `series:娃照` / `series:杂项`）。 */
+                    val subject: Boolean = true,
+                    /** 一句话描述（落 `media_asset.caption`）。 */
+                    val caption: Boolean = true,
+                    /** 角色视觉属性（`attribute:粉发` …）。 */
+                    val attributes: Boolean = true,
+                    /** 角色识别（需参考库，V5，暂未实现；开了也不生效）。 */
+                    val character: Boolean = false,
+                )
+
+                /** 本地预筛参数（模糊 / 纯色 / 近重复）。 */
+                @Serializable
+                data class PreFilterConfig(
+                    /** 拉普拉斯方差下限（越大越锐）；低于它判废片。暂未启用。 */
+                    val blurThreshold: Int = 60,
+                    /** dHash 汉明距离阈值；以内判近重复（组内只发代表图）。 */
+                    val dedupHamming: Int = 6,
+                    /** 内联档的最长边像素（本地降采样目标）。 */
+                    val maxUploadEdge: Int = 512,
+                )
+
+                /** 预算拦截（反算依据见设计稿 §3.5）。 */
+                @Serializable
+                data class BudgetConfig(
+                    /** 只在空闲（半价）时段开跑；手动触发可覆盖。 */
+                    val preferOffPeakOnly: Boolean = true,
+                    /** 单次作业输入 token 上限。 */
+                    val maxPromptTokensPerRun: Long = 1_000_000,
+                    /** 日累计输入 token 上限。 */
+                    val dailyPromptTokenLimit: Long = 3_000_000,
+                )
+
+                /** 分词器来源（运行期拉取并缓存，拉不到降级为字符启发式）。 */
+                @Serializable
+                data class TokenizerConfig(
+                    /** DeepSeek 官方 CDN。 */
+                    val url: String = "https://cdn.deepseek.com/api-docs/deepseek_v4_tokenizer.zip",
+                    /** 镜像仓库（CDN 拉不动时用它取 `tokenizer.json`）。 */
+                    val mirrorUrl: String = "https://modelscope.cn/models/deepseek-ai/DeepSeek-V4.1-Flash",
+                    /** 下载后缓存目录（相对浏览根）。 */
+                    val cacheDir: String = ".cache/lolosia/llm",
+                )
+            }
         }
 
         @Serializable

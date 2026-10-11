@@ -26,6 +26,7 @@ import moe.lolosia.web.service.dashboard.AccessStatService
 import moe.lolosia.web.service.dashboard.SystemMetricService
 import moe.lolosia.web.service.ddns.DdnsService
 import moe.lolosia.web.service.files.ThumbnailService
+import moe.lolosia.web.service.media.MediaAnalyzeService
 import moe.lolosia.web.service.media.MediaIndexService
 import moe.lolosia.web.service.permission.PermissionRegistry
 import moe.lolosia.web.service.permission.syncRegistryGroups
@@ -161,6 +162,9 @@ fun Application.configureApplication(koin: Koin) {
 
     // 媒体索引后台扫描：**只做本地的事**（stat / 哈希 / EXIF / 规则打标），不出网（§8.2）
     koin.get<MediaIndexService>().start()
+
+    // 外发分析（视觉自动打标）：默认关；开启后才把素材交给外部模型（见 doc/vision-autotag-design.md）
+    koin.get<MediaAnalyzeService>().start()
 
     // 仪表盘：系统指标后台采样与访问统计聚合（由 dashboard.enabled 开关控制，未启用只记一条日志）
     koin.get<SystemMetricService>().start()

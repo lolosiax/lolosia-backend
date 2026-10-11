@@ -12,8 +12,8 @@ sealed interface ContentPart {
     @SerialName("text")
     data class Text(val text: String) : ContentPart
 
-    /** 图片；[url] 为 http(s) 链接或 `data:<mime>;base64,…`。 */
+    /** 图片；[url] 为 http(s) 链接或 `data:<mime>;base64,…`，[detail] 为 `low` / `original` 等。 */
     @Serializable
     @SerialName("image_url")
-    data class Image(val url: String) : ContentPart
+    data class Image(val url: String, val detail: String? = null) : ContentPart
 }

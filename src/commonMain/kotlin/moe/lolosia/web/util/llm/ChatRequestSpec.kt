@@ -30,6 +30,7 @@ class ChatRequestSpec internal constructor(
     private var memory: ChatMemory? = null
     private var conversationId: String = ""
     private var inspector: ToolInspector? = null
+    private var usageHandler: (suspend (ChatUsage) -> Unit)? = null
 
     /** 设置系统提示词。 */
     fun system(text: String): ChatRequestSpec = apply { systemPrompt = text }
@@ -37,12 +38,13 @@ class ChatRequestSpec internal constructor(
     /** 追加一段用户文本。 */
     fun user(text: String): ChatRequestSpec = apply { userParts += ContentPart.Text(text) }
 
-    /** 追加一张用户图片（字节 + MIME）。 */
-    fun image(bytes: ByteArray, mime: String): ChatRequestSpec =
-        apply { userParts += ContentPart.Image(dataUrl(bytes, mime)) }
+    /** 追加一张用户图片（字节 + MIME）；[detail] 为 `low` / `original` 等。 */
+    fun image(bytes: ByteArray, mime: String, detail: String? = null): ChatRequestSpec =
+        apply { userParts += ContentPart.Image(dataUrl(bytes, mime), detail) }
 
-    /** 追加一张用户图片（外链或 `data:` URL）。 */
-    fun imageUrl(url: String): ChatRequestSpec = apply { userParts += ContentPart.Image(url) }
+    /** 追加一张用户图片（外链或 `data:` URL）；[detail] 为 `low` / `original` 等。 */
+    fun imageUrl(url: String, detail: String? = null): ChatRequestSpec =
+        apply { userParts += ContentPart.Image(url, detail) }
 
     /** 追加一个多模态输入源（延迟解析），见 [MediaResource]。 */
     fun media(resource: MediaResource): ChatRequestSpec = apply { mediaResources += resource }
@@ -67,6 +69,13 @@ class ChatRequestSpec internal constructor(
         val inspector = this.inspector ?: ToolInspector().also { this.inspector = it }
         inspector.block()
     }
+
+    /**
+     * 注册 token 用量回调：请求开 `stream_options.include_usage`，末尾帧带回 `usage` 时触发。
+     *
+     * 用于成本台账（见 `service/media/TokenLedger`）；不改动「流式、不阻塞」的既有形态。
+     */
+    fun onUsage(block: suspend (ChatUsage) -> Unit): ChatRequestSpec = apply { usageHandler = block }
 
     /**
      * 流式对话：逐段产出模型文本增量。
@@ -147,6 +156,7 @@ class ChatRequestSpec internal constructor(
         val body = ChatProtocol.buildRequest(settings, history, tools, toolChoice)
         val content = StringBuilder()
         val toolCalls = ToolCallAccumulator()
+        var usage: ChatUsage? = null
         try {
             withTimeout(settings.timeoutSeconds.seconds) {
                 post<Flow<ByteArray>>(
@@ -160,6 +170,7 @@ class ChatRequestSpec internal constructor(
                     .takeWhile { it != STREAM_DONE }
                     .collect { data ->
                         val chunk = chatJson.decodeFromString<ChatCompletionChunk>(data)
+                        chunk.usage?.let { usage = it }
                         val delta = chunk.choices.firstOrNull()?.delta ?: return@collect
                         delta.content?.takeIf { it.isNotEmpty() }?.let {
                             content.append(it)
@@ -175,6 +186,7 @@ class ChatRequestSpec internal constructor(
         } catch (e: Throwable) {
             throw ChatException(502, "调用大模型失败：${e.message}")
         }
+        usage?.let { usageHandler?.invoke(it) }
         return content.toString() to toolCalls.build()
     }
 

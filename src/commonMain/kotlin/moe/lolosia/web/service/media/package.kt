@@ -30,6 +30,9 @@ const val MEDIA_NSFW: String = "lolosia.files.nsfw"
 /** SSE 事件名：单个文件索引 / 打标完成。 */
 const val MEDIA_INDEX_EVENT: String = "media:index"
 
+/** SSE 事件名：单张图的外发（视觉）分析完成。 */
+const val MEDIA_ANALYZE_EVENT: String = "media:analyze"
+
 /** 默认规则集在 classpath 里的路径。 */
 const val MEDIA_RULES_RESOURCE: String = "media-rules.yaml"
 

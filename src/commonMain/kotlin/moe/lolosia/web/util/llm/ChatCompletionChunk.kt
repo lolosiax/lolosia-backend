@@ -7,6 +7,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ChatCompletionChunk(
     val choices: List<Choice> = emptyList(),
+    /** 末尾用量帧才带；需请求里开 `stream_options.include_usage`。 */
+    val usage: ChatUsage? = null,
 ) {
 
     /** 单个候选。 */

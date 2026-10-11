@@ -140,3 +140,71 @@ data class MediaIndexEvent(
     /** 8×8 采样（每像素 4 位十六进制，RGB565 大端，共 256 字符）；没有为空串。 */
     val sample: String = "",
 )
+
+/**
+ * 请求对某范围做**外发分析**（视觉打标）。
+ *
+ * 与 `media/index/scan` 的分工：那是**本地**索引（不出网），这才是把素材交给外部分析。
+ * `path` 为空表示浏览根。
+ */
+@Serializable
+data class MediaAnalyzeReq(
+    val path: String? = null,
+    /** 是否含子目录。 */
+    val recursive: Boolean = true,
+    /** 重跑：已有分析结果的记录也重新入队（先清 `model` 来源的标签再重打）。 */
+    val reanalyze: Boolean = false,
+)
+
+/** 外发分析作业的运行状态（进程内快照）。 */
+@Serializable
+data class MediaAnalyzeStatus(
+    val enabled: Boolean = false,
+    /** provider id，如 `deepseek-flash@vision`。 */
+    val provider: String = "",
+    val running: Boolean = false,
+    val queued: Int = 0,
+    val processed: Long = 0,
+    val failed: Long = 0,
+    val skipped: Long = 0,
+    /** 本轮作业累计输入 token（实测）。 */
+    val promptTokens: Long = 0,
+    val completionTokens: Long = 0,
+    /** 当前是否处于空闲（半价）时段。 */
+    val offPeak: Boolean = true,
+    val message: String = "",
+)
+
+/** 台账快照：全局累计消耗与按 provider 汇总。 */
+@Serializable
+data class MediaAnalyzeUsage(
+    val requests: Long = 0,
+    val promptTokens: Long = 0,
+    val completionTokens: Long = 0,
+    val cacheHitTokens: Long = 0,
+    /** 今日累计估算花费（元）。 */
+    val todayCost: Double = 0.0,
+    /** 今日是否已超日配额。 */
+    val overBudget: Boolean = false,
+    val items: List<MediaAnalyzeUsageItem> = emptyList(),
+)
+
+/** 台账里按 provider 汇总的一行。 */
+@Serializable
+data class MediaAnalyzeUsageItem(
+    val provider: String,
+    val requests: Long = 0,
+    val promptTokens: Long = 0,
+    val completionTokens: Long = 0,
+)
+
+/** SSE 事件 `media:analyze` 的负载：单张图的外发分析完成。 */
+@Serializable
+data class MediaAnalyzeEvent(
+    val path: String,
+    /** `done` / `failed` / `skipped`。 */
+    val state: String,
+    /** 生效的标签（`namespace:name`），供前端就地展示。 */
+    val tags: List<String> = emptyList(),
+    val caption: String = "",
+)

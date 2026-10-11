@@ -110,3 +110,18 @@ const val RATING_EXPLICIT: String = "explicit"
 
 /** 外发分析尚未开始。 */
 const val ANALYZE_NONE: String = "none"
+
+/** 外发分析已入队，等待处理。 */
+const val ANALYZE_QUEUED: String = "queued"
+
+/** 外发分析正在处理。 */
+const val ANALYZE_RUNNING: String = "running"
+
+/** 外发分析完成。 */
+const val ANALYZE_DONE: String = "done"
+
+/** 外发分析失败（可重跑）。 */
+const val ANALYZE_FAILED: String = "failed"
+
+/** 外发分析被闸门拦下或本地判废片，未外发。 */
+const val ANALYZE_SKIPPED: String = "skipped"

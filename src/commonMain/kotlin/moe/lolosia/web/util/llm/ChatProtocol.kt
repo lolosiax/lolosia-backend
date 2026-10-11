@@ -15,6 +15,8 @@ internal object ChatProtocol {
         put("model", settings.model)
         settings.temperature?.let { put("temperature", it) }
         put("stream", true)
+        // 让末尾帧带回 usage（成本台账的权威口径），不改变「流式、不阻塞」的既有形态
+        put("stream_options", buildJsonObject { put("include_usage", true) })
         put("messages", buildJsonArray { messages.forEach { add(messageJson(it)) } })
         if (tools.isNotEmpty()) {
             put("tools", buildJsonArray { tools.forEach { add(toolJson(it)) } })
@@ -63,7 +65,10 @@ internal object ChatProtocol {
 
                     is ContentPart.Image -> add(buildJsonObject {
                         put("type", "image_url")
-                        put("image_url", buildJsonObject { put("url", part.url) })
+                        put("image_url", buildJsonObject {
+                            put("url", part.url)
+                            part.detail?.let { put("detail", it) }
+                        })
                     })
                 }
             }

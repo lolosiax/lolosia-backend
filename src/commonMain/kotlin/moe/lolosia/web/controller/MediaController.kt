@@ -1,5 +1,8 @@
 package moe.lolosia.web.controller
 
+import moe.lolosia.web.dto.MediaAnalyzeReq
+import moe.lolosia.web.dto.MediaAnalyzeStatus
+import moe.lolosia.web.dto.MediaAnalyzeUsage
 import moe.lolosia.web.dto.MediaDetail
 import moe.lolosia.web.dto.MediaIndexScanReq
 import moe.lolosia.web.dto.MediaPropertyApplyReq
@@ -12,6 +15,7 @@ import moe.lolosia.web.service.media.FolderTagService
 import moe.lolosia.web.service.media.MEDIA_INDEX_EVENT
 import moe.lolosia.web.service.media.MEDIA_READ
 import moe.lolosia.web.service.media.MEDIA_WRITE
+import moe.lolosia.web.service.media.MediaAnalyzeService
 import moe.lolosia.web.service.media.MediaIndexService
 import moe.lolosia.web.service.media.MediaPropertyService
 import moe.lolosia.web.service.media.MediaQueryService
@@ -158,4 +162,33 @@ object MediaController {
         index.requestScan(normalizeRelative(req.path))
         return MessageResult("已排队，元数据与评级将通过 $MEDIA_INDEX_EVENT 推送")
     }
+
+    /**
+     * 对某范围发起**外发分析**（视觉自动打标，`doc/vision-autotag-design.md`）。
+     *
+     * 与 `media/index/scan` 的区别：那个只做本地索引（不出网），这个会把素材交给外部模型。
+     * 需要写入权限（会改标签与描述），且受 `files.media.vision.enabled` 总开关约束。
+     */
+    @POST("/media/analyze/start")
+    @Permission(MEDIA_WRITE)
+    suspend fun analyzeStart(
+        ctx: Context,
+        analyze: MediaAnalyzeService,
+        @Body req: MediaAnalyzeReq,
+    ): MessageResult = analyze.start(req, ctx.userId)
+
+    /** 外发分析：取消排队（正在处理的批会自然跑完）。 */
+    @POST("/media/analyze/cancel")
+    @Permission(MEDIA_WRITE)
+    suspend fun analyzeCancel(analyze: MediaAnalyzeService): MessageResult = analyze.cancel()
+
+    /** 外发分析：运行状态快照。 */
+    @GET("/media/analyze/status")
+    @Permission(MEDIA_READ)
+    suspend fun analyzeStatus(analyze: MediaAnalyzeService): MediaAnalyzeStatus = analyze.status()
+
+    /** 外发分析：token 台账（全局累计 + 按 provider 汇总 + 今日估算花费）。 */
+    @GET("/media/analyze/usage")
+    @Permission(MEDIA_READ)
+    suspend fun analyzeUsage(analyze: MediaAnalyzeService): MediaAnalyzeUsage = analyze.usage()
 }
