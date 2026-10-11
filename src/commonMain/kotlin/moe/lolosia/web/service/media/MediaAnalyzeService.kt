@@ -39,6 +39,7 @@ import moe.lolosia.web.service.media.worker.NAMESPACE_SCENE
 import moe.lolosia.web.service.media.worker.NAMESPACE_SERIES
 import moe.lolosia.web.service.media.worker.NoopTaggingProvider
 import moe.lolosia.web.service.media.worker.TaggingProvider
+import moe.lolosia.web.service.media.worker.VisionPrompts
 import moe.lolosia.web.service.media.worker.sceneTagsOf
 import moe.lolosia.web.service.media.worker.seriesTagOf
 import moe.lolosia.web.service.permission.PermissionResolver
@@ -49,6 +50,7 @@ import moe.lolosia.web.util.llm.ChatUsage
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
+import moe.lolosia.web.util.tokenizer.DeepSeekTokenizer
 import kotlin.concurrent.Volatile
 import kotlin.time.Clock
 
@@ -78,6 +80,7 @@ class MediaAnalyzeService(
     private val bindings: MediaAssetTagRepository,
     private val tagService: MediaTagService,
     private val ledger: TokenLedger,
+    private val tokenizer: DeepSeekTokenizer,
 ) {
 
     private val log = Log.of("Vision")
@@ -204,6 +207,7 @@ class MediaAnalyzeService(
             promptTokens = runPrompt,
             completionTokens = runCompletion,
             offPeak = !LlmPricing.isPeak(),
+            tokenizerReady = tokenizer.available,
             message = pausedReason,
         )
     }
@@ -309,6 +313,15 @@ class MediaAnalyzeService(
         }
         if (items.isEmpty()) return
 
+        // 请求前用分词器预估文本 token（精确算文本侧，图片侧以响应 usage 为准，§6.3/§6.5）
+        val estimatedText = if (provider is DeepSeekVisionProvider) {
+            val a = config.analyze
+            tokenizer.count(VisionPrompts.system(a.composition, a.validity, a.subject, a.caption, a.attributes)) +
+                tokenizer.count(VisionPrompts.user(items.size))
+        } else {
+            0
+        }
+
         val output = try {
             provider.tag(items)
         } catch (e: CancellationException) {
@@ -327,7 +340,15 @@ class MediaAnalyzeService(
         }
 
         ledger.record(provider.id, output.usage)
-        output.usage?.let { addRun(it) }
+        output.usage?.let { usage ->
+            addRun(usage)
+            if (estimatedText > 0) {
+                log.info {
+                    "本批 ${items.size} 图：实测输入 ${usage.promptTokens} token" +
+                        "（预估文本 $estimatedText，推算图片 ≈ ${usage.promptTokens - estimatedText}）"
+                }
+            }
+        }
 
         for ((index, rep) in reps.withIndex()) {
             val result = output.results.getOrNull(index) ?: TaggingProvider.Result()

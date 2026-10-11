@@ -1,6 +1,6 @@
 # 视觉大模型自动打标：构图 / 有效性 / 题材 / 角色 / 描述
 
-> 状态：**方案（未实现）**。落地后按 [media-index-design.md](./media-index-design.md) 的做法在文末补「实现落点与偏差」。
+> 状态：**V1–V4 已实现**（V5 角色参考库待做）。实现落点与偏差见 §12；原型指标（构图 / 有效性 / 题材 / 属性 / 一句话描述）已可跑。
 > 目标目录示例：`影集/娃照/20260930-CGF`（文件管理器路由 `…/home/files/…`，取图走 `GET /api/files/raw?path=…&exp=…&sig=…`）。
 > 依赖：复用刚落地的 [util/llm](../src/commonMain/kotlin/moe/lolosia/web/util/llm/)（原生 `ChatClient`）+ [media-index-design.md](./media-index-design.md) 已实现的本地索引。
 
@@ -399,3 +399,33 @@ user:   [图0][图1]…[图5]   ← 6 个图（低清档），与 i 对齐
 - **只加**"框选区 → `media/region`"这套可选的区域标注（表 `media_asset_region(asset_id, x, y, w, h, tag_id)`），
   其余沿用现有手工打标。
 - **前置**：不阻塞 V1~V5；等参考库真需要批量挑图时再做。
+
+---
+
+## 12. 实现落点与偏差（V1–V4）
+
+### 12.1 新增 / 改动文件
+
+| 层 | 文件 | 说明 |
+| --- | --- | --- |
+| 协议扩展 | `util/llm/ChatUsage.kt`；`ChatCompletionChunk.kt` / `ChatProtocol.kt` / `ChatRequestSpec.kt` / `ContentPart.kt` | 流式 `usage`（`stream_options.include_usage`）+ `onUsage` 回调 + 图片 `detail` 字段 |
+| Provider | `service/media/worker/TaggingProvider.kt` / `NoopTaggingProvider.kt` / `DeepSeekVisionProvider.kt` / `VisionPrompts.kt` / `VisionTags.kt` | 批量多图一请求，短键名 JSON；未启用时装 Noop |
+| 服务 | `service/media/MediaAnalyzeService.kt` | 作业队列 + 两道闸门 + 落库 + 批内近重复去重 |
+| 台账 | `service/media/TokenLedger.kt` + `LlmPricing.kt` | 实测 `usage` 累计、按 provider 汇总、空闲/高峰计价、双阈值暂停 |
+| 去重 | `service/media/NearDup.kt` | 从 `sample_rgb565`（8×8）算 dHash，零解码 |
+| 分词器 | `util/tokenizer/*`（`DeepSeekTokenizer` / `TokenizerData` / `PreTokenizer` / `ByteLevel` / `Bpe` / `package.kt`） | 运行期拉取 + 缓存 + 字符启发式降级 |
+| 接口 | `controller/MediaController.kt` | `media/analyze/start\|status\|cancel\|usage` |
+| 配置 | `settings/AppSettings.kt` | `FilesConfig.MediaConfig.VisionConfig`（默认 `enabled=false`） |
+
+### 12.2 与设计稿的偏差
+
+1. **分词器来源**：设计稿默认 DeepSeek CDN 的 **zip**；原生端不便解压，改为直接取 ModelScope 的**原始 `tokenizer.json`**（`…/repo?Revision=master&FilePath=tokenizer.json`），CDN zip 作备选注释保留（§7.4 配置已更新）。
+2. **本地预筛**：`blur/entropy`（模糊/纯色）**暂未实现** —— `util/image.Image` 目前只写不读（无像素回读接口），要做得先给 native 图像对象加取像素能力。本期只落地**近重复去重**（`NearDup`，基于已有的 8×8 采样），且限定在**批内**（跨批不合并），足以砍掉同一姿势的连拍。
+3. **角色识别（V5）**：未做，配置项 `analyze.character` 保留但开了也不生效（无参考库）。
+4. **`detail`**：默认 `low`；实现把它原样透传给 `image_url.detail`，与本地降采样（≤`prefilter.maxUploadEdge`，默认 512）叠加，二者不冲突。
+
+### 12.3 验证
+
+- **分词器**：用 HF `tokenizers`（Rust，与 `LlamaTokenizerFast` 同内核）对 32 条覆盖中英/标点/数字/空白/换行/emoji/特殊 token 的样例生成参考 id，Kotlin 实现**逐串完全一致**（一次性校验后移除临时用例）。
+- **编译**：`compileKotlinMingwX64` / `LinuxArm64` / `LinuxX64` 均通过。
+- **端到端**：见「部署与启用」——需在服务端把 `files.media.vision.enabled` 置真并配 `KTOR_LLM_API_KEY`。

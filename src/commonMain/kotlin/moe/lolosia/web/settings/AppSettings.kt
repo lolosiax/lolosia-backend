@@ -237,10 +237,18 @@ data class AppSettings(
                 /** 分词器来源（运行期拉取并缓存，拉不到降级为字符启发式）。 */
                 @Serializable
                 data class TokenizerConfig(
-                    /** DeepSeek 官方 CDN。 */
-                    val url: String = "https://cdn.deepseek.com/api-docs/deepseek_v4_tokenizer.zip",
-                    /** 镜像仓库（CDN 拉不动时用它取 `tokenizer.json`）。 */
-                    val mirrorUrl: String = "https://modelscope.cn/models/deepseek-ai/DeepSeek-V4.1-Flash",
+                    /**
+                     * 主源：ModelScope 原始 `tokenizer.json`（**直接是 JSON**，无需解压）。
+                     *
+                     * 官方的 `https://cdn.deepseek.com/api-docs/deepseek_v4_tokenizer.zip` 是压缩包，
+                     * 原生端不便解压，故默认走镜像的原始文件。
+                     */
+                    val url: String =
+                        "https://www.modelscope.cn/api/v1/models/deepseek-ai/DeepSeek-V4.1-Flash/repo" +
+                            "?Revision=master&FilePath=tokenizer.json",
+                    /** 备用源（不可用时回退字符启发式）。 */
+                    val mirrorUrl: String =
+                        "https://modelscope.cn/models/deepseek-ai/DeepSeek-V4.1-Flash/resolve/master/tokenizer.json",
                     /** 下载后缓存目录（相对浏览根）。 */
                     val cacheDir: String = ".cache/lolosia/llm",
                 )

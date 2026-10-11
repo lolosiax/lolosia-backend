@@ -172,6 +172,8 @@ data class MediaAnalyzeStatus(
     val completionTokens: Long = 0,
     /** 当前是否处于空闲（半价）时段。 */
     val offPeak: Boolean = true,
+    /** 分词器是否已就绪（未就绪时文本 token 走字符启发式估算）。 */
+    val tokenizerReady: Boolean = false,
     val message: String = "",
 )
 
