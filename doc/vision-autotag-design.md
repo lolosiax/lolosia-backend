@@ -1,6 +1,6 @@
 # 视觉大模型自动打标：构图 / 有效性 / 题材 / 角色 / 描述
 
-> 状态：**V1–V4 已实现**（V5 角色参考库待做）。实现落点与偏差见 §12；原型指标（构图 / 有效性 / 题材 / 属性 / 一句话描述）已可跑。
+> 状态：**V1–V4 已实现并线上端到端验证**（V5 角色参考库待做）。实现落点与偏差见 §12；原型指标（构图 / 有效性 / 题材 / 属性 / 一句话描述）已可跑。
 > 目标目录示例：`影集/娃照/20260930-CGF`（文件管理器路由 `…/home/files/…`，取图走 `GET /api/files/raw?path=…&exp=…&sig=…`）。
 > 依赖：复用刚落地的 [util/llm](../src/commonMain/kotlin/moe/lolosia/web/util/llm/)（原生 `ChatClient`）+ [media-index-design.md](./media-index-design.md) 已实现的本地索引。
 
@@ -428,4 +428,20 @@ user:   [图0][图1]…[图5]   ← 6 个图（低清档），与 i 对齐
 
 - **分词器**：用 HF `tokenizers`（Rust，与 `LlamaTokenizerFast` 同内核）对 32 条覆盖中英/标点/数字/空白/换行/emoji/特殊 token 的样例生成参考 id，Kotlin 实现**逐串完全一致**（一次性校验后移除临时用例）。
 - **编译**：`compileKotlinMingwX64` / `LinuxArm64` / `LinuxX64` 均通过。
-- **端到端**：见「部署与启用」——需在服务端把 `files.media.vision.enabled` 置真并配 `KTOR_LLM_API_KEY`。
+- **端到端（2026-10-11，tsp-1m 线上，谷时段）**：对 `影集/娃照/20260930-CGF` 全量 345 张跑一遍 ——
+  345 张全部 `analyze_state=done`，模型标签 / 描述均落库，`failed=0`、`running=0`；
+  可按 `scene:单人写真`（24 张）、`series:娃照`（312 张）、`meta:有效`（335 张）与 `attribute:*`（197 个不同取值）检索；
+  caption 平均 18 字；近重复继承（`provider=dedup-from:<代表图>`）87 条。
+  （`media/search` 接口尚未落地，本次以库内精确查询代验收。）
+- **成本**：本轮 43 请求，输入 6.19 万 / 输出 3.64 万 token，**缓存命中率 ~75%**（`cacheHitTokens` 4.62 万），
+  按空闲价折合约 **¥0.02/张**（整目录 ¥0.21）；实测 ≈ **203 图 token/张**（`detail:low`，落在 §6.5 的待标定量级内）。
+
+### 12.4 端到端暴露并修复的问题
+
+1. **`created_by` 超长**：模型行把 `providerId` 写进了 `media_asset_tag.created_by/updated_by`（varchar(40)）；
+   继承图的 `dedup-from:<代表图路径>`（>40）落库报 `1406 Data too long`，导致**继承图的标签 / 描述整批丢失**。
+   修：`apply()` 的 `operator` 改传 `null`（模型写入无人工操作者，与规则写入 `applyRules(..., null)` 同口径），
+   `provider` 仍记 `dedup-from:...` 并按列宽 `take(64)` 保底。
+2. **续跑与数据库启动竞态**：`start()` 里 `resume()` 与 DB 建连并发，`db.driver` 未就绪时静默返回，
+   库里残留的 `queued` 行不会被拉起。修：`resume()` 先短等重试（`RESUME_DB_RETRY = 15` 次 × 1s），
+   仍不就绪才放弃并告警。

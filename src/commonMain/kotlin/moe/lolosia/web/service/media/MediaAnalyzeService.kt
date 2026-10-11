@@ -218,9 +218,23 @@ class MediaAnalyzeService(
     // ---- 后台 ----
 
     private suspend fun resume() {
-        val exec = driverOrNull() ?: return
+        // 启动瞬间数据库可能尚未建连（`start()` 里 resume 与 DB 初始化并发）：短等重试，别把 queued 行晾着。
+        var exec = driverOrNull()
+        var waited = 0
+        while (exec == null && waited < RESUME_DB_RETRY) {
+            delay(1000)
+            waited++
+            exec = driverOrNull()
+        }
+        if (exec == null) {
+            log.warn { "数据库未就绪，本次跳过续跑（queued 行将在下次重启时恢复）" }
+            return
+        }
         val rows = runCatching { assets.findAllByAnalyzeState(exec, ANALYZE_QUEUED, RESUME_LIMIT).getOrThrow() }
-            .getOrElse { return }
+            .getOrElse {
+                log.warn(it) { "续跑读取 queued 行失败" }
+                return
+            }
         val now = Clock.System.now()
         var restored = 0
         for (row in rows) {
@@ -391,21 +405,24 @@ class MediaAnalyzeService(
         providerId: String,
     ) {
         val now = Clock.System.now()
+        // provider 列是 varchar(64)，继承图的标记带代表图路径（`dedup-from:<path>`）可能超长，截断保底。
+        val provider = providerId.take(PROVIDER_MAX)
         runCatching { bindings.executeSoftDeleteByAssetIdAndSource(exec, row.id, SOURCE_MODEL, now).getOrThrow() }
             .onFailure { log.warn(it) { "清除旧模型标签失败：${row.path}" } }
         for ((namespace, name) in tagRefs(result)) {
+            // operator 落 created_by / updated_by（varchar(40)，记的是「操作人」）：模型写入没有人工操作者，传 null。
             runCatching {
-                tagService.attach(exec, row.id, namespace, name, SOURCE_MODEL, providerId, providerId)
+                tagService.attach(exec, row.id, namespace, name, SOURCE_MODEL, null, provider)
             }.onFailure { log.warn(it) { "写入模型标签失败：${row.path} $namespace:$name" } }
         }
         val caption = result.caption?.trim()?.ifEmpty { null }
         if (caption != null && row.captionSource != SOURCE_MANUAL) {
             runCatching {
-                assets.executeUpdateCaptionById(exec, row.id, caption, SOURCE_MODEL, now, providerId).getOrThrow()
+                assets.executeUpdateCaptionById(exec, row.id, caption, SOURCE_MODEL, now, null).getOrThrow()
             }.onFailure { log.warn(it) { "写入描述失败：${row.path}" } }
         }
         runCatching {
-            assets.executeUpdateAnalyzeById(exec, row.id, ANALYZE_DONE, now, providerId, now).getOrThrow()
+            assets.executeUpdateAnalyzeById(exec, row.id, ANALYZE_DONE, now, provider, now).getOrThrow()
         }.onFailure { log.warn(it) { "写入分析状态失败：${row.path}" } }
     }
 
@@ -460,8 +477,14 @@ class MediaAnalyzeService(
         /** 单次启动最多恢复多少条库里的 `queued` 行。 */
         const val RESUME_LIMIT: Int = 50_000
 
+        /** 启动后续跑前等待数据库就绪的重试上限（次）。 */
+        const val RESUME_DB_RETRY: Int = 15
+
         /** 暂停状态下的重检间隔。 */
         const val PAUSE_MS: Long = 30_000
+
+        /** `media_asset_tag.provider` / `media_asset.analyze_provider` 的列宽（varchar）。 */
+        const val PROVIDER_MAX: Int = 64
 
         /** 只分析图片（视频 / 音频暂不支持视觉分析）。 */
         const val KIND_IMAGE: String = "image"
