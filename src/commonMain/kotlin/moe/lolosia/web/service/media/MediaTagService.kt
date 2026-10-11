@@ -83,6 +83,24 @@ class MediaTagService(
         return ruleSet.ratingFor(path, name)
     }
 
+    /**
+     * 某个资产当前**生效**的标签（`namespace:name`）。
+     *
+     * 供外发分析把「已有的打标」当上下文喂给模型（见 `doc/vision-autotag-design.md`）：不分来源
+     * （人工 / 规则 / 模型都算），但**跳过否决行** —— 已否决的标签不该再提示模型去沿用。
+     */
+    suspend fun labelsOf(exec: QueryExecutor, assetId: Long): List<String> {
+        val links = bindings.findAllByAssetId(exec, assetId).getOrNull().orEmpty()
+        if (links.isEmpty()) return emptyList()
+        val out = LinkedHashSet<String>()
+        for (link in links) {
+            if (link.negative) continue
+            val tag = tags.findOneById(exec, link.tagId).getOrNull() ?: continue
+            out.add("${tag.namespace}:${tag.name}")
+        }
+        return out.toList()
+    }
+
     /** 找一个标签；不存在则按需创建（根级自由标签 `parentId = null` 是合法状态，§7.5）。 */
     suspend fun ensureTag(
         exec: QueryExecutor,

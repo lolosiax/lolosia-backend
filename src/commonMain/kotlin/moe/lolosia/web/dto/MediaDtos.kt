@@ -210,3 +210,23 @@ data class MediaAnalyzeEvent(
     val tags: List<String> = emptyList(),
     val caption: String = "",
 )
+
+/**
+ * **文件夹备注**：目录的自由文本备注（与文件的 `caption` 对齐，见 `folder_remark` 表）。
+ *
+ * 目录不在媒体索引里，前端右侧属性面板选中目录时用它展示 / 编辑；外发分析也会把它当作
+ * 「图片所属文件夹」的上下文喂给模型。
+ */
+@Serializable
+data class MediaFolderRemark(
+    /** 相对浏览根的目录路径；根目录是空串。 */
+    val path: String = "",
+    val remark: String = "",
+)
+
+/** 保存文件夹备注的请求体；`remark` 为空串表示清除备注。 */
+@Serializable
+data class MediaFolderRemarkReq(
+    val path: String? = null,
+    val remark: String? = null,
+)

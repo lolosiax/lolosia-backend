@@ -44,7 +44,8 @@ class DeepSeekVisionProvider(
             .system(VisionPrompts.system(a.composition, a.validity, a.subject, a.caption, a.attributes))
             .user(VisionPrompts.user(items.size))
         items.forEachIndexed { index, item ->
-            spec.user("图$index：")
+            // 图前先给路径与已有分析结果：模型据此决定沿用 / 增补标签、改写描述
+            spec.user(VisionPrompts.image(index, item.path, item.tags, item.caption, item.folderRemark))
             spec.image(item.bytes, item.mime, config.detail.ifBlank { "low" })
         }
         spec.onUsage { usage = it }

@@ -24,8 +24,21 @@ interface TaggingProvider {
     /** 分析一批图片；返回的 [Output.results] 与 [items] 按序对应（数量不足时由服务层补空）。 */
     suspend fun tag(items: List<Item>): Output
 
-    /** 单张图的输入：**本地降采样后**的字节 + MIME（省上行、避开请求体限制）。 */
-    class Item(val path: String, val bytes: ByteArray, val mime: String)
+    /**
+     * 单张图的输入：**本地降采样后**的字节 + MIME（省上行、避开请求体限制），外加让模型
+     * 「看到以前的分析结果」的上下文（已有标签 / 已有描述 / 所属文件夹备注），由提示词层渲染。
+     */
+    class Item(
+        val path: String,
+        val bytes: ByteArray,
+        val mime: String,
+        /** 该图当前生效的标签（`namespace:name`），供模型沿用 / 增补。 */
+        val tags: List<String> = emptyList(),
+        /** 该图已有的描述（`media_asset.caption`），供模型参考改写。 */
+        val caption: String? = null,
+        /** 该图所属文件夹的备注（`folder_remark`），只作上下文，不该写进描述。 */
+        val folderRemark: String? = null,
+    )
 
     /**
      * 单张图的判定。

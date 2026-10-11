@@ -81,6 +81,7 @@ class MediaAnalyzeService(
     private val tagService: MediaTagService,
     private val ledger: TokenLedger,
     private val tokenizer: DeepSeekTokenizer,
+    private val folderRemark: FolderRemarkService,
 ) {
 
     private val log = Log.of("Vision")
@@ -296,6 +297,8 @@ class MediaAnalyzeService(
         val reps = ArrayList<MediaAssetEntity>()
         val hashes = ArrayList<Long?>()
         val dups = HashMap<Int, MutableList<MediaAssetEntity>>()
+        /** 目录备注按 dirPath 缓存：一批里同一目录只查一次。 */
+        val remarks = HashMap<String, String?>()
         val now = Clock.System.now()
 
         for (id in ids) {
@@ -321,7 +324,18 @@ class MediaAnalyzeService(
                 continue
             }
             assets.executeUpdateAnalyzeById(exec, row.id, ANALYZE_RUNNING, null, null, now).getOrThrow()
-            items.add(TaggingProvider.Item(row.path, loaded.first, loaded.second))
+            // 让模型「看到以前的打标 / 描述」+ 所属目录备注，再决定沿用 / 增补 / 改写
+            if (!remarks.containsKey(row.dirPath)) remarks[row.dirPath] = folderRemark.remarkOf(exec, row.dirPath)
+            items.add(
+                TaggingProvider.Item(
+                    path = row.path,
+                    bytes = loaded.first,
+                    mime = loaded.second,
+                    tags = tagService.labelsOf(exec, row.id),
+                    caption = row.caption,
+                    folderRemark = remarks[row.dirPath],
+                )
+            )
             reps.add(row)
             hashes.add(hash)
         }

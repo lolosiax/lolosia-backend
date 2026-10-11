@@ -4,6 +4,8 @@ import moe.lolosia.web.dto.MediaAnalyzeReq
 import moe.lolosia.web.dto.MediaAnalyzeStatus
 import moe.lolosia.web.dto.MediaAnalyzeUsage
 import moe.lolosia.web.dto.MediaDetail
+import moe.lolosia.web.dto.MediaFolderRemark
+import moe.lolosia.web.dto.MediaFolderRemarkReq
 import moe.lolosia.web.dto.MediaIndexScanReq
 import moe.lolosia.web.dto.MediaPropertyApplyReq
 import moe.lolosia.web.dto.MediaPropertyReq
@@ -11,6 +13,7 @@ import moe.lolosia.web.dto.MediaTagItem
 import moe.lolosia.web.dto.MediaTagsReq
 import moe.lolosia.web.dto.MessageResult
 import moe.lolosia.web.service.files.normalizeRelative
+import moe.lolosia.web.service.media.FolderRemarkService
 import moe.lolosia.web.service.media.FolderTagService
 import moe.lolosia.web.service.media.MEDIA_INDEX_EVENT
 import moe.lolosia.web.service.media.MEDIA_READ
@@ -127,6 +130,29 @@ object MediaController {
         folderTags: FolderTagService,
         @Body req: MediaTagsReq,
     ): MessageResult = folderTags.detach(ctx, req)
+
+    /**
+     * **文件夹备注**：读。
+     *
+     * 与文件的 `caption`（前端叫「备注」）对齐，只是目录不在 `media_asset` 里，单独按相对路径取
+     * （`folder_remark` 表）。`path` 为空串表示浏览根。
+     */
+    @GET("/media/folder-remark")
+    @Permission(MEDIA_READ)
+    suspend fun folderRemark(
+        ctx: Context,
+        remark: FolderRemarkService,
+        @Query path: String?,
+    ): MediaFolderRemark = remark.get(ctx, path)
+
+    /** 文件夹备注：保存（`remark` 为空即清除）。 */
+    @POST("/media/folder-remark/save")
+    @Permission(MEDIA_WRITE)
+    suspend fun saveFolderRemark(
+        ctx: Context,
+        remark: FolderRemarkService,
+        @Body req: MediaFolderRemarkReq,
+    ): MessageResult = remark.save(ctx, req)
 
     /**
      * 标签选择器：全量词表（带命名空间），供控件按段浏览。

@@ -445,3 +445,53 @@ user:   [图0][图1]…[图5]   ← 6 个图（低清档），与 i 对齐
 2. **续跑与数据库启动竞态**：`start()` 里 `resume()` 与 DB 建连并发，`db.driver` 未就绪时静默返回，
    库里残留的 `queued` 行不会被拉起。修：`resume()` 先短等重试（`RESUME_DB_RETRY = 15` 次 × 1s），
    仍不就绪才放弃并告警。
+
+---
+
+## 13. 入口、上下文增强与目录备注（V4 后补）
+
+补齐上线后暴露的三处缺口：**没有可见的触发入口**、**模型看不到历史分析结果**、**目录没有备注**。
+
+### 13.1 触发入口（前端）
+
+| 入口 | 语义 | 实现 |
+| --- | --- | --- |
+| 工具栏「开始打标」（`bi-stars`，紧邻「刷新索引」） | **增量**：只打 `analyze_state='none'` | `FileToolbar` emit `analyze` → `index.vue#onAnalyze` → `analyzePath(path, false)` |
+| 右键文件夹「开始打标」 | **增量**，作用于被右键的目录 | `index.vue#analyzeEntry` |
+| 右键文件夹「重新打标（全部）」 | **全量**：`reanalyze=true`，含已分析项（先弹确认） | `index.vue#reanalyzeEntry` |
+
+与「刷新索引」的分工不变：那是**纯本地**（stat/EXIF/规则打标，不出网），这是**外发分析**（素材交给外部大模型）。
+重打只重写 `source='model'` 的行（§7.3），人工 / 规则行与人工填过的描述都不动。
+
+### 13.2 prompt 上下文增强
+
+设计稿原 §8 的 prompt 只喂图片本身。现改为**每张图前附上下文**（`VisionPrompts.image`）：
+
+```
+图N（路径：<相对路径>；已有标签：a、b；已有描述：……；文件夹备注：……）：
+```
+
+- `已有标签`：`MediaTagService.labelsOf` 取该图的 `namespace:name`（跳 `negative`，去重）；空则整段省略。
+- `已有描述` / `文件夹备注`：分别取 `media_asset.caption` / 所属目录的 `folder_remark`；空则省略。
+- system 提示同步加一段引导：**路径与备注只作上下文、不要写进描述**；已有标签「成立则沿用、可增补、不凭空否定」；
+  已有描述「作改写基础，更准更简洁，不必照抄」。`TaggingProvider.Item` 相应加 `tags` / `caption` / `folderRemark` 字段。
+
+目的：模型据此**沿用 / 增补标签、改写描述**，而不是每次从零重来（配合 §13.1 的「重新打标（全部）」使用）。
+
+### 13.3 目录备注（`folder_remark`）
+
+目录不在 `media_asset` 里（索引只登记文件），复用不了 `caption`，故**按相对路径另存一张表**。
+
+- 表 `folder_remark(id, path, remark, created_at/by, updated_at/by, deleted)`，一个目录最多一条活行；保存「有则更新、无则插入」，清空即软删（DDL 见 `sql/folder_remark.sql`）。
+- 后端：`FolderRemarkEntity` / `FolderRemarkRepository` / `FolderRemarkService`；接口 `GET /api/media/folder-remark`、`POST /api/media/folder-remark/save`。
+  `FolderRemarkService.remarkOf(exec, path)` **不需要 `Context`**，供后台外发分析读取。
+- 前端：右侧预览面板在**文件名 / 夹名下方**展示备注（view 态文本 + 铅笔按钮，edit 态 textarea + 取消 / 保存），
+  文件写 `caption`、目录写 `folder_remark`；属性页原「描述」一律改称「**备注**」（描述即备注，同一概念）。
+
+### 13.4 验证（2026-10-11，tsp-1m 线上）
+
+- **接口**：`folder-remark` 的存 / 取 / 清（空串软删）三条路径逐一走通。
+- **前端产物**：deploy 后线上 `static/js` 分块里能 grep 到「开始打标」（工具栏块与 `index` 块各一处）与 `folder-remark`。
+- **外发链路**：对 1 张未分析图（另建目录备注后）跑增量分析 —— `processed=1`、`failed=0`，
+  caption 与 `model` 标签均落库（`provider=deepseek-flash@vision`），规则标签 `series:VRChat` 保留；
+  日志 `本批 1 图：实测输入 638 token`（文本预估含新增的路径 / 备注上下文）。验证用的测试备注已清除。

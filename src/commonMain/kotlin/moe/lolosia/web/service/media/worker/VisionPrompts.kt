@@ -29,6 +29,11 @@ object VisionPrompts {
         if (caption) appendLine("- d：一句话描述（不超过 30 个汉字，只陈述画面里发生了什么，不评价、不推测人物身份）")
         if (attributes) appendLine("- a：画面的角色视觉属性数组（如 [\"粉发\",\"双马尾\",\"和服\"]）；无明显角色属性时给空数组 []")
         appendLine()
+        appendLine("每张图前会附上该图的路径与已有信息（已有标签 / 已有描述 / 文件夹备注），请当作参考：")
+        appendLine("- 已有标签若仍然成立就继续输出；发现遗漏可补充；确实不成立可不再输出（不要凭空否定）。")
+        appendLine("- 已有描述只作改写基础，让它更准更简洁，不必照抄。")
+        appendLine("- 路径与文件夹备注仅帮助理解上下文，不要写进描述。")
+        appendLine()
         append("输出示例：")
         append(sample(composition, validity, subject, caption, attributes))
     }
@@ -36,6 +41,25 @@ object VisionPrompts {
     /** 用户指令（图片按序跟在后面）。 */
     fun user(count: Int): String =
         "下面共有 $count 张图片，已按顺序编号 0 至 ${count - 1}，请逐张标注并输出 JSON 数组。"
+
+    /**
+     * 单张图的前导文本（紧接该图的图片内容）。
+     *
+     * 把「已有分析结果」摆到模型眼前，它才能判断「沿用 / 增补标签、改写描述」，而不是从零重来。
+     */
+    fun image(
+        index: Int,
+        path: String,
+        tags: List<String>,
+        caption: String?,
+        folderRemark: String?,
+    ): String = buildString {
+        append("图$index（路径：$path")
+        if (tags.isNotEmpty()) append("；已有标签：${tags.joinToString("、")}")
+        if (!caption.isNullOrBlank()) append("；已有描述：$caption")
+        if (!folderRemark.isNullOrBlank()) append("；文件夹备注：$folderRemark")
+        append("）：")
+    }
 
     private fun sample(
         composition: Boolean,
