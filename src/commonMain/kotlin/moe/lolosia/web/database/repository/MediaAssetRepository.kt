@@ -229,4 +229,52 @@ interface MediaAssetRepository : CrudRepository<MediaAssetEntity> {
         updatedAt: Instant,
         updatedBy: String?,
     ): Result<Long>
+
+    /** 仪表板「近期活跃」：按源文件修改时间倒序取一页（不限类型，视频 / 文档也进来）。 */
+    @Query("select * from media_asset where deleted = 0 order by mtime desc limit :limit")
+    suspend fun findAllByOrderByMtimeDesc(
+        context: QueryExecutor,
+        limit: Int,
+    ): Result<List<MediaAssetEntity>>
+
+    /** 仪表板「最近新增」：按入库时间倒序取一页（`created_at` 相同的用 id 兜底）。 */
+    @Query("select * from media_asset where deleted = 0 order by created_at desc, id desc limit :limit")
+    suspend fun findAllByOrderByCreatedAtDesc(
+        context: QueryExecutor,
+        limit: Int,
+    ): Result<List<MediaAssetEntity>>
+
+    /**
+     * 仪表板「为你推荐」的候选池：排掉某个评级（一般是 `explicit`）后按修改时间倒序取一页，
+     * 服务层再从池子里随机抽几张 —— 避免在 SQL 里用 `rand()`（KSP 的语句解析不保证认）。
+     */
+    @Query(
+        "select * from media_asset where kind = :kind and rating <> :excludeRating and deleted = 0 " +
+            "order by mtime desc limit :limit"
+    )
+    suspend fun findAllByKindAndRatingNotOrderByMtimeDesc(
+        context: QueryExecutor,
+        kind: String,
+        excludeRating: String,
+        limit: Int,
+    ): Result<List<MediaAssetEntity>>
+
+    /**
+     * 带某个标签的资产（仪表板「受欢迎」取人工标心的图）：以 `media_asset` 为主表 join 关联表与词表。
+     *
+     * 否决位（`negative = 1`）不计入 —— 那表示「明确不是这个标签」。
+     */
+    @Query(
+        "select a.* from media_asset a " +
+            "join media_asset_tag t on t.asset_id = a.id and t.deleted = 0 and t.negative = 0 " +
+            "join media_tag g on g.id = t.tag_id and g.deleted = 0 " +
+            "where a.deleted = 0 and g.namespace = :namespace and g.name = :tagName " +
+            "order by a.mtime desc limit :limit"
+    )
+    suspend fun findAllByTagOrderByMtimeDesc(
+        context: QueryExecutor,
+        namespace: String,
+        tagName: String,
+        limit: Int,
+    ): Result<List<MediaAssetEntity>>
 }

@@ -19,6 +19,7 @@ data class AppSettings(
     val ddns: DdnsConfig = DdnsConfig(),
     val webdav: WebdavConfig = WebdavConfig(),
     val files: FilesConfig = FilesConfig(),
+    val dashboard: DashboardConfig = DashboardConfig(),
     /** 日志级别：TRACE / DEBUG / INFO / WARN / ERROR / OFF */
     val logLevel: String = "INFO",
 ) {
@@ -176,4 +177,24 @@ data class AppSettings(
             val maxSourceBytes: Long = 64L * 1024 * 1024,
         )
     }
+
+    /**
+     * 仪表板：系统指标采样（CPU / 内存 / 磁盘 / 网络 / 磁盘 IO）与访问统计（IP / Origin 排行）。
+     *
+     * 系统指标在 Linux 上读 `/proc` 采集；Windows 目标（本地开发）不采集，仪表板把系统卡片隐藏。
+     * 访问统计只在内存里聚合、周期性落库，是纯派生的遥测数据，可随时清空。
+     */
+    @Serializable
+    data class DashboardConfig(
+        /** 是否启用仪表板的后台采集（关掉后系统卡片与访问排行为空，媒体卡片不受影响）。 */
+        val enabled: Boolean = true,
+        /** 系统指标采样间隔（秒），下限 2。 */
+        val sampleIntervalSeconds: Int = 2,
+        /** 系统指标采样保留天数（下限 1）。 */
+        val retentionDays: Int = 14,
+        /** 访问统计保留天数（下限 1）。 */
+        val accessRetentionDays: Int = 7,
+        /** 各卡片的条数上限（排行 / 文件 / 标签 / 图片），3~20。 */
+        val topLimit: Int = 8,
+    )
 }

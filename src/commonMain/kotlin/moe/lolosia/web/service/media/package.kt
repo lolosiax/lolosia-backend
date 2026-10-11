@@ -45,6 +45,15 @@ const val SOURCE_MODEL: String = "model"
 /** `namespace` 里的元信息命名空间（`meta:explicit` 这类投影标签）。 */
 const val NAMESPACE_META: String = "meta"
 
+/**
+ * `namespace` 里的**功能开关**命名空间：不描述画面，而是给文件管理器 / 仪表板用的展示标记
+ * （目录级的 `feature:日期分组`、文件级的 `feature:喜欢`）。
+ */
+const val NAMESPACE_FEATURE: String = "feature"
+
+/** 文件级「人工标心」标签名（`feature:喜欢`），仪表板「受欢迎」的一档口径。 */
+const val TAG_LIKE: String = "喜欢"
+
 /** 评级投影成标签时的名字（§7.2：列是权威，标签是投影）。 */
 const val TAG_EXPLICIT: String = "explicit"
 

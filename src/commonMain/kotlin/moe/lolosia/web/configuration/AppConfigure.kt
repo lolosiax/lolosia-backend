@@ -22,6 +22,8 @@ import moe.lolosia.web.service.AppSettingService
 import moe.lolosia.web.service.WebpCache
 import moe.lolosia.web.service.dav.DavLockManager
 import moe.lolosia.web.service.dav.DavStore
+import moe.lolosia.web.service.dashboard.AccessStatService
+import moe.lolosia.web.service.dashboard.SystemMetricService
 import moe.lolosia.web.service.ddns.DdnsService
 import moe.lolosia.web.service.files.ThumbnailService
 import moe.lolosia.web.service.media.MediaIndexService
@@ -159,6 +161,11 @@ fun Application.configureApplication(koin: Koin) {
 
     // 媒体索引后台扫描：**只做本地的事**（stat / 哈希 / EXIF / 规则打标），不出网（§8.2）
     koin.get<MediaIndexService>().start()
+
+    // 仪表板：系统指标采样（Linux 读 /proc，Windows 目标不支持）与访问统计落库。
+    // 两者都是纯派生的遥测，库不可用时只丢数据、不影响服务。
+    koin.get<SystemMetricService>().start()
+    koin.get<AccessStatService>().start()
 
     // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用。
     // 连上后顺带把权限注册表声明的组继承同步进 sys_role.parent_id（幂等；规则不落库，见 service.permission），

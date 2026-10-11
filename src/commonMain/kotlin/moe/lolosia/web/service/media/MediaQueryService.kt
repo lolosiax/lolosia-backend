@@ -83,7 +83,7 @@ class MediaQueryService(
             sample = row?.sampleRgb565.orEmpty(),
             gps = gpsOf(ctx, row),
             metadata = exifItems(row?.metadataJson),
-            tags = row?.let { tagItems(ctx, it.id) }.orEmpty(),
+            tags = row?.let { tagsOf(ctx, it.id) }.orEmpty(),
             indexed = row != null,
             exp = exp,
             sig = signer.sign(relative, exp),
@@ -196,8 +196,10 @@ class MediaQueryService(
     /**
      * 该资产身上的标签。同一个标签可能有多条来源行，这里按 `manual > rule > model` 合并成一条生效的
      * （§7.3），否决的行**照列但带上 `negative`** —— 属性页要把「这张图明确不是什么」显示出来。
+     *
+     * 公开给仪表板复用（它也要给「近期活跃 / 最近新增」的每一行配一个代表标签）。
      */
-    private suspend fun tagItems(ctx: Context, assetId: Long): List<MediaTagItem> {
+    suspend fun tagsOf(ctx: Context, assetId: Long): List<MediaTagItem> {
         val links = bindings.findAllByAssetId(ctx.db, assetId).getOrThrow()
         if (links.isEmpty()) return emptyList()
         val winners = links.groupBy { it.tagId }.values.mapNotNull { winningLink(it) }
