@@ -22,6 +22,7 @@ import moe.lolosia.web.database.repository.AnimeReleaseRepository
 import moe.lolosia.web.database.repository.AnimeSeriesAliasRepository
 import moe.lolosia.web.database.repository.AnimeSeriesRepository
 import moe.lolosia.web.dto.ApiException
+import moe.lolosia.web.service.media.TokenLedger
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.llm.ChatClient
 import moe.lolosia.web.util.llm.ChatTool
@@ -41,7 +42,8 @@ import moe.lolosia.web.util.router.Service
  *   工具去整个库检索。判完再调 `decide` 一次性交回结果（`seriesId` 省略 = 匹配不到）。
  *
  * **成本闸门**：整轮累计 token 超过 [AppSettings.AnimeConfig.aiMatchTokenLimit] 就抛
- * [TokenBudgetExceeded] 硬止损，避免模型反复检索把 token 烧穿。
+ * [TokenBudgetExceeded] 硬止损，避免模型反复检索把 token 烧穿；同时每一轮的 `usage` 都记进
+ * 全局台账 [TokenLedger]（与视觉打标同一本账，仪表盘 / `sys_token_usage` 可见）。
  *
  * 落库口径（这是「不再重复匹配」的关键）：
  * - 命中 → [MATCH_MATCHED]；明确判「匹配不到」→ [MATCH_AI_UNMATCHED]（下次不再捞）；
@@ -56,12 +58,16 @@ class AnimeMatchAiService(
     private val seriesRepo: AnimeSeriesRepository,
     private val aliasRepo: AnimeSeriesAliasRepository,
     private val releaseRepo: AnimeReleaseRepository,
+    private val ledger: TokenLedger,
 ) {
 
     private val log = Log.of("Anime")
     private val config = settings.anime
     private val llm = settings.llm
     private val client = ChatClient(settings.llm)
+
+    /** 全局台账里的 provider 标签（按模型区分，与视觉打标的 `…@vision` 分开记）。 */
+    private val provider: String = "${llm.model}@anime-match"
 
     /** 「匹配所有未识别」：捞全部 [MATCH_UNMATCHED] 走一轮 AI 匹配，返回新增命中条数。 */
     suspend fun rematchAll(exec: QueryExecutor): Int {
@@ -129,7 +135,11 @@ class AnimeMatchAiService(
             .user(userPrompt(chunk))
             .tools(searchTool(exec), decideTool)
             .toolChoice(ToolChoice.Auto)
-            .onUsage { meter.add(it) }
+            .onUsage { usage ->
+                // 先记全局台账（即便随后超限抛错中断，这一轮的消耗也已入账），再累入本次硬上限
+                ledger.record(provider, usage)
+                meter.add(usage)
+            }
             .inspect {
                 onExit { event ->
                     if (event.call.name == DECIDE_TOOL) {

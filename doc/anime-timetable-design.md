@@ -207,6 +207,8 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
   拦截器捕到 `decide` 即中断后续轮次（`ToolEvent.throwIt`）。
 - **成本闸门**：整轮累计 token 超 `aiMatchTokenLimit`（默认 20 万）就抛 `TokenBudgetExceeded`
   **硬止损**（`onUsage` 回调里抛，直接中断请求），已判部分照常落库。`llm.apiKey` 为空或目录为空时直接跳过。
+- **记账**：每轮的 `usage` 记进全局 `TokenLedger`（provider = `<model>@anime-match`），与视觉打标同一本账，
+  仪表盘 / `sys_token_usage` 可见（先记账再判上限，超限中断那一轮也已入账）。
 - **落库口径**（「不再重复匹配」的关键）：命中 → `matched`；明确判「匹配不到」→ **`ai-unmatched`**
   （下次不再被捞）；整批失败 / token 超限 → 原地不动（仍是 `unmatched`，下轮还能再试）。
 - **命中即补 SSE**：兜底命中的条目不重新入库，直接补一发与规则命中相同的推送（§5）。
