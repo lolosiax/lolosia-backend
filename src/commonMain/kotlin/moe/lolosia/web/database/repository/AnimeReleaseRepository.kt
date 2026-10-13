@@ -87,6 +87,13 @@ interface AnimeReleaseRepository : CrudRepository<AnimeReleaseEntity> {
         matchState: String,
     ): Result<Long>
 
+    @Query("update anime_release set match_state = :matchState where id = :id")
+    suspend fun executeUpdateMatchState(
+        context: QueryExecutor,
+        id: Long,
+        matchState: String,
+    ): Result<Long>
+
     @Query("delete from anime_release where published_at < :cutoff")
     suspend fun executeDeleteBefore(context: QueryExecutor, cutoff: Instant): Result<Long>
 }

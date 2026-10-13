@@ -42,6 +42,11 @@ TARGET = os.environ.get("RELAY_TARGET_URL", "https://api.bgm.tv/calendar")
 UA = os.environ.get("RELAY_UA", "lolosia-anime/1.0 (+http://lolosia.moe)")
 TIMEOUT = int(os.environ.get("RELAY_TIMEOUT_SECONDS", "30"))
 STATE_FILE = os.environ.get("RELAY_STATE_FILE", "/srv/anime-relay/state.json")
+# 封面镜像：目录拿到日历后，后台**逐个、带间隔**地把封面图也拉下来（墙内后端连不到 Bangumi 图床）。
+COVER_DIR = os.environ.get("RELAY_COVER_DIR", "/srv/anime-relay/covers")
+COVER_DELAY = int(os.environ.get("RELAY_COVER_DELAY_SECONDS", "2"))
+COVER_JITTER = int(os.environ.get("RELAY_COVER_JITTER_SECONDS", "2"))
+COVER_MAX_TRIES = int(os.environ.get("RELAY_COVER_MAX_TRIES", "3"))
 MAX_BODY = 8 * 1024 * 1024
 
 # 与前端基座/后端一致的「自定义请求通道」：msgpack + gzip，前 10 字节用随机数盖掉 gzip 头
@@ -67,17 +72,22 @@ def _xhr_decode(data: bytes) -> object:
     return msgpack.unpackb(gzip.decompress(bytes(buf)), raw=False)
 
 # job: 待执行任务（含 fire_at）；last: 最近一次结果（ready / error），持久化后可在重启后继续供数
+# covers: 日历里各番的封面 id -> URL（后台据此逐个下载）；cover_tries: 失败重试计数（超过上限即放弃）
 _lock = threading.Lock()
-_state: dict = {"job": None, "last": None}
+_state: dict = {"job": None, "last": None, "covers": {}, "cover_tries": {}}
 
 
 def _load_state() -> None:
-    """启动时把上次成功的结果读回来，避免进程重启后一段时间取不到数。"""
+    """启动时把上次成功的结果与封面清单读回来，避免进程重启后一段时间取不到数。"""
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if isinstance(data, dict) and isinstance(data.get("last"), dict):
+        if not isinstance(data, dict):
+            return
+        if isinstance(data.get("last"), dict):
             _state["last"] = data["last"]
+        if isinstance(data.get("covers"), dict):
+            _state["covers"] = data["covers"]
     except Exception:
         pass
 
@@ -86,7 +96,7 @@ def _save_state() -> None:
     try:
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"last": _state["last"]}, f, ensure_ascii=False)
+            json.dump({"last": _state["last"], "covers": _state["covers"]}, f, ensure_ascii=False)
         os.replace(tmp, STATE_FILE)
     except Exception:
         pass  # 落盘失败不影响服务
@@ -101,6 +111,68 @@ def _fetch() -> object:
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         raw = resp.read(MAX_BODY)
     return json.loads(raw.decode("utf-8"))
+
+
+def _collect_covers(data: object) -> dict:
+    """从日历数组里抽 `id -> 封面 URL`（large 优先，退回 common/medium/grid）。"""
+    covers: dict = {}
+    if not isinstance(data, list):
+        return covers
+    for day in data:
+        if not isinstance(day, dict):
+            continue
+        for item in (day.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            cid = item.get("id")
+            images = item.get("images") or {}
+            url = images.get("large") or images.get("common") or images.get("medium") or images.get("grid")
+            if cid and url:
+                covers[str(cid)] = url
+    return covers
+
+
+def _cover_path(cid: str) -> str:
+    return os.path.join(COVER_DIR, cid + ".jpg")
+
+
+def _download_cover(cid: str, url: str) -> None:
+    """下载单张封面并原子落盘（先写 .tmp 再 rename）。"""
+    os.makedirs(COVER_DIR, exist_ok=True)
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://bgm.tv/"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        body = resp.read(MAX_BODY)
+    tmp = _cover_path(cid) + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(body)
+    os.replace(tmp, _cover_path(cid))
+
+
+def _cover_worker() -> None:
+    """后台**逐个**下载封面；每张之间睡 COVER_DELAY + 抖动，避免短时间内猛拉图床。"""
+    while True:
+        time.sleep(1)
+        with _lock:
+            pick = None
+            for cid, c_url in _state["covers"].items():
+                if os.path.exists(_cover_path(cid)):
+                    continue
+                if _state["cover_tries"].get(cid, 0) >= COVER_MAX_TRIES:
+                    continue
+                pick = (cid, c_url)
+                break
+        if pick is None:
+            continue
+        cid, c_url = pick
+        try:
+            _download_cover(cid, c_url)
+            with _lock:
+                _state["cover_tries"].pop(cid, None)
+        except Exception as exc:  # noqa: BLE001 —— 记一次失败，超过上限即放弃该张
+            with _lock:
+                _state["cover_tries"][cid] = _state["cover_tries"].get(cid, 0) + 1
+            print("cover %s 下载失败：%s: %s" % (cid, type(exc).__name__, exc), flush=True)
+        time.sleep(COVER_DELAY + random.uniform(0, COVER_JITTER))
 
 
 def _worker() -> None:
@@ -123,6 +195,8 @@ def _worker() -> None:
                     "count": len(data) if isinstance(data, list) else None,
                     "data": data,
                 }
+                # 顺带把这次的封面清单并入待下载集合，交给 _cover_worker 慢慢拉
+                _state["covers"].update(_collect_covers(data))
             _save_state()
         except Exception as exc:  # noqa: BLE001 —— 任何出站异常都记为一次失败结果
             with _lock:
@@ -211,6 +285,31 @@ class Handler(BaseHTTPRequestHandler):
                 data["error"] = last.get("error")
             return self._ok_xhr(data)
 
+        if url.path == "/anime/bangumi/covers/status":
+            if not self._authed(query):
+                return self._err_xhr(401, 401, "unauthorized")
+            with _lock:
+                total = len(_state["covers"])
+                ids = sorted(cid for cid in _state["covers"] if os.path.exists(_cover_path(cid)))
+            return self._ok_xhr({"total": total, "ready": len(ids), "ids": ids})
+
+        if url.path.startswith("/anime/bangumi/covers/"):
+            if not self._authed(query):
+                return self._err(401, 401, "unauthorized")
+            cid = url.path.rsplit("/", 1)[-1]
+            if cid.endswith(".jpg"):
+                cid = cid[:-4]
+            if not cid.isdigit() or not os.path.exists(_cover_path(cid)):
+                return self._err(404, 404, "cover not ready")
+            with open(_cover_path(cid), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         return self._err(404, 404, "not found")
 
     def do_POST(self) -> None:  # noqa: N802
@@ -263,8 +362,13 @@ def main() -> None:
         raise SystemExit("RELAY_TOKEN 未设置：请通过环境变量提供共享令牌")
     _load_state()
     threading.Thread(target=_worker, daemon=True).start()
+    threading.Thread(target=_cover_worker, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"anime-relay listening on {HOST}:{PORT}, delay={DELAY}s + jitter 0..{JITTER}s, target={TARGET}", flush=True)
+    print(
+        f"anime-relay listening on {HOST}:{PORT}, delay={DELAY}s + jitter 0..{JITTER}s, "
+        f"target={TARGET}, covers={COVER_DIR}",
+        flush=True,
+    )
     server.serve_forever()
 
 

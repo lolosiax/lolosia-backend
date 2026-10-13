@@ -187,7 +187,10 @@ class AnimeMetaService(
             series.findOneByBangumiId(exec, bangumiId).getOrNull()?.id ?: return false
         } else {
             series.executeUpdateById(
-                exec, existing.id, title, nameOriginal, cover, weekday, existing.airTime, airDate,
+                exec, existing.id, title, nameOriginal,
+                // 已回源到本地的封面不被目录同步覆盖回原始 URL（由 AnimeCoverService 负责回源）
+                if (isLocalAnimeCover(existing.cover)) existing.cover else cover,
+                weekday, existing.airTime, airDate,
                 existing.season, siteUrl, rating, summary, existing.status, now,
             )
             existing.id

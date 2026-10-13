@@ -29,11 +29,33 @@ interface AnimeSeriesRepository : CrudRepository<AnimeSeriesEntity> {
     @Query("select * from anime_series where deleted = 0 and title like :keyword order by title asc")
     suspend fun findAllByTitleLike(context: QueryExecutor, keyword: String): Result<List<AnimeSeriesEntity>>
 
+    /** AI 匹配的检索工具用：标题或原名命中关键词，限量返回。 */
+    @Query(
+        "select * from anime_series where deleted = 0 and (title like :keyword or title_original like :keyword) " +
+            "order by title asc limit :maxRows"
+    )
+    suspend fun findAllByTitleOrOriginalLike(
+        context: QueryExecutor,
+        keyword: String,
+        maxRows: Long,
+    ): Result<List<AnimeSeriesEntity>>
+
     @Query("select * from anime_series where id = :id and deleted = 0")
     suspend fun findOneById(context: QueryExecutor, id: Long): Result<AnimeSeriesEntity?>
 
     @Query("select * from anime_series where bangumi_id = :bangumiId and deleted = 0")
     suspend fun findOneByBangumiId(context: QueryExecutor, bangumiId: Long): Result<AnimeSeriesEntity?>
+
+    /** 还没回源到本地封面的番（`cover` 仍是原始 URL / 为空，且是 Bangumi 番）；分批回源用。 */
+    @Query(
+        "select * from anime_series where deleted = 0 and bangumi_id is not null " +
+            "and (cover is null or cover not like '/res/%') order by id asc limit :limit"
+    )
+    suspend fun findAllByPendingCover(context: QueryExecutor, limit: Long): Result<List<AnimeSeriesEntity>>
+
+    /** 回源成功后把封面改写成本地资源路径（`/res/resources/anime/cover/{bangumiId}.jpg`）。 */
+    @Query("update anime_series set cover = :cover, updated_at = :updatedAt where id = :id")
+    suspend fun executeUpdateCover(context: QueryExecutor, id: Long, cover: String, updatedAt: Instant): Result<Long>
 
     @Query(
         "insert into anime_series(bangumi_id, title, title_original, cover, air_weekday, air_time, air_date, " +

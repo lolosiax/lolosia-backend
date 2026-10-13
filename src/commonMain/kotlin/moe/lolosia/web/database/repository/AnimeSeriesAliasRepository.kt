@@ -25,6 +25,14 @@ interface AnimeSeriesAliasRepository : CrudRepository<AnimeSeriesAliasEntity> {
     @Query("select * from anime_series_alias where series_id = :seriesId")
     suspend fun findAllBySeriesId(context: QueryExecutor, seriesId: Long): Result<List<AnimeSeriesAliasEntity>>
 
+    /** AI 匹配的检索工具用：别名命中关键词，限量返回。 */
+    @Query("select * from anime_series_alias where alias like :keyword limit :maxRows")
+    suspend fun findAllByAliasLike(
+        context: QueryExecutor,
+        keyword: String,
+        maxRows: Long,
+    ): Result<List<AnimeSeriesAliasEntity>>
+
     @Query(
         "insert into anime_series_alias(series_id, alias, alias_norm, source, created_at) " +
             "values (:seriesId, :alias, :aliasNorm, :source, :createdAt)"

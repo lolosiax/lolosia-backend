@@ -120,7 +120,7 @@ CREATE TABLE `anime_release` (
   `torrent_url` varchar(512) NULL DEFAULT NULL COMMENT 'enclosure 种子直链',
   `detail_url` varchar(512) NULL DEFAULT NULL COMMENT '详情页',
   `match_state` varchar(16) NOT NULL DEFAULT 'pending'
-      COMMENT 'pending / matched / unmatched / ignored',
+      COMMENT 'pending / matched / unmatched / ai-unmatched / ignored',
   `published_at` timestamp NULL DEFAULT NULL COMMENT 'pubDate，转 UTC',
   `created_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
@@ -193,6 +193,26 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 5. 未命中 → `match_state = 'unmatched'`；管理员可在界面**手动映射**（写 `series_id` 并追加一条
    `manual` 别名），形成**学习闭环**，同类标题下次自动命中。
 
+#### 4.2.1 AI 兜底匹配 `AnimeMatchAiService`（第二道闸）
+
+规则（§4.2）是**纯函数、零成本**的第一道闸；漏网的条目再交给大模型判一次。核心约束是**成本可控**
+—— 不能把整批发布与整张番剧表一次性喂进去。
+
+- **触发**：RSS 采集轮里规则未命中的新条目（`aiMatchEnabled` 时）自动兜底；另有右上角
+  「匹配所有未识别」（`POST /anime/release/rematch`）对全部 `unmatched` 手动跑一轮。
+- **发布分批**：每 `aiMatchBatchSize` 条一次请求（默认 20），逐批判定、逐批落库。
+- **候选先给窄的**：系统提示只塞**本季度在播**（`status = airing`）的候选表；表里没有合适的，
+  模型自己调 `search_series` 工具去整个库检索（命中标题 / 原名 / 别名，限量返回）。
+- **一次交卷**：全部判完调 `decide` 工具一次性交回（`i` = 条目序号，`seriesId` 省略 = 匹配不到）；
+  拦截器捕到 `decide` 即中断后续轮次（`ToolEvent.throwIt`）。
+- **成本闸门**：整轮累计 token 超 `aiMatchTokenLimit`（默认 20 万）就抛 `TokenBudgetExceeded`
+  **硬止损**（`onUsage` 回调里抛，直接中断请求），已判部分照常落库。`llm.apiKey` 为空或目录为空时直接跳过。
+- **落库口径**（「不再重复匹配」的关键）：命中 → `matched`；明确判「匹配不到」→ **`ai-unmatched`**
+  （下次不再被捞）；整批失败 / token 超限 → 原地不动（仍是 `unmatched`，下轮还能再试）。
+- **命中即补 SSE**：兜底命中的条目不重新入库，直接补一发与规则命中相同的推送（§5）。
+
+细节实现见 `service/anime/AnimeMatchAiService.kt`。
+
 ### 4.3 目录同步 `AnimeMetaService`
 
 - 按 `metaRefreshHours` 拉 `/calendar`，upsert `anime_series` 与别名，重建内存别名缓存。
@@ -258,10 +278,42 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 **部署**（[`backend/deploy/anime-relay/`](../deploy/anime-relay/)，纯 Python3，仅依赖 `msgpack` 包）：
 
 - `relay.py`：单文件服务；`relay.env.example` 为配置模板（`RELAY_TOKEN` 必填、`RELAY_DELAY_SECONDS`、
-  `RELAY_JITTER_SECONDS`、`RELAY_TARGET_URL`…），落盘到 `/srv/anime-relay/relay.env`（权限 600）。
+  `RELAY_JITTER_SECONDS`、`RELAY_TARGET_URL`、封面相关的 `RELAY_COVER_*`…），落盘到 `/srv/anime-relay/relay.env`（权限 600）。
+  封面落在 `RELAY_COVER_DIR`（默认 `/srv/anime-relay/covers`，需服务用户可写，见 §4.5）。
 - `anime-relay.service`：systemd 单元（`Restart=always` + `ProtectSystem=full` 等加固），部署到
   `/srv/anime-relay/`。变更后 `systemctl restart anime-relay`。
 - 最近一次成功结果会落盘到 `RELAY_STATE_FILE`（默认 `/srv/anime-relay/state.json`），**进程重启后仍能供数**。
+
+### 4.5 封面回源（Bangumi 图床墙内打不开）
+
+番剧封面在 Bangumi 图床（`lain.bgm.tv`），**墙内同样打不开** —— 若 `anime_series.cover` 直接存原始 URL，
+前端 `<img>` 一律加载失败。所以封面也要**回源到本地**（同 §4.4 一样，境外节点先备、墙内后端再取）：
+
+```
+中继（境外）：拿到日历时顺带把各番封面逐个下载到 /srv/anime-relay/covers/{id}.jpg（间隔 + 抖动，慢慢来）
+墙内后端 AnimeCoverService：周期问中继「已备好哪些」→ 分批把就绪的取回 → 落 work/resources/anime/cover/{id}.jpg
+                                                              → 把 anime_series.cover 改写成本地路径
+前端：<img src="/res/anime-cover?id={id}&size=256">（后端按需缩图，缓存在 work/.cache/anime/cover）
+```
+
+- 中继新增两个接口（都走 §4.4 的鉴权）：`GET /anime/bangumi/covers/status`（走自定义通道，返回
+  `data.{total, ready, ids}`）与 `GET /anime/bangumi/covers/{id}`（直接返回 JPEG 字节 —— 图片本身即不透明，
+  不必再套通道）。
+- 后端 [`AnimeCoverService`](../src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeCoverService.kt) 周期分批回源
+  （间隔 / 批量见 §7 的 `coverPollMinutes` / `coverBatchSize`）；**直连模式**下直接从原始 URL 下载，无需中继。
+- `cover` 落地后就长成 `/res/resources/anime/cover/{bangumiId}.jpg`；目录同步再跑时
+  [`AnimeMetaService`](../src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeMetaService.kt) 的 upsert
+  **不再把它覆盖回原始 URL**（按 `isLocalAnimeCover` 判定）。
+- 存储走既有 `FileStore`（根 = `work`）：`resources/anime/cover/{id}.jpg` ⇒ URL `/res/resources/anime/cover/{id}.jpg`。
+- **大图不下发**：Bangumi 原图动辄上千像素、单张数 MB，直接塞进 62×86 的卡片会把浏览器拖卡（实测整页滚动掉到 ~13 FPS）。
+  大图照旧留在 `work/resources/anime/cover/`，另由公开路由 `GET /res/anime-cover?id=&size=` 下发**缩略图**：
+  首次访问时按档位解码缩放成有损 WebP，落盘 `work/.cache/anime/cover/v1`（**复用文件管理器那套**
+  [`ThumbnailCache`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailCache.kt) + [`ThumbnailGenerator`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailGenerator.kt)，
+  档位 + SHA-1 分片 + 元数据），之后直接命中缓存。档位 / 质量见 §7 的 `coverThumbSizes` / `coverThumbQuality`。
+  路由与 `/res/resources` 一样**公开**（`<img>` 带不了鉴权头），且封面本就是从公开图床回源的。
+- 前端 `coverSrc(cover, size)`（[`web/src/api/anime.ts`](../../web/src/api/anime.ts)）把 `/res/resources/anime/cover/{id}.jpg`
+  映射成 `/res/anime-cover?id={id}&size={size}`（卡片 256、详情抽屉 512）；尚未回源的原始 URL 原样返回，
+  组件加载失败回退占位块。
 
 ## 5. 实时推送（复用既有 SSE）
 
@@ -297,6 +349,7 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 | POST | `/anime/subscription/delete` | `lolosia.anime.write` | 取消关注（软删） |
 | POST | `/anime/series/refresh` | `lolosia.anime.admin` | 手动同步 Bangumi 目录 |
 | POST | `/anime/release/map` | `lolosia.anime.admin` | 手动把一条发布映射到番剧（并可选加别名） |
+| POST | `/anime/release/rematch` | `lolosia.anime.admin` | 对全部「未识别」发布跑一轮 AI 兜底匹配（§4.2.1） |
 | POST | `/anime/feed/poll` | `lolosia.anime.admin` | 立即触发一次 RSS 拉取（排障用） |
 
 - 参数类型限 `String/Int/Long/Boolean/Uuid/枚举`；批量只能循环单条（§AGENTS）。
@@ -331,6 +384,16 @@ data class AnimeConfig(
     val bangumiRelayUrl: String = "",              // 如 http://<境外节点>:8790
     val bangumiRelayToken: String = "",            // 与中继 RELAY_TOKEN 一致，走 X-Relay-Token
     val bangumiRelayWaitSeconds: Int = 300,        // notify 后先等这么久再开始轮询结果
+    // 封面回源（见 §4.5）：把 Bangumi 图床的封面拉到本地 work/resources/anime/cover
+    val coverEnabled: Boolean = true,
+    val coverPollMinutes: Int = 30,                // 封面回源轮询间隔（分钟），下限 1
+    val coverBatchSize: Int = 30,                  // 每轮最多回源多少张（分批，避免猛拉）
+    val coverThumbSizes: List<Int> = listOf(256, 512), // 下发缩略图的档位（最长边），缓存在 work/.cache/anime/cover
+    val coverThumbQuality: Int = 80,               // 缩略图有损 WebP 质量（1~100）
+    // AI 兜底匹配（见 §4.2.1）：规则漏网的发布交给大模型再判一次
+    val aiMatchEnabled: Boolean = true,            // RSS 事件触发时是否自动兜底（手动「匹配所有未识别」不受此限）
+    val aiMatchBatchSize: Int = 20,                // 单批送进 AI 的发布条数上限（超出的分批）
+    val aiMatchTokenLimit: Long = 200_000,         // 单次匹配累计 token 上限，超了抛异常硬止损
 )
 ```
 
@@ -339,7 +402,11 @@ data class AnimeConfig(
 ```kotlin
 koin.get<AnimeFeedService>().start(this)     // RSS 轮询（未启用只记一条日志）
 koin.get<AnimeMetaService>().start(this)     // Bangumi 目录同步
+koin.get<AnimeCoverService>().start(this)    // 封面回源（见 §4.5）
 ```
+
+封面缩略图路由 `GET /res/anime-cover?id=&size=` 也在 `AppConfigure` 的 `routing { }` 里注册（与 `/res/resources`
+同一层，**在 `/api` 之外**、不经会话鉴权），见 §4.5。
 
 ## 8. 前端
 
@@ -376,9 +443,9 @@ src/commonMain/kotlin/moe/lolosia/web/
   dto/AnimeDtos.kt
   database/model/AnimeSeriesEntity.kt / AnimeSeriesAliasEntity.kt / AnimeReleaseEntity.kt / AnimeSubscriptionEntity.kt
   database/repository/AnimeSeriesRepository.kt / AnimeSeriesAliasRepository.kt / AnimeReleaseRepository.kt / AnimeSubscriptionRepository.kt
-  service/anime/AnimeFeedService.kt / AnimeMetaService.kt / AnimeSubscriptionService.kt
-               / AnimeRssParser.kt / AnimeTitleMatcher.kt
-  settings/AppSettings.kt（加 AnimeConfig）· resources/permissions.yaml（加三节点）· configuration/AppConfigure.kt（启两个服务）
+  service/anime/AnimeFeedService.kt / AnimeMetaService.kt / AnimeCoverService.kt / AnimeSubscriptionService.kt
+               / AnimeMatchAiService.kt / AnimeRssParser.kt / AnimeTitleMatcher.kt
+  settings/AppSettings.kt（加 AnimeConfig）· resources/permissions.yaml（加三节点）· configuration/AppConfigure.kt（启三个服务）
   util/xhrdata/XhrData.kt + nativeMain/…/util/xhrdata/XhrData.native.kt（自定义通道编解码，见 §4.4）
   api/package.kt（加 xhrRequest：走通道请求外部服务）
 src/nativeInterop/cinterop/msgpack.def · thirdparty/（msgpack-c 静态库，见 §4.4）

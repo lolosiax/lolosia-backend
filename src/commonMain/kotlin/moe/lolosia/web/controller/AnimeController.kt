@@ -12,6 +12,7 @@ import moe.lolosia.web.service.anime.ANIME_ADMIN
 import moe.lolosia.web.service.anime.ANIME_READ
 import moe.lolosia.web.service.anime.ANIME_WRITE
 import moe.lolosia.web.service.anime.AnimeFeedService
+import moe.lolosia.web.service.anime.AnimeMatchAiService
 import moe.lolosia.web.service.anime.AnimeMetaService
 import moe.lolosia.web.service.anime.AnimeQueryService
 import moe.lolosia.web.service.anime.AnimeSubscriptionService
@@ -101,6 +102,12 @@ object AnimeController {
         subs: AnimeSubscriptionService,
         @Body req: AnimeReleaseMapReq,
     ): MessageResult = subs.mapRelease(ctx, req)
+
+    /** 对全部「未识别」发布跑一轮 AI 匹配（匹配不到的会被标记，不再重复匹配）。 */
+    @POST("/anime/release/rematch")
+    @Permission(ANIME_ADMIN)
+    suspend fun rematchReleases(ctx: Context, ai: AnimeMatchAiService): MessageResult =
+        MessageResult("AI 匹配新增 ${ai.rematchAll(ctx.db)} 条")
 
     /** 手动同步 Bangumi 番剧目录（中继模式下只发通知，秒回；结果由后台任务取回）。 */
     @POST("/anime/series/refresh")

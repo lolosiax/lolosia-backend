@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 import moe.lolosia.web.api.*
 import moe.lolosia.web.database.Database
+import moe.lolosia.web.database.model.AnimeReleaseEntity
 import moe.lolosia.web.database.model.MATCH_MATCHED
 import moe.lolosia.web.database.model.MATCH_UNMATCHED
 import moe.lolosia.web.database.model.RELEASE_SOURCE_MIOBT
@@ -44,6 +45,7 @@ class AnimeFeedService(
     private val aliasRepo: AnimeSeriesAliasRepository,
     private val releaseRepo: AnimeReleaseRepository,
     private val subscriptionRepo: AnimeSubscriptionRepository,
+    private val aiMatch: AnimeMatchAiService,
 ) {
 
     private val log = Log.of("Anime")
@@ -84,6 +86,7 @@ class AnimeFeedService(
         val aliases = loadAliases(exec)
         val now = Clock.System.now()
         var inserted = 0
+        val unmatched = mutableListOf<Pair<AnimeRssParser.RawRelease, AnimeReleaseEntity>>()
 
         for (item in items) {
             if (categories.isNotEmpty() && item.category.isNotBlank() && item.category !in categories) continue
@@ -99,12 +102,33 @@ class AnimeFeedService(
             ).getOrElse { -1L }
             if (affected < 0) continue
             inserted++
-            if (seriesId != null) notify(exec, seriesId, item, episodeNo)
+            if (seriesId != null) {
+                notify(exec, seriesId, item, episodeNo)
+            } else if (config.aiMatchEnabled) {
+                // 规则漏掉的：够批之后一起交给 AI 兜底（见 aiFallback）
+                releaseRepo.findOneByGuid(exec, item.guid).getOrNull()?.let { unmatched += item to it }
+            }
         }
 
+        if (unmatched.isNotEmpty()) aiFallback(exec, unmatched)
         cleanup(exec)
         if (inserted > 0) log.info { "本轮新增 $inserted 条番组发布" }
         return inserted
+    }
+
+    /** 规则没命中的条目交给 AI 兜底（§4.2）；AI 也说没有就标记不再重试；命中则补一发 SSE。 */
+    private suspend fun aiFallback(
+        exec: QueryExecutor,
+        unmatched: List<Pair<AnimeRssParser.RawRelease, AnimeReleaseEntity>>,
+    ) {
+        runCatching { aiMatch.rematch(exec, unmatched.map { it.second }) }
+            .onSuccess { matched ->
+                for ((item, entity) in unmatched) {
+                    val seriesId = matched[entity.id] ?: continue
+                    notify(exec, seriesId, item, entity.episodeNo)
+                }
+            }
+            .onFailure { log.warn(it) { "AI 兜底匹配失败（${unmatched.size} 条）" } }
     }
 
     /** 命中关注则广播：订阅了该番、且（关注任意组 或 组名一致）的用户才收到。 */

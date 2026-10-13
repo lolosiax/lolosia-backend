@@ -359,5 +359,35 @@ data class AppSettings(
         val bangumiRelayToken: String = "",
         /** 通知中继后隔多久去取结果（秒）；中继侧还会再叠加自身延迟与抖动。 */
         val bangumiRelayWaitSeconds: Int = 300,
+        /**
+         * 是否把封面图**回源到本地**（`work/resources/anime/cover/{bangumiId}.jpg`）。
+         *
+         * Bangumi 图床在墙内打不开，中继模式下由境外节点先备好、后端再分批取回；直连模式直接取原图。
+         * 落盘后 `anime_series.cover` 会被改写成 `/res/resources/...`，前端再拼 `?webp` 取图。
+         */
+        val coverEnabled: Boolean = true,
+        /** 封面回源轮询间隔（分钟），下限 1（封面不急，低频即可）。 */
+        val coverPollMinutes: Int = 30,
+        /** 每轮回源下载的封面张数上限（分批，避免一次性猛拉）。 */
+        val coverBatchSize: Int = 30,
+        /**
+         * 封面**缩略图**档位（最长边像素）。原图经常上千像素、单张数 MB，直接下发到 62×86 的卡片上
+         * 会把浏览器拖卡；这里按档位缩一遍，缓存在 `work/.cache/anime/cover`，前端取缩略图（见 §4.5）。
+         */
+        val coverThumbSizes: List<Int> = listOf(256, 512),
+        /** 封面缩略图的有损 WebP 质量（1~100）。 */
+        val coverThumbQuality: Int = 80,
+        /**
+         * 规则匹配不上时是否自动交给大模型兜底（RSS 事件触发，见 `AnimeMatchAiService`）。
+         * 关掉只是不做**自动**兜底；右上角「匹配所有未识别」仍可手动触发。
+         */
+        val aiMatchEnabled: Boolean = true,
+        /** 单批送进 AI 的发布条数上限（超出的分批；控制单次提示词体量）。 */
+        val aiMatchBatchSize: Int = 20,
+        /**
+         * 单次 AI 匹配（含分批与检索轮次）的 token 总量上限，**硬止损**：累计用量一超就抛异常、
+         * 立刻收手，避免智能体反复检索把 token 烧穿。提示 + 补全一起算。
+         */
+        val aiMatchTokenLimit: Long = 200_000,
     )
 }

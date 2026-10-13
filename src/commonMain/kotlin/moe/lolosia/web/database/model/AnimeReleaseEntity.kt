@@ -10,8 +10,8 @@ import kotlin.time.Instant
  * 来自 MioBT 系发布站的 RSS；[guid] 是全局唯一键，跨轮去重靠它。[groupName] 是 RSS 的
  * `author`（发布组），[seriesId] 是匹配到的番（`null` = 未匹配）。
  *
- * [matchState]：`pending` 刚入库 / `matched` 已匹配 / `unmatched` 匹配失败（可人工映射）/
- * `ignored` 人工判噪音。[source] 预留换源（`miobt` / `mikan` …）。
+ * [matchState]：`pending` 刚入库 / `matched` 已匹配 / `unmatched` 匹配失败（可人工映射，可送 AI 兜底）/
+ * `ai-unmatched` AI 判定匹配不到（不再重复匹配）/ `ignored` 人工判噪音。[source] 预留换源（`miobt` / `mikan` …）。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -53,8 +53,16 @@ const val MATCH_PENDING: String = "pending"
 /** 匹配状态：已匹配到番剧。 */
 const val MATCH_MATCHED: String = "matched"
 
-/** 匹配状态：匹配失败（可人工映射）。 */
+/** 匹配状态：匹配失败（可人工映射 / 可再交给 AI 兜底）。 */
 const val MATCH_UNMATCHED: String = "unmatched"
+
+/**
+ * 匹配状态：**AI 判定匹配不到**（规则与 AI 都没命中）。
+ *
+ * 与 [MATCH_UNMATCHED] 分开，正是为了**不再重复送 AI**：只有 `unmatched` 会被 AI 兜底 /
+ * 「匹配所有未识别」捞取，`ai-unmatched` 直接跳过（见 `AnimeMatchAiService`）。
+ */
+const val MATCH_AI_UNMATCHED: String = "ai-unmatched"
 
 /** 匹配状态：人工判噪音。 */
 const val MATCH_IGNORED: String = "ignored"

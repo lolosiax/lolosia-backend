@@ -20,6 +20,8 @@ import moe.lolosia.web.generated.generatedRoutes
 import moe.lolosia.web.generated.registerInjectables
 import moe.lolosia.web.service.AppSettingService
 import moe.lolosia.web.service.WebpCache
+import moe.lolosia.web.service.anime.ANIME_COVER_THUMB_ROUTE
+import moe.lolosia.web.service.anime.AnimeCoverService
 import moe.lolosia.web.service.anime.AnimeFeedService
 import moe.lolosia.web.service.anime.AnimeMetaService
 import moe.lolosia.web.service.dav.DavLockManager
@@ -145,6 +147,21 @@ fun Application.configureApplication(koin: Koin) {
             }
         }
 
+        // 番剧封面**缩略图**：大图（`work/resources/anime/cover`）照样留着，这里按需从 `work/.cache/anime/cover`
+        // 生成/读取缩小的 WebP 再下发（见 AnimeCoverService / doc/anime-timetable-design.md §4.5）。
+        // 与 `/res/resources` 一样**公开** —— `<img>` 带不了鉴权头（同文件缩略图的签名直链思路，这里封面本就公开）。
+        val animeCovers = koin.get<AnimeCoverService>()
+        get(ANIME_COVER_THUMB_ROUTE) {
+            val id = call.request.queryParameters["id"]?.toLongOrNull()
+            val size = call.request.queryParameters["size"]?.toIntOrNull()
+            val bytes = id?.let { animeCovers.thumbnail(it, size) }
+            if (bytes == null) {
+                call.respond(HttpStatusCode.NotFound)
+            } else {
+                call.respondBytes(bytes, ContentType("image", "webp"))
+            }
+        }
+
         // WebDAV：把机械盘挂到配置的路径下（可选）。不走 `/api`，因此既不被会话鉴权拦截，
         // 响应也不会被 JSON 信封包装 —— Windows 的 WebDAV 客户端要的是原样状态码与 207 多状态 XML。
         // 「是否允许访问隐藏文件」是运行时可改的（设置面板 → sys_cache），所以按回调取值而不是定死
@@ -177,6 +194,8 @@ fun Application.configureApplication(koin: Koin) {
     // 番组表：MioBT 系发布站 RSS 采集（轮询 + 单实例）+ Bangumi 目录同步（由 anime.enabled 控制）
     koin.get<AnimeFeedService>().start(this)
     koin.get<AnimeMetaService>().start(this)
+    // 封面回源：把 Bangumi 图床的封面逐步拉到 work/resources/anime/cover（墙内取不到）
+    koin.get<AnimeCoverService>().start(this)
 
     // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用。
     // 连上后顺带把权限注册表声明的组继承同步进 sys_role.parent_id（幂等；规则不落库，见 service.permission），
