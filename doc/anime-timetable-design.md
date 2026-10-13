@@ -293,7 +293,7 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 中继（境外）：拿到日历时顺带把各番封面逐个下载到 /srv/anime-relay/covers/{id}.jpg（间隔 + 抖动，慢慢来）
 墙内后端 AnimeCoverService：周期问中继「已备好哪些」→ 分批把就绪的取回 → 落 work/resources/anime/cover/{id}.jpg
                                                               → 把 anime_series.cover 改写成本地路径
-前端：<img src="/res/anime-cover?id={id}&size=256">（后端按需缩图，缓存在 work/.cache/anime/cover）
+前端：<img src="/res/anime-cover?id={id}&size=256">（后端按需缩图，缓存在 anime.coverCacheRoot，默认 work/.cache/anime/cover）
 ```
 
 - 中继新增两个接口（都走 §4.4 的鉴权）：`GET /anime/bangumi/covers/status`（走自定义通道，返回
@@ -307,10 +307,13 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 - 存储走既有 `FileStore`（根 = `work`）：`resources/anime/cover/{id}.jpg` ⇒ URL `/res/resources/anime/cover/{id}.jpg`。
 - **大图不下发**：Bangumi 原图动辄上千像素、单张数 MB，直接塞进 62×86 的卡片会把浏览器拖卡（实测整页滚动掉到 ~13 FPS）。
   大图照旧留在 `work/resources/anime/cover/`，另由公开路由 `GET /res/anime-cover?id=&size=` 下发**缩略图**：
-  首次访问时按档位解码缩放成有损 WebP，落盘 `work/.cache/anime/cover/v1`（**复用文件管理器那套**
+  首次访问时按档位解码缩放成有损 WebP，落盘 `<coverCacheRoot>/v1`（**复用文件管理器那套**
   [`ThumbnailCache`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailCache.kt) + [`ThumbnailGenerator`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailGenerator.kt)，
-  档位 + SHA-1 分片 + 元数据），之后直接命中缓存。档位 / 质量见 §7 的 `coverThumbSizes` / `coverThumbQuality`。
+  档位 + SHA-1 分片 + 元数据），之后直接命中缓存。档位 / 质量 / 缓存根见 §7 的 `coverThumbSizes` / `coverThumbQuality` / `coverCacheRoot`。
   路由与 `/res/resources` 一样**公开**（`<img>` 带不了鉴权头），且封面本就是从公开图床回源的。
+- **缓存盘选择**：缩略图是**可再生**的写密集缓存，别放系统 SD 卡 —— tsp-1m 上 `/srv`（含 `work/`）就挂在 SD 卡上，
+  频繁小写入既拖慢系统又磨损卡。生产把 `anime.coverCacheRoot` 指到 `/mnt/hdd1/.cache/anime/cover`
+  （与文件管理器缩略图 `/mnt/hdd1/.cache/lolosia/thumb` 同盘），大容量盘更适合这种可丢弃缓存。
 - 前端 `coverSrc(cover, size)`（[`web/src/api/anime.ts`](../../web/src/api/anime.ts)）把 `/res/resources/anime/cover/{id}.jpg`
   映射成 `/res/anime-cover?id={id}&size={size}`（卡片 256、详情抽屉 512）；尚未回源的原始 URL 原样返回，
   组件加载失败回退占位块。
@@ -343,7 +346,7 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 | GET | `/anime/timetable` | `lolosia.anime.read` | 番组表：按 `air_weekday` 分组 + 是否已关注；参数 `weekday` / `season` |
 | GET | `/anime/series/{id}` | `lolosia.anime.read` | 番详情：别名、各发布组最近更新 |
 | GET | `/anime/search` | `lolosia.anime.read` | 关键词搜番（用于关注），参数 `q` |
-| GET | `/anime/releases` | `lolosia.anime.read` | 更新历史；参数 `seriesId` / `groupName` / `limit` |
+| GET | `/anime/releases` | `lolosia.anime.read` | 更新历史（分页，返回 `{ items, total }`）；参数 `seriesId` / `groupName` / `offset` / `limit` |
 | GET | `/anime/subscriptions` | `lolosia.anime.read` | 我的关注 |
 | POST | `/anime/subscription/save` | `lolosia.anime.write` | 新建 / 更新关注（`seriesId`, `groupName`） |
 | POST | `/anime/subscription/delete` | `lolosia.anime.write` | 取消关注（软删） |
@@ -388,8 +391,9 @@ data class AnimeConfig(
     val coverEnabled: Boolean = true,
     val coverPollMinutes: Int = 30,                // 封面回源轮询间隔（分钟），下限 1
     val coverBatchSize: Int = 30,                  // 每轮最多回源多少张（分批，避免猛拉）
-    val coverThumbSizes: List<Int> = listOf(256, 512), // 下发缩略图的档位（最长边），缓存在 work/.cache/anime/cover
+    val coverThumbSizes: List<Int> = listOf(256, 512), // 下发缩略图的档位（最长边），缓存在 coverCacheRoot
     val coverThumbQuality: Int = 80,               // 缩略图有损 WebP 质量（1~100）
+    val coverCacheRoot: String = "work/.cache/anime/cover", // 缩略图缓存根目录；生产指到大容量盘（如 /mnt/hdd1/.cache/anime/cover）
     // AI 兜底匹配（见 §4.2.1）：规则漏网的发布交给大模型再判一次
     val aiMatchEnabled: Boolean = true,            // RSS 事件触发时是否自动兜底（手动「匹配所有未识别」不受此限）
     val aiMatchBatchSize: Int = 20,                // 单批送进 AI 的发布条数上限（超出的分批）

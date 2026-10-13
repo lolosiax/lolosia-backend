@@ -66,6 +66,13 @@ data class AnimeReleaseDto(
     val publishedAt: Long = 0,
 )
 
+/** 更新历史的一页：`items` 是本页条目，`total` 是当前过滤条件下的总条数（翻页控件用）。 */
+@Serializable
+data class AnimeReleasePageDto(
+    val items: List<AnimeReleaseDto> = emptyList(),
+    val total: Long = 0,
+)
+
 /** 一条关注。 */
 @Serializable
 data class AnimeSubscriptionDto(

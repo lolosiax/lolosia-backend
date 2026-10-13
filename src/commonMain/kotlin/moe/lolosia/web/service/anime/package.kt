@@ -55,14 +55,12 @@ const val ANIME_COVER_URL_PREFIX: String = "/res/resources/anime/cover/"
 internal fun isLocalAnimeCover(cover: String?): Boolean = cover?.startsWith(ANIME_COVER_URL_PREFIX) == true
 
 /**
- * 封面**缩略图**缓存的根目录（`FileStore`/okio 相对路径，根 = 启动目录）。
+ * 封面**缩略图**缓存版本：算法 / 规格变更时递增，旧缓存整体失效（目录名带版本）。
  *
+ * 缓存的**根目录**由 `anime.coverCacheRoot` 配置（默认 `work/.cache/anime/cover`，生产可指到大容量盘）；
  * 大图仍留在 [ANIME_COVER_STORE_DIR]，这里只缓存缩小的 WebP（档位 + 元数据，键 = SHA-1），
  * 复用文件管理器那套 `ThumbnailCache` 机制（见 `service/files/ThumbnailCache.kt`）。
  */
-const val ANIME_COVER_CACHE_ROOT: String = "work/.cache/anime/cover"
-
-/** 封面缩略图缓存版本：算法/规格变更时递增，旧缓存整体失效（目录名带版本）。 */
 const val ANIME_COVER_CACHE_VERSION: Int = 1
 
 /** 封面缩略图下发路由（公开，同 `/res/resources`：`<img>` 没法带鉴权头）。`?id={bangumiId}&size={档位}`。 */

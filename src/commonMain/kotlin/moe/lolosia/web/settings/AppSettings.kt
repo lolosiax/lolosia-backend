@@ -372,11 +372,16 @@ data class AppSettings(
         val coverBatchSize: Int = 30,
         /**
          * 封面**缩略图**档位（最长边像素）。原图经常上千像素、单张数 MB，直接下发到 62×86 的卡片上
-         * 会把浏览器拖卡；这里按档位缩一遍，缓存在 `work/.cache/anime/cover`，前端取缩略图（见 §4.5）。
+         * 会把浏览器拖卡；这里按档位缩一遍，缓存在 [coverCacheRoot]，前端取缩略图（见 §4.5）。
          */
         val coverThumbSizes: List<Int> = listOf(256, 512),
         /** 封面缩略图的有损 WebP 质量（1~100）。 */
         val coverThumbQuality: Int = 80,
+        /**
+         * 封面缩略图缓存的根目录（相对启动目录或绝对路径）。默认 `work/.cache/anime/cover`；
+         * 生产建议指向大容量盘（如 tsp-1m 的 `/mnt/hdd1/.cache/anime/cover`），别往系统 SD 卡上写。
+         */
+        val coverCacheRoot: String = "work/.cache/anime/cover",
         /**
          * 规则匹配不上时是否自动交给大模型兜底（RSS 事件触发，见 `AnimeMatchAiService`）。
          * 关掉只是不做**自动**兜底；右上角「匹配所有未识别」仍可手动触发。

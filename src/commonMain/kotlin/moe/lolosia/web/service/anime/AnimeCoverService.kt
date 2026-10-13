@@ -52,7 +52,7 @@ class AnimeCoverService(
 
     /** 封面缩略图缓存（复用文件管理器那套：档位 + SHA-1 分片 + 元数据，见 [ThumbnailCache]）。 */
     private val thumbs: ThumbnailCache = ThumbnailCache(
-        root = "$ANIME_COVER_CACHE_ROOT/v$ANIME_COVER_CACHE_VERSION",
+        root = "${config.coverCacheRoot}/v$ANIME_COVER_CACHE_VERSION",
         sizes = config.coverThumbSizes.filter { it > 0 }.ifEmpty { listOf(256) },
     )
 

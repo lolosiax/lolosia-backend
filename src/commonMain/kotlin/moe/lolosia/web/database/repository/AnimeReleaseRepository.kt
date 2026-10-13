@@ -29,26 +29,44 @@ interface AnimeReleaseRepository : CrudRepository<AnimeReleaseEntity> {
     @Query("select * from anime_release where guid = :guid")
     suspend fun findOneByGuid(context: QueryExecutor, guid: String): Result<AnimeReleaseEntity?>
 
-    @Query("select * from anime_release order by published_at desc limit :maxRows")
-    suspend fun findAllByPublishedDesc(context: QueryExecutor, maxRows: Long): Result<List<AnimeReleaseEntity>>
+    @Query("select * from anime_release order by published_at desc limit :limit offset :offset")
+    suspend fun findAllByPublishedDesc(context: QueryExecutor, limit: Int, offset: Int): Result<List<AnimeReleaseEntity>>
 
-    @Query("select * from anime_release where series_id = :seriesId order by published_at desc limit :maxRows")
+    @Query(
+        "select * from anime_release where series_id = :seriesId " +
+            "order by published_at desc limit :limit offset :offset"
+    )
     suspend fun findAllBySeriesId(
         context: QueryExecutor,
         seriesId: Long,
-        maxRows: Long,
+        limit: Int,
+        offset: Int,
     ): Result<List<AnimeReleaseEntity>>
 
     @Query(
         "select * from anime_release where series_id = :seriesId and group_name = :groupName " +
-            "order by published_at desc limit :maxRows"
+            "order by published_at desc limit :limit offset :offset"
     )
     suspend fun findAllBySeriesIdAndGroupName(
         context: QueryExecutor,
         seriesId: Long,
         groupName: String,
-        maxRows: Long,
+        limit: Int,
+        offset: Int,
     ): Result<List<AnimeReleaseEntity>>
+
+    @Query("select count(*) from anime_release")
+    suspend fun countByAll(context: QueryExecutor): Result<Long>
+
+    @Query("select count(*) from anime_release where series_id = :seriesId")
+    suspend fun countBySeriesId(context: QueryExecutor, seriesId: Long): Result<Long>
+
+    @Query("select count(*) from anime_release where series_id = :seriesId and group_name = :groupName")
+    suspend fun countBySeriesIdAndGroupName(
+        context: QueryExecutor,
+        seriesId: Long,
+        groupName: String,
+    ): Result<Long>
 
     @Query("select * from anime_release where match_state = :matchState order by published_at desc limit :maxRows")
     suspend fun findAllByMatchState(

@@ -6,6 +6,7 @@ import moe.lolosia.web.database.model.AnimeSeriesEntity
 import moe.lolosia.web.database.repository.*
 import moe.lolosia.web.dto.AnimeGroupDto
 import moe.lolosia.web.dto.AnimeReleaseDto
+import moe.lolosia.web.dto.AnimeReleasePageDto
 import moe.lolosia.web.dto.AnimeSeriesDetailDto
 import moe.lolosia.web.dto.AnimeSeriesDto
 import moe.lolosia.web.dto.AnimeSubscriptionDto
@@ -52,7 +53,7 @@ class AnimeQueryService(
         val exec = ctx.db
         val row = seriesRepo.findOneById(exec, id).getOrNull() ?: throw ApiException(404, "番剧不存在")
         val dto = decorate(ctx, exec, listOf(row)).first()
-        val releases = releaseRepo.findAllBySeriesId(exec, id, DETAIL_RELEASE_LIMIT).getOrElse { emptyList() }
+        val releases = releaseRepo.findAllBySeriesId(exec, id, DETAIL_RELEASE_LIMIT, 0).getOrElse { emptyList() }
         val groups = releases.groupBy { it.groupName }.map { (group, list) ->
             AnimeGroupDto(
                 groupName = group,
@@ -64,16 +65,28 @@ class AnimeQueryService(
         return AnimeSeriesDetailDto(dto, groups)
     }
 
-    /** 更新历史：按番 / 发布组过滤；都不给则取全站最新。 */
-    suspend fun releases(ctx: Context, seriesId: Long?, groupName: String?, limit: Int?): List<AnimeReleaseDto> {
+    /** 更新历史：按番 / 发布组过滤并分页；都不给则取全站最新。 */
+    suspend fun releases(
+        ctx: Context,
+        seriesId: Long?,
+        groupName: String?,
+        offset: Int?,
+        limit: Int?,
+    ): AnimeReleasePageDto {
         val exec = ctx.db
-        val maxRows = (limit ?: DEFAULT_RELEASE_LIMIT).coerceIn(1, MAX_RELEASE_LIMIT).toLong()
+        val pageSize = (limit ?: DEFAULT_RELEASE_LIMIT).coerceIn(1, MAX_RELEASE_LIMIT)
+        val start = (offset ?: 0).coerceAtLeast(0)
         val rows = when {
-            seriesId == null -> releaseRepo.findAllByPublishedDesc(exec, maxRows)
-            groupName.isNullOrBlank() -> releaseRepo.findAllBySeriesId(exec, seriesId, maxRows)
-            else -> releaseRepo.findAllBySeriesIdAndGroupName(exec, seriesId, groupName, maxRows)
+            seriesId == null -> releaseRepo.findAllByPublishedDesc(exec, pageSize, start)
+            groupName.isNullOrBlank() -> releaseRepo.findAllBySeriesId(exec, seriesId, pageSize, start)
+            else -> releaseRepo.findAllBySeriesIdAndGroupName(exec, seriesId, groupName, pageSize, start)
         }.getOrElse { throw ApiException(500, "读取更新历史失败") }
-        return toReleaseDtos(exec, rows)
+        val total = when {
+            seriesId == null -> releaseRepo.countByAll(exec)
+            groupName.isNullOrBlank() -> releaseRepo.countBySeriesId(exec, seriesId)
+            else -> releaseRepo.countBySeriesIdAndGroupName(exec, seriesId, groupName)
+        }.getOrElse { 0L }
+        return AnimeReleasePageDto(toReleaseDtos(exec, rows), total)
     }
 
     /** 我的关注。 */
@@ -144,7 +157,7 @@ class AnimeQueryService(
     )
 
     private companion object {
-        const val DETAIL_RELEASE_LIMIT: Long = 500L
+        const val DETAIL_RELEASE_LIMIT: Int = 500
         const val DEFAULT_RELEASE_LIMIT: Int = 100
         const val MAX_RELEASE_LIMIT: Int = 500
     }

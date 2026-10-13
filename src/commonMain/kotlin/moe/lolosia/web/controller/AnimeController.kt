@@ -1,7 +1,7 @@
 package moe.lolosia.web.controller
 
-import moe.lolosia.web.dto.AnimeReleaseDto
 import moe.lolosia.web.dto.AnimeReleaseMapReq
+import moe.lolosia.web.dto.AnimeReleasePageDto
 import moe.lolosia.web.dto.AnimeSeriesDetailDto
 import moe.lolosia.web.dto.AnimeSeriesDto
 import moe.lolosia.web.dto.AnimeSubscriptionDeleteReq
@@ -59,7 +59,7 @@ object AnimeController {
         @Path id: Long,
     ): AnimeSeriesDetailDto = query.seriesDetail(ctx, id)
 
-    /** 更新历史。 */
+    /** 更新历史（分页）。 */
     @GET("/anime/releases")
     @Permission(ANIME_READ)
     suspend fun releases(
@@ -67,8 +67,9 @@ object AnimeController {
         query: AnimeQueryService,
         @Query seriesId: Long?,
         @Query groupName: String?,
+        @Query offset: Int?,
         @Query limit: Int?,
-    ): List<AnimeReleaseDto> = query.releases(ctx, seriesId, groupName, limit)
+    ): AnimeReleasePageDto = query.releases(ctx, seriesId, groupName, offset, limit)
 
     /** 我的关注。 */
     @GET("/anime/subscriptions")

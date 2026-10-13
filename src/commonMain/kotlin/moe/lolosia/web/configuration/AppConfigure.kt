@@ -147,8 +147,8 @@ fun Application.configureApplication(koin: Koin) {
             }
         }
 
-        // 番剧封面**缩略图**：大图（`work/resources/anime/cover`）照样留着，这里按需从 `work/.cache/anime/cover`
-        // 生成/读取缩小的 WebP 再下发（见 AnimeCoverService / doc/anime-timetable-design.md §4.5）。
+        // 番剧封面**缩略图**：大图（`work/resources/anime/cover`）照样留着，这里按需从缓存根目录
+        // （`anime.coverCacheRoot`）生成/读取缩小的 WebP 再下发（见 AnimeCoverService / doc §4.5）。
         // 与 `/res/resources` 一样**公开** —— `<img>` 带不了鉴权头（同文件缩略图的签名直链思路，这里封面本就公开）。
         val animeCovers = koin.get<AnimeCoverService>()
         get(ANIME_COVER_THUMB_ROUTE) {
