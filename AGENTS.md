@@ -11,7 +11,7 @@
 - **Kotlin/Native 全栈模板**：Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB。
 - 目标平台有 **`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**没有 JVM 目标**。两个 linux 目标共享 `src/linuxMain/` 下的平台实现。
 - 产物是**单个原生可执行文件**：前端产物、SQL、默认配置都以 `classpath.zip` 形式内嵌，无 fat jar、无外部资源目录。
-- 图像编解码（WebP / PNG / JPEG / GIF）走**预编译的 C 静态库**，随可执行文件静态链入；库产物随仓库提交，日常构建不需要 C 工具链（`thirdparty/`，见 §7 / §10）。
+- 图像编解码（WebP / PNG / JPEG / GIF）与自定义请求通道用的 **msgpack**（msgpack-c）走**预编译的 C 静态库**，随可执行文件静态链入；库产物随仓库提交，日常构建不需要 C 工具链（`thirdparty/`，见 §7 / §10）。
 - 根包 **`moe.lolosia.web`**；唯一的独立 Gradle 模块是 `:router-ksp`（插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。
 
 ## 1. 代码风格
@@ -181,13 +181,14 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - `files/list` 的条目还带索引侧字段 `rating` / `indexed` / `takenAt` / `sample` / `tags`（见 [media-index-design.md](doc/media-index-design.md) §11.1）：
     `tags` **只给 `namespace` + `name`**（够网格标心 `feature:喜欢`、目录 `feature:` 分组开关与将来的标签分组 / 筛选）——
     否决位与来源仍只在 `media/detail` 给全。**别往列表里塞标签正文**，列目录要能扛住大目录。
-- **第三方 C 库**（图像编解码）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `src/nativeInterop/cinterop/*.def`。
+- **第三方 C 库**（图像编解码 + 通道用的 msgpack-c）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `src/nativeInterop/cinterop/*.def`。
   - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/build-libs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
-  - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` 收发，不把 C 指针泄漏给调用方。
+  - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` / `JsonElement` 收发，不把 C 指针泄漏给调用方（msgpack 的门面是 [`util/xhrdata/`](src/commonMain/kotlin/moe/lolosia/web/util/xhrdata/XhrData.kt)，见 §4.4 自定义请求通道）。
   - 一律选**不依赖 `setjmp/longjmp` 的接口**（libpng 用 `png_image` 简化接口、libjpeg-turbo 用 `tj3*`、libwebp / giflib 本身回错误码），坏图只回 `null`，不会把进程带走。
   - ⚠️ C 库只保留调用期间有效的裸指针（libpng 的 `png_image_begin_read_from_memory` 就是典型）：`usePinned` 必须覆盖到真正的解码调用为止，中途解 pin 只会得到「不报错但像素全错」。
   - ⚠️ `size_t` 三个目标都是 64 位可安全传递；`unsigned long` 不是（mingw 32 位 / linux 64 位），跨目标代码别写出具体宽度。
   - ⚠️ libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档，`build-libs.ps1` 已把它合并回单个 `libwebp.a`：K/N 的 ELF 链接（ld.gold）按归档逐个解析，分成两个归档时 `SharpYuv*` 会解析不到（arm64 / x64 都失败）。
+  - ⚠️ **msgpack-c**：`msgpack_unpacked_init` / `msgpack_unpacked_destroy` 是 `static inline`，**cinterop 不导出** —— 用 `alloc<msgpack_unpacked>()`（零初始化）替代 init，收尾手动 `msgpack_zone_free` 替代 destroy。另外 `msgpack_object_kv` 的字段名 `val` 与 Kotlin 关键字撞名，访问要写反引号 `` `val` ``；`CPointer` 的 `get` / `plus` 等运算符需显式 `import kotlinx.cinterop.*`。
 - **前端路径不许写死**：用 `generateConstants` 产出的 `VITE_DEFAULT`（值 = viteJar 的 `contextPath`）拼路由。
 - **配置只有一个入口** [`settings/AppSettings.kt`](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable`）。
   优先级（低→高，**按字段深合并**）：数据类默认值 < 内嵌 `application.json` < 磁盘 `application.json` < 环境变量 < 命令行端口。
@@ -262,8 +263,8 @@ src/commonMain/kotlin/moe/lolosia/web/
 src/commonMain/resources/       application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ static/home/ / hello.txt
 src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspath(Image) / EmptyClasspath、
                                 installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*、
-                                util/image/Image.kt(actual)、service/files/ThumbnailGenerator.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
-src/nativeInterop/cinterop/     第三方 C 库的绑定定义（zlib / png / webp / jpeg / gif 各一个 .def）
+                                util/image/Image.kt(actual)、util/xhrdata/（msgpack+gzip 自定义通道编解码）、service/files/ThumbnailGenerator.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
+src/nativeInterop/cinterop/     第三方 C 库的绑定定义（zlib / png / webp / jpeg / gif / msgpack 各一个 .def）
 src/linuxMain/kotlin/…/          两个 linux 目标共享的平台实现（.linux.kt）：
                                 api/ApiClient / classpath/EmbeddedClasspath / fs/Mkdir / proc/Shell
 src/mingwX64Main/kotlin/…/      Windows 平台实现（.mingw.kt）：ApiClient / EmbeddedClasspath / Mkdir / Shell（无入口）
@@ -273,6 +274,7 @@ router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller�
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、
                                 NativeClasspath.kt（zip 合并 + windres/objcopy 嵌入 + 链接参数）、extension/
 sql/                            建表脚本（含 sys_role.parent_id 与权限规则两表、媒体库各表与 folder_tag / media_location_region 等；无种子规则 —— 默认值在 permissions.yaml）+ migrate_rbac_groups.sql（历史库一次性迁移）
+deploy/anime-relay/             境外取数中继（relay.py + anime-relay.service + relay.env.example，纯 Python3 + msgpack 包；见 doc/anime-timetable-design.md §4.4）
 ```
 
 ## 11. 深度材料
@@ -283,5 +285,6 @@ sql/                            建表脚本（含 sys_role.parent_id 与权限�
 | [doc/rbac-design.md](doc/rbac-design.md) | RBAC 权限体系：组 + 点分权限（`±通配`）+ 用户直授 + `@Permission` 的设计、判定口径与已实现落点 |
 | [doc/media-index-design.md](doc/media-index-design.md) | 媒体库索引：文件身份（path / quick_id / sha256 三层）、标签体系与来源优先级、EXIF 等元数据抽取、评级与 NSFW 遮罩（直链签名折 flags）、embedding 与语义检索 |
 | [doc/footprint-map-design.md](doc/footprint-map-design.md) | 足迹地图：带 GPS / 拍摄时间的照片聚成热点与拍摄会话、人工画圈命名区域；聚类算法（DBSCAN + 相邻间隔切段）、接口契约、区域表、地图底图（高德）选型与替代方案 |
+| [doc/anime-timetable-design.md](doc/anime-timetable-design.md) | 番组表：订阅 MioBT 系发布站 RSS（发布事件）+ Bangumi API（番剧目录 / 播出时间），按 (番剧, 发布组) 关注；标题匹配与手动映射学习闭环、`anime_*` 四表、经既有 SSE 通道实时推送 |
 | [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 / 工程形态（运行层面） |
 | [doc/native-migration-plan.md](doc/native-migration-plan.md) | JVM → Kotlin/Native 迁移详设与实测记录（历史） |

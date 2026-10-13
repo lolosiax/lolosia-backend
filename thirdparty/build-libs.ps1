@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    一次性构建 thirdparty/ 下的第三方原生静态库（zlib / libpng / libwebp / libjpeg-turbo / giflib）。
+    一次性构建 thirdparty/ 下的第三方原生静态库（zlib / libpng / libwebp / libjpeg-turbo / giflib / msgpack-c）。
 
 .DESCRIPTION
     只在需要新增或升级库时手动跑一次；产物（.a + 公共头文件）提交入库，
@@ -16,7 +16,8 @@
     这些 sysroot 与 Kotlin/Native 链接期的完全一致，因此产物的 ABI/glibc 版本天然对齐。
 
     zlib / libpng / libwebp / libjpeg-turbo 用各自上游的 CMake 构建（避免手工维护 config.h 与
-    SIMD 源文件清单）；giflib 只有 autotools，按其 Makefile 的 SOURCES 直接编译归档。
+    SIMD 源文件清单）；giflib 只有 autotools，按其 Makefile 的 SOURCES 直接编译归档；
+    msgpack-c 的 C 库也只编译 src/*.c，其 cmake 模板生成的 sysdep.h / pack_template.h 就地替换字节序宏后产出。
 
 .PARAMETER Targets
     要构建的目标，默认三个都构建。
@@ -59,6 +60,8 @@ $sources = @(
     @{ Name = 'libwebp';       Version = '1.6.0';  Url = 'https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz' }
     @{ Name = 'libjpeg-turbo'; Version = '3.1.0';  Url = 'https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.0/libjpeg-turbo-3.1.0.tar.gz' }
     @{ Name = 'giflib';        Version = '5.2.2';  Url = 'https://deb.debian.org/debian/pool/main/g/giflib/giflib_5.2.2.orig.tar.gz' }
+    # msgpack-c 的 C 库（tag 前缀 c-）；sysdep.h / pack_template.h 由 cmake 模板生成，见下文手工替换
+    @{ Name = 'msgpack-c';     Version = '7.0.2';  Url = 'https://github.com/msgpack/msgpack-c/releases/download/c-7.0.2/msgpack-c-7.0.2.tar.gz' }
 )
 
 # ------------------------------------------------ 1. 定位 Kotlin/Native 工具链
@@ -181,16 +184,19 @@ function Invoke-CCompile {
         [string]$Label,
         [string]$Target,
         [string]$OutDir,
-        [string[]]$SourceFiles
+        [string[]]$SourceFiles,
+        [string[]]$IncludeDirs = @()
     )
     $d = $targetDefs[$Target]
     Info "clang 编译        $Label [$Target]"
     New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    $incArgs = @()
+    foreach ($inc in $IncludeDirs) { $incArgs += "-I$inc" }
     $objects = @()
     foreach ($src in $SourceFiles) {
         $obj = Join-Path $OutDir ((Split-Path $src -Leaf) -replace '\.c$', '.o')
         & $clang "--target=$($d.Triple)" "--sysroot=$($d.Sysroot)" `
-            -O2 -fPIC -fno-strict-aliasing -std=gnu99 -Wall -c $src -o $obj
+            -O2 -fPIC -fno-strict-aliasing -std=gnu99 -Wall @incArgs -c $src -o $obj
         if ($LASTEXITCODE -ne 0) { Fail "编译失败：$src [$Target]" }
         $objects += $obj
     }
@@ -213,6 +219,19 @@ $pngTree = Get-Tree "libpng-1.6.44"
 $webpTree = Get-Tree "libwebp-1.6.0"
 $jpegTree = Get-Tree "libjpeg-turbo-3.1.0"
 $gifTree = Get-Tree "giflib-5.2.2"
+$msgpackTree = Get-Tree "msgpack-c-7.0.2"
+
+# msgpack-c 的 sysdep.h / pack_template.h 由 cmake 的 configure_file 生成，只有字节序宏要替换；
+# 三个目标都是小端，直接写死 LITTLE=1 / BIG=0（等价于 TEST_BIG_ENDIAN 的结果），省掉 cmake。
+$msgpackInclude = Join-Path $msgpackTree 'include'
+foreach ($tpl in @(
+    @{ In = 'sysdep.h.in';        Out = 'sysdep.h' },
+    @{ In = 'pack_template.h.in'; Out = 'pack_template.h' }
+)) {
+    $content = Get-Content (Join-Path $msgpackTree "cmake/$($tpl.In)") -Raw
+    $content = $content.Replace('@MSGPACK_ENDIAN_BIG_BYTE@', '0').Replace('@MSGPACK_ENDIAN_LITTLE_BYTE@', '1')
+    Set-Content -Path (Join-Path $msgpackInclude "msgpack/$($tpl.Out)") -Value $content -NoNewline -Encoding ascii
+}
 
 foreach ($target in $Targets) {
     Write-Host ''
@@ -311,6 +330,19 @@ foreach ($target in $Targets) {
     & $llvmAr rcs $gifLib @gifObjects
     if ($LASTEXITCODE -ne 0) { Fail "归档失败：libgif.a [$target]" }
     Write-Host "    -> libgif.a ($([math]::Round((Get-Item $gifLib).Length / 1KB)) KB)"
+
+    # ---- msgpack-c（同样无 CMake：clang 直接编译 src/*.c 归档；配置头已在上文生成）----
+    $msgpackSources = @('objectc.c', 'unpack.c', 'version.c', 'vrefbuffer.c', 'zone.c') |
+        ForEach-Object { Join-Path $msgpackTree "src/$_" }
+    $msgpackObjDir = Join-Path $cmakeDir "$target/msgpack-c"
+    $msgpackObjects = Invoke-CCompile -Label 'msgpack-c' -Target $target -OutDir $msgpackObjDir `
+        -SourceFiles $msgpackSources -IncludeDirs @($msgpackInclude)
+    $msgpackLib = Join-Path $outDir 'libmsgpackc.a'
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    if (Test-Path $msgpackLib) { Remove-Item $msgpackLib -Force }
+    & $llvmAr rcs $msgpackLib @msgpackObjects
+    if ($LASTEXITCODE -ne 0) { Fail "归档失败：libmsgpackc.a [$target]" }
+    Write-Host "    -> libmsgpackc.a ($([math]::Round((Get-Item $msgpackLib).Length / 1KB)) KB)"
 }
 
 # ---------------------------------------------------------------- 5. 公共头文件
@@ -334,6 +366,14 @@ foreach ($h in $headerMap) {
     Copy-Item $h.From $dest -Force
     Write-Host "    -> $($h.To)"
 }
+
+# msgpack-c 头文件较多（msgpack.h + msgpack/ 子树，含配置生成的 sysdep.h / pack_template.h），整目录拷贝
+$msgpackDest = Join-Path $incOut 'msgpack'
+if (Test-Path $msgpackDest) { Remove-Item $msgpackDest -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $msgpackDest | Out-Null
+Copy-Item (Join-Path $msgpackInclude 'msgpack.h') $incOut -Force
+Copy-Item (Join-Path $msgpackInclude 'msgpack/*') $msgpackDest -Recurse -Force
+Write-Host '    -> msgpack.h + msgpack/*'
 
 Write-Host ''
 Info '完成。产物：'

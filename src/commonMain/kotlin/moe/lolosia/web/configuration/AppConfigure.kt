@@ -20,6 +20,8 @@ import moe.lolosia.web.generated.generatedRoutes
 import moe.lolosia.web.generated.registerInjectables
 import moe.lolosia.web.service.AppSettingService
 import moe.lolosia.web.service.WebpCache
+import moe.lolosia.web.service.anime.AnimeFeedService
+import moe.lolosia.web.service.anime.AnimeMetaService
 import moe.lolosia.web.service.dav.DavLockManager
 import moe.lolosia.web.service.dav.DavStore
 import moe.lolosia.web.service.dashboard.AccessStatService
@@ -171,6 +173,10 @@ fun Application.configureApplication(koin: Koin) {
     koin.get<SystemMetricService>().start()
     koin.get<AccessStatService>().start()
     koin.get<TokenUsageService>().start()
+
+    // 番组表：MioBT 系发布站 RSS 采集（轮询 + 单实例）+ Bangumi 目录同步（由 anime.enabled 控制）
+    koin.get<AnimeFeedService>().start(this)
+    koin.get<AnimeMetaService>().start(this)
 
     // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用。
     // 连上后顺带把权限注册表声明的组继承同步进 sys_role.parent_id（幂等；规则不落库，见 service.permission），

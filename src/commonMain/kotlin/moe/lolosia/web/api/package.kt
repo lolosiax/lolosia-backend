@@ -21,6 +21,7 @@ import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.Logger
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.sse.EventSource
+import moe.lolosia.web.util.xhrdata.decodeXhrData
 import kotlin.concurrent.Volatile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -247,6 +248,52 @@ internal suspend fun bytes(
     if (!response.status.isSuccess()) respHandleException(response, baseUrl, url)
     return response.bodyAsChannel().asFlow()
         .onCompletion { if (!noLog) afterWebRequest(null, baseUrl, url) }
+}
+
+/**
+ * 走**自定义请求通道**（`application/vnd.lolosia.xhr.data`：msgpack + gzip）请求外部服务，
+ * 解出信封后返回 `data`。用于境外中继这类「不愿暴露明文 JSON 特征」的链路（见
+ * `doc/anime-timetable-design.md` §4.4）。
+ *
+ * 非 2xx 或信封 `code` 非 0/200 时抛 [ApiException]（优先取通道响应里的 `msg`）。
+ */
+suspend fun xhrRequest(
+    method: HttpMethod,
+    baseUrl: String,
+    url: String,
+    body: JsonElement? = null,
+    headers: Map<String, String> = emptyMap(),
+    timeout: Duration = DEFAULT_TIMEOUT,
+    noLog: Boolean = false,
+): JsonElement {
+    val response = send(method, baseUrl, url, body, null, headers, null)
+    if (!noLog) beforeWebRequest(body, baseUrl, url)
+    return withTimeout(timeout) {
+        val raw = response.readAllBytes()
+        val element = runCatching { decodeXhrData(raw) }.getOrElse {
+            throw ApiException(502, "中继响应不是通道格式：${raw.decodeToString().s200()}")
+        }
+        val env = element as? JsonObject ?: throw ApiException(502, "中继通道响应不是 JSON 对象")
+        val code = (env["code"] as? JsonPrimitive)?.intOrNull ?: 0
+        val msg = (env["msg"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        if (!noLog) afterWebRequest(env.toString(), baseUrl, url)
+        if (!response.status.isSuccess() || (code != 0 && code != 200)) {
+            throw ApiException(response.status.value, msg.ifBlank { "中继请求失败" })
+        }
+        env["data"] ?: JsonNull
+    }
+}
+
+/** 把响应体读成完整字节数组（复用 [asFlow] 的分块读取）。 */
+private suspend fun HttpResponse.readAllBytes(): ByteArray {
+    val chunks = bodyAsChannel().asFlow().toList()
+    val out = ByteArray(chunks.sumOf { it.size })
+    var pos = 0
+    for (c in chunks) {
+        c.copyInto(out, pos)
+        pos += c.size
+    }
+    return out
 }
 
 /** 组装并执行一次请求；`expectSuccess` 保持关闭，状态码由调用方判定。 */

@@ -21,6 +21,7 @@ data class AppSettings(
     val webdav: WebdavConfig = WebdavConfig(),
     val files: FilesConfig = FilesConfig(),
     val dashboard: DashboardConfig = DashboardConfig(),
+    val anime: AnimeConfig = AnimeConfig(),
     val llm: LlmSettings = LlmSettings(),
     /** 日志级别：TRACE / DEBUG / INFO / WARN / ERROR / OFF */
     val logLevel: String = "INFO",
@@ -316,5 +317,47 @@ data class AppSettings(
          * Windows 固定统计系统盘，忽略此值。
          */
         val diskPath: String = "/",
+    )
+
+    /**
+     * 番组表：订阅 MioBT 系发布站的番组更新（发布组 × 番剧），落库成可回看的番组表，
+     * 命中关注时经 SSE 实时推给浏览器（见 `doc/anime-timetable-design.md`）。
+     *
+     * [enabled] 关掉时采集与目录同步全部空转。采集是**轮询 + 单实例**：只在一台机器上开，
+     * 否则多实例会重复广播（同缩略图口径）。
+     */
+    @Serializable
+    data class AnimeConfig(
+        /** 是否启用番组表采集与目录同步。 */
+        val enabled: Boolean = false,
+        /** 发布站 RSS 地址（MioBT 系；非官方接口，结构可能变）。 */
+        val rssUrl: String = "http://www.comicat.org/rss.xml",
+        /** RSS 拉取间隔（秒），下限 60。 */
+        val pollIntervalSeconds: Int = 300,
+        /** 只收这些分类的发布（空列表 = 全收）。默认只收「动画」。 */
+        val includeCategories: List<String> = listOf("动画"),
+        /** 发布历史保留天数（0 = 永久保留）。 */
+        val retainDays: Int = 365,
+        /** 是否同步 Bangumi 番剧目录（提供标题 / 别名 / 周几 / 封面）。 */
+        val bangumiEnabled: Boolean = true,
+        /** Bangumi 每日放送接口（公开）。 */
+        val bangumiCalendarUrl: String = "https://api.bgm.tv/calendar",
+        /**
+         * 出站请求的 User-Agent。
+         *
+         * Bangumi 会拒无 UA 的请求；发布站建议也带上以便被识别为正常客户端。
+         */
+        val bangumiUserAgent: String = "lolosia-anime/1.0 (+http://lolosia.moe)",
+        /** 番剧目录同步间隔（小时），下限 1。 */
+        val metaRefreshHours: Int = 24,
+        /**
+         * Bangumi 取数中继根地址（境外节点，见 `deploy/anime-relay`）。非空时**改用中继**，忽略
+         * [bangumiCalendarUrl]：先 POST 通知中继、隔一会再来取结果，把出站与入站请求在时间上错开。
+         */
+        val bangumiRelayUrl: String = "",
+        /** 中继共享令牌（请求头 `X-Relay-Token`）。 */
+        val bangumiRelayToken: String = "",
+        /** 通知中继后隔多久去取结果（秒）；中继侧还会再叠加自身延迟与抖动。 */
+        val bangumiRelayWaitSeconds: Int = 300,
     )
 }

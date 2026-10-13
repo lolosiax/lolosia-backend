@@ -229,6 +229,26 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 22 <user>@<host>
 kill -9 <pid>; rm -f /tmp/ktor-test.kexe; rm -rf /tmp/ktortest
 ```
 
+### 本地实时调试（起后端 + 浏览器自动化）
+
+改前端 / 后端时**不必每次都 `deploy` 上板子** —— 本地把服务与前端 dev server 起起来，用 **Trae 的浏览器自动化 SKILL**（插件「浏览器控制」，技能 `TRAE-browseruse`）直接开页面点，实时看接口响应、静态页与 SSE 推送，边改边验。
+
+```powershell
+# 1) 后端：编译并运行本机产物（默认端口 7129）
+gradlew runReleaseExecutableMingwX64                       # 一条命令编译 + 运行
+# 或先 linkReleaseExecutableMingwX64，再直接跑：
+.\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129   # 首参覆盖端口，不传用配置里的
+
+# 2) 前端：vite dev server（端口 5005）
+cd <工作区>/web
+pnpm dev
+```
+
+- **配置来源**：启动目录下的 `application.yaml → yml → json` 里**第一个存在的**；`KTOR_CONFIG` 显式指定文件、`KTOR_PORT` / 首个命令行参数覆盖端口（优先级 命令行 > 环境变量 > 配置文件 > 内置默认）。内置默认见 `src/commonMain/resources/application.json`。
+- **前端请求指向哪**：`web/.env.serve-dev` 里 `VITE_APP_BASE_MODE=port` + `VITE_APP_BASE_PORT=7129`，`utils/request.ts` 据此把 API 拼成 `http://<host>:7129/api/`。所以**本地后端跑在 7129 即可与 dev server（5005）互通**，不必额外配代理。
+- **前端要被后端内嵌时**才需要构建：`viteJar` 是 `link*` 的依赖，`gradlew link...` / `deploy` 会顺带跑（见下条「vite 前端的增量行为」）；纯调前端用 dev server 就够。
+- **用浏览器 SKILL 做多步验收**：登录 → 打开番组表 → 关注番剧 / 发布组 → 点「立即拉取」，即可当场看到列表刷新与 `anime.release` 的站内 / 桌面通知。板子上同理，只是换成板子地址。
+
 ### vite 前端的增量行为
 
 - `viteJar` 的 `inputs` 由 `lolosia { viteJar { platform(...) { cache { } } } }` 的 `dirs` / `files` / `filePatterns` 声明，**增量是好的**。
@@ -254,6 +274,12 @@ kill -9 <pid>; rm -f /tmp/ktor-test.kexe; rm -rf /tmp/ktortest
 
 - **`host` 必须写 `127.0.0.1`，不要写 `localhost`**：Windows 上 `localhost` 会先解析到 `::1`，而隧道只绑 IPv4。
   > 原生服务的 `host = "0.0.0.0"` 只绑 IPv4，从外部用板子的 **IPv6** 探 7130 会失败（JVM/Netty 默认双栈，所以 7129 探得通）。要 IPv6 直连就把监听地址改成 `::`。
+
+### 默认部署目标：`platforms.json` 的 `active`（主服务器）
+
+- `gradlew deploy`（**不带服务器名**）等价于 `gradlew deploy<active>` —— 目标由 `platforms.json` 的 `deploy.active` 决定，**当前是 `tsp-1m`（板子，主服务器）**。日常部署后端就是它。
+- `deploy.servers` 里的**其他项（如 `shiyan`）当前不部署后端** —— 预留作 **CDN** 使用，`gradlew deploy` 不会碰它们，可以忽略；要单独发某台才显式 `gradlew deploy<名字>`。
+- ⚠️ **单实例后台任务只在主服务器开**：番组表 RSS 轮询（`anime.enabled`）、DDNS（`ddns.enabled`）等一旦在多台机器同时开启就会重复推送（SSE 重复广播 / DNS 重复更新）。CDN 节点配置里这些开关保持 `false`。
 
 ### mode=docker（原生）细节
 

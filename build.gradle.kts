@@ -26,7 +26,7 @@ fun curlCryptoLib(target: String): String =
 
 // 第三方 C 库：产物（thirdparty/<目标>/*.a）与公共头文件随仓库提交，见 thirdparty/build-libs.ps1
 val thirdpartyDir = layout.projectDirectory.dir("thirdparty")
-val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif")
+val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif", "msgpack")
 
 kotlin {
     // Windows：本地开发调试用
