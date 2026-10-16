@@ -8,6 +8,15 @@
 
 body
 {
+	/* RmlUi 的文档元素（也就是 body）默认是 position: absolute（见 ElementDocument 构造），
+	   不给尺寸约束时它会按内容收缩 —— 于是背景只铺满内容那一块、窗口其余部分留白。
+	   这里用四边定位把它撑满视口（RmlUi 自带样例的 window.rml 就是这么做的）。 */
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+
 	font-family: lolosia-ui;
 	font-size: 15dp;
 	color: #d7dae3;

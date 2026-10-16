@@ -195,7 +195,11 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - RmlUi 只编 `rmlui_core`（不出 samples / tests / Lua / Lottie / SVG / 内置调试器）。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 build-rmlui.ps1）。
   - ⚠️ 那三个后端源文件会 `#include <SDL3_image/SDL_image.h>`（只为 `IMG_LoadTyped_IO` 一个函数，给 `background-image` 用）。本轮不接图片，于是 [`include/SDL3_image/SDL_image.h`](src/nativeCpp/include/SDL3_image/SDL_image.h) 是占位头、[`src/SdlImageStub.cpp`](src/nativeCpp/src/SdlImageStub.cpp) 是「关流 + 打 ERROR 日志 + 返回 nullptr」的占位实现：引用到图片的地方会缺图，但不会崩。要真支持图片就替换这两处。
   - ⚠️ **不要给链接补 `-lstdc++`**：K/N 自己的 runtime 就是 C++ 写的、已经链了 libstdc++，再加一次会 `ld.lld: duplicate symbol: std::bad_alloc::~bad_alloc()`。
-  - ⚠️ **thirdparty 的 `.a` 必须声明为链接输入**（`build.gradle.kts` 里对每个可执行文件设了 `linkTaskProvider { inputs.files(...) }`）：它们只以路径形式（`-libraryPath` / `linkerOpts`）交给链接器，Gradle 看不见归档内容的变化，不声明的话重建静态库后 link 会被判 UP-TO-DATE，症状是「改了 C 代码却看不到效果」。`classpath.res` 是同一类问题，处理方式见 buildSrc/NativeClasspath.kt。
+  - ⚠️ **RmlUi 的尺寸口径与 CSS 直觉不同**（容易踩，症状是「内容只铺满窗口一角、其余一片黑」）：
+    - `Context::SetDimensions` 收的尺寸**就是像素** —— 它同时是渲染视口与文档根盒的尺寸；`SetDensityIndependentPixelRatio` 才是 dp→px 的乘数（`ComputeLength` 里 `Unit::DP × dp_ratio`）。所以正确写法是 `SetDimensions(窗口像素尺寸)` + `SetDensityIndependentPixelRatio(显示缩放)`。
+    - RmlUi 的 **SDL 后端只在「显示缩放变化」事件里设 dp 比**，窗口刚建好时不会设，它的示例代码又把逻辑尺寸当 dp 直接交给 `CreateContext` —— 100% 缩放下两者恰好相等看不出问题，150% 缩放下视口就少了一块。`ll_ui_create` 里已按「窗口像素 + 显示缩放」补齐（改这块先看 `src/nativeCpp/src/LolosiaUi.cpp` 的注释）。
+    - 文档元素（RmlUi 里 **body 就是文档**，`Factory.cpp` 的 `documents_base_tag`）在构造时被设成 `position: absolute`：**不给尺寸约束它就按内容收缩**，背景只铺满内容那一块。写 RML 时要把 body 显式撑满（`left/right/top/bottom: 0`，样例的 `window.rml` 就是这么写的），或 `width/height: 100%`。
+  - ⚠️ **thirdparty 的 `.a` 要声明成 cinterop 任务的输入**（`build.gradle.kts`）：cinterop 会把它**复制**进 klib 的依赖目录，链接器用的是那份副本；而 cinterop 自身输入只算 `.def` 与头文件。不声明的话，重建静态库后 cinterop 不重跑，副本一直停在旧版 —— 症状是「改了 C 代码却看不到任何效果」，且 `link` 看上去正常执行了。`classpath.res` 是同一类陷阱，处理方式见 buildSrc/NativeClasspath.kt。
   - Kotlin 侧绑定包名 `moe.lolosia.web.ui.native`（`src/nativeInterop/cinterop/lolosia.def`）；**该 cinterop 只挂在 mingwX64 上**，linux 目标还没有交叉构建好的 SDL3。
 - **前端路径不许写死**：用 `generateConstants` 产出的 `VITE_DEFAULT`（值 = viteJar 的 `contextPath`）拼路由。
 - **配置只有一个入口** [`settings/AppSettings.kt`](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable`）。

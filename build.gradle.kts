@@ -1,5 +1,4 @@
 import com.fasterxml.jackson.databind.json.JsonMapper
-import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
@@ -101,15 +100,15 @@ kotlin {
                 }
             }
         }
-        // thirdparty/<目标>/*.a 只以路径形式（-libraryPath / linkerOpts）交给链接器，
-        // Gradle 看不见归档内容的变化 —— 不声明成输入的话，重建静态库后 link 会被判
-        // UP-TO-DATE，产出静默停留在旧库上（改了 C 代码却看不到效果）。
-        // classpath.res 那条链路有同样的问题，处理方式见 buildSrc/NativeClasspath.kt。
-        binaries.withType<Executable>().configureEach {
-            linkTaskProvider.configure {
-                inputs.files(layout.projectDirectory.dir("thirdparty/$targetName").asFileTree.matching { include("*.a") })
-            }
-        }
+        // thirdparty/<目标>/*.a 会被 cinterop **复制**进 klib 的依赖目录
+        // （build/classes/…/cinterop/<klib>/default/targets/<abi>/included/），链接器用的是那份副本。
+        // 而 cinterop 任务自身只把 .def 与头文件当输入 —— 不把归档也声明进来，
+        // 重建静态库后 cinterop 不会重跑，副本一直停在旧版：症状是「改了 C 代码却看不到任何效果」。
+        val thirdpartyArchives = layout.projectDirectory.dir("thirdparty/$targetName")
+            .asFileTree.matching { include("*.a") }
+        val targetSuffix = targetName.replaceFirstChar { it.uppercaseChar() }
+        tasks.matching { it.name.startsWith("cinterop") && it.name.endsWith(targetSuffix) }
+            .configureEach { inputs.files(thirdpartyArchives) }
     }
 
     sourceSets {

@@ -30,7 +30,12 @@
 extern "C" {
 #endif
 
-/* 创建窗口、初始化 RmlUi 与它的数据模型；成功返回 0 */
+/*
+ * 创建窗口、初始化 RmlUi 与它的数据模型；成功返回 0。
+ *
+ * width / height 是**逻辑尺寸（dp）**：窗口的实际像素尺寸由后端按显示器缩放乘出来
+ * （150% 缩放下 1120dp → 1680px），dp 比与 context 尺寸在内部对齐，调用方不用管。
+ */
 int32_t ll_ui_create(const char* title, int32_t width, int32_t height);
 
 /* 释放窗口、上下文与全部 RmlUi 资源 */

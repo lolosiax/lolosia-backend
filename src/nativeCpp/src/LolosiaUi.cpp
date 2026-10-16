@@ -17,6 +17,7 @@
 #include "RmlUi_Backend.h"
 
 #include <RmlUi/Core.h>
+#include <SDL3/SDL.h>
 #include <string.h>
 
 namespace {
@@ -155,6 +156,52 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
         return -1;
     }
     g_state.handle = g_state.model.GetModelHandle();
+
+    // 把 context 的视口尺寸与 dp 比对齐到窗口的真实像素尺寸。
+    //
+    // 约定（来自 RmlUi 自己的实现，别按 CSS 的直觉猜）：
+    //   Context::SetDimensions 的尺寸直接当**像素**用 —— 它同时是渲染视口与文档根盒的尺寸；
+    //   SetDensityIndependentPixelRatio 才是 dp→px 的乘数（ComputeLength 里 Unit::DP × dp_ratio）。
+    //
+    // 坑：RmlUi 的 SDL 后端只在「显示缩放变化」事件里设 dp 比，窗口刚建好时不会设，
+    // 而它的示例把逻辑尺寸当 dp 直接交给 CreateContext。在 100% 缩放下两者恰好相等，看不出问题；
+    // 150% 缩放下窗口是 1680x1140 像素，若视口只给 1120x760，内容就只铺满左上角一块，
+    // 其余区域是后端清出的透明黑 —— 表现就是「可视区域没有覆盖整个窗口」。
+    {
+        SDL_Window* window = nullptr;
+        int window_count = 0;
+        SDL_Window** windows = SDL_GetWindows(&window_count);
+        if (windows != nullptr && window_count > 0) window = windows[0];
+
+        int pixel_width = 0;
+        int pixel_height = 0;
+        float dp_ratio = 1.0f;
+        if (window != nullptr) {
+            SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height);
+            const float display_scale = SDL_GetWindowDisplayScale(window);
+            if (display_scale > 0.0f) dp_ratio = display_scale;
+        }
+        if (pixel_width <= 0 || pixel_height <= 0) {
+            // 拿不到窗口像素尺寸时退回调用方给的逻辑尺寸（等于按 100% 缩放处理）
+            pixel_width = width;
+            pixel_height = height;
+            dp_ratio = 1.0f;
+        }
+
+        g_state.context->SetDimensions(Rml::Vector2i(pixel_width, pixel_height));
+        g_state.context->SetDensityIndependentPixelRatio(dp_ratio);
+
+        char message[192];
+        snprintf(message, sizeof(message),
+            "渲染视口 %dx%d 像素（%.2f dp 比，即 %.0fx%.0f dp）",
+            pixel_width, pixel_height, (double)dp_ratio,
+            (double)(pixel_width / dp_ratio), (double)(pixel_height / dp_ratio));
+        // 走系统接口而不是 Rml::Log::Message：后者受 RmlUi 的日志级别过滤（默认会滤掉 INFO），
+        // 而系统接口是后端自己报「Using SDL device driver」用的通道，能稳定落到 stderr。
+        Rml::SystemInterface* system = Backend::GetSystemInterface();
+        if (system != nullptr) system->LogMessage(Rml::Log::LT_INFO, message);
+    }
+
     // 注册名为 action 的数据事件：文档里的 data-event-click="action('x')" 全靠它派发。
     // 这一步失败必须报出来 —— 否则症状是「按钮点了完全没反应」，且没有任何线索可查。
     if (!g_state.model.BindEventCallback("action", &onAction)) {
