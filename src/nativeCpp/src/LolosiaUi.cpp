@@ -13,11 +13,13 @@
 #define SDL_MAIN_HANDLED 1
 
 #include "lolosia_ui.h"
+#include "LolosiaUiInternal.h"
 
 #include "RmlUi_Backend.h"
 
 #include <RmlUi/Core.h>
 #include <SDL3/SDL.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace {
@@ -112,6 +114,24 @@ void onAction(Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& argumen
 
 }  // namespace
 
+LlResourceCallbacks& ll_resource_callbacks() {
+    static LlResourceCallbacks callbacks = {nullptr, nullptr, nullptr};
+    return callbacks;
+}
+
+/**
+ * 往 RmlUi 的日志通道打一条。走系统接口而不是 Rml::Log::Message：
+ * 后者受 RmlUi 的日志级别过滤（默认会把 INFO 滤掉），而系统接口是后端自己报
+ * 「Using SDL device driver」用的通道，能稳定落到 stderr。
+ */
+static void logToSystem(Rml::Log::Type level, const char* message) {
+    Rml::SystemInterface* system = Backend::GetSystemInterface();
+    if (system != nullptr) system->LogMessage(level, message);
+}
+
+void ll_log_info(const char* message) { logToSystem(Rml::Log::LT_INFO, message); }
+void ll_log_error(const char* message) { logToSystem(Rml::Log::LT_ERROR, message); }
+
 int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     if (g_state.created) {
         setError("ll_ui 已初始化，同一进程只允许一个窗口");
@@ -132,9 +152,12 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
         return -1;
     }
 
-    // 渲染/系统接口必须在 Rml::Initialise() 之前挂上
+    // 渲染/系统/文件接口都必须在 Rml::Initialise() 之前挂上。
+    // 文件接口换成「先问宿主、再退回磁盘」的实现：界面资源在 classpath（内嵌 zip）里，
+    // 而字体这类东西仍是磁盘文件，两者都要能读到。
     Rml::SetSystemInterface(Backend::GetSystemInterface());
     Rml::SetRenderInterface(Backend::GetRenderInterface());
+    Rml::SetFileInterface(ll_resource_file_interface());
     if (!Rml::Initialise()) {
         setError("Rml::Initialise 失败");
         ll_ui_destroy();
@@ -196,10 +219,7 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
             "渲染视口 %dx%d 像素（%.2f dp 比，即 %.0fx%.0f dp）",
             pixel_width, pixel_height, (double)dp_ratio,
             (double)(pixel_width / dp_ratio), (double)(pixel_height / dp_ratio));
-        // 走系统接口而不是 Rml::Log::Message：后者受 RmlUi 的日志级别过滤（默认会滤掉 INFO），
-        // 而系统接口是后端自己报「Using SDL device driver」用的通道，能稳定落到 stderr。
-        Rml::SystemInterface* system = Backend::GetSystemInterface();
-        if (system != nullptr) system->LogMessage(Rml::Log::LT_INFO, message);
+        ll_log_info(message);
     }
 
     // 注册名为 action 的数据事件：文档里的 data-event-click="action('x')" 全靠它派发。
@@ -330,6 +350,13 @@ int32_t ll_ui_model_set_bool(const char* name, int32_t value) {
 void ll_ui_set_action_callback(ll_ui_action_callback callback, void* user_data) {
     g_state.action = callback;
     g_state.action_user_data = user_data;
+}
+
+void ll_ui_set_resource_loader(ll_ui_read_file read_file, ll_ui_decode_image decode_image, void* user_data) {
+    LlResourceCallbacks& callbacks = ll_resource_callbacks();
+    callbacks.read_file = read_file;
+    callbacks.decode_image = decode_image;
+    callbacks.user_data = user_data;
 }
 
 int32_t ll_ui_load_document(const char* rml_utf8) {

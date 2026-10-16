@@ -30,6 +30,27 @@ header
 	margin-bottom: 22dp;
 }
 
+/* 图片的两条路径都演示一下：结构里用 <img>，样式里用 background-image（走 decorator）。
+   路径以 / 开头 = classpath 根相对（RmlUi 的 JoinPath 会剥掉开头的 / 直接返回）。 */
+.brand
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.brand-text
+{
+	display: block;
+}
+
+.logo
+{
+	width: 56dp;
+	height: 56dp;
+	margin-right: 16dp;
+}
+
 h1
 {
 	display: block;
@@ -165,13 +186,33 @@ button:active
 	border: 1dp #2e6b47;
 	color: #a9e8c1;
 }
+
+/* 图片：RmlUi 没有 CSS 的 background-image，图片装饰器要写成 decorator: image(<路径>)。
+   路径以 / 开头 = classpath 根相对（RmlUi 的 JoinPath 会剥掉开头的 / 直接返回）。 */
+.banner
+{
+	display: block;
+	margin-top: 18dp;
+	min-height: 96dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	border: 1dp #2b3140;
+	background-color: #1b1f29;
+	decorator: image( /ui/sample.png );
+	color: #f2f4f8;
+}
 </style>
 </head>
 
 <body data-model="main">
 	<header>
-		<h1>{{ title }}</h1>
-		<p class="subtitle">{{ subtitle }}</p>
+		<div class="brand">
+			<img class="logo" src="/ui/sample.png"/>
+			<div class="brand-text">
+				<h1>{{ title }}</h1>
+				<p class="subtitle">{{ subtitle }}</p>
+			</div>
+		</div>
 	</header>
 
 	<p class="section-title">下面三张卡片是 flex 行里的 flex: 1 —— 宽度由布局算出，没有写死坐标</p>
@@ -205,6 +246,11 @@ button:active
 	<div class="panel" data-class-panel-active="highlighted">
 		<span data-if="highlighted">data-class-panel-active 生效：块样式随数据变了。</span>
 		<span data-if="!highlighted">data-class-panel-active 还没生效，点「切换高亮」试试。</span>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">图片：资源从 classpath 读、解码复用已有的 C 编解码库</p>
+	<div class="banner">
+		<span>这块背景是 background-image（decorator 路径）；标题左边的图标是 &lt;img&gt;（元素路径）。</span>
 	</div>
 </body>
 </rml>

@@ -77,6 +77,30 @@ void ll_ui_set_action_callback(ll_ui_action_callback callback, void* user_data);
 int32_t ll_ui_load_document(const char* rml_utf8);
 
 /*
+ * 资源回调：把 RmlUi 的「读文件」与「解码图片」接到宿主侧。
+ *
+ * 为什么要回调而不是在 C++ 里自己解码：文件要从 classpath（内嵌 zip）读、解码复用仓库里
+ * 已有的 C 编解码库（libpng / libjpeg-turbo / libwebp / giflib，见 src/nativeMain 的门面）。
+ * 这两件事宿主都已经有实现，回调过去就不用把解码器再写一遍，也不给链接顺序添新依赖。
+ *
+ * 两个回调都按「两次调用」约定工作，调用方据此避免先猜缓冲大小：
+ *   - out 为 NULL 或 capacity 不足：不写数据，只返回**所需字节数**（用于探大小）；
+ *   - 容量足够：写入数据并返回**写入字节数**。
+ *   返回负数表示失败（文件不存在、格式不认识、数据损坏等）。
+ * 回调在视图线程上同步调用；已在 ll_ui_create 之后、ll_ui_load_document 之前注册即可。
+ *
+ * 用不到图片时不注册也能跑：引用到图片的地方会缺图并留一条 ERROR 日志，不会崩。
+ */
+typedef int32_t (*ll_ui_read_file)(void* user_data, const char* path, uint8_t* out, int32_t capacity);
+
+/* 解码回调额外回写像素尺寸（两次调用都会写）；out_rgba 的预期大小为 width * height * 4。 */
+typedef int32_t (*ll_ui_decode_image)(void* user_data, const uint8_t* bytes, int32_t size,
+                                      uint8_t* out_rgba, int32_t capacity,
+                                      int32_t* out_width, int32_t* out_height);
+
+void ll_ui_set_resource_loader(ll_ui_read_file read_file, ll_ui_decode_image decode_image, void* user_data);
+
+/*
  * 跑一帧：处理输入事件 → 更新 → 渲染 → 呈现。
  * 空闲时会阻塞等事件（不空转烧 CPU）。返回 0 表示继续，1 表示收到关闭请求，负数表示出错。
  */

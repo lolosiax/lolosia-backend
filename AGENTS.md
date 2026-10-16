@@ -193,7 +193,10 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - 与 `build-libs.ps1` 的差异：这几个脚本自己找 cmake / ninja（本机没有系统级 cmake，`python -m pip install cmake ninja` 即可，脚本会在 python 的用户级 Scripts 目录里找 —— 别用 `& python` 直接探，PATH 上的商店占位 stub 会抛错）；公共的工具链定位与源码下载解压抽在 [`thirdparty/toolchain.ps1`](thirdparty/toolchain.ps1)，各脚本 dot-source 它。
   - 交叉编译的坑都用**定点补丁**解决，且补丁失配会直接报错（不会静默失效）：SDL3 的 `SDL_assert.h` / `SDL_intrin.h`（clang 与 mingw 的 `<intrin.h>` 在 C++ 下冲突，而 CMake 给目标挂了 PCH）、FreeType 的 `CMakeLists.txt`（去掉 `ftver.rc`：windres 预处理要能用的 gcc，K/N 的 sysroot 里只有缺 cc1 的驱动壳）。
   - RmlUi 只编 `rmlui_core`（不出 samples / tests / Lua / Lottie / SVG / 内置调试器）。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 build-rmlui.ps1）。
-  - ⚠️ 那三个后端源文件会 `#include <SDL3_image/SDL_image.h>`（只为 `IMG_LoadTyped_IO` 一个函数，给 `background-image` 用）。本轮不接图片，于是 [`include/SDL3_image/SDL_image.h`](src/nativeCpp/include/SDL3_image/SDL_image.h) 是占位头、[`src/SdlImageStub.cpp`](src/nativeCpp/src/SdlImageStub.cpp) 是「关流 + 打 ERROR 日志 + 返回 nullptr」的占位实现：引用到图片的地方会缺图，但不会崩。要真支持图片就替换这两处。
+  - RmlUi 的 SDL_GPU 后端加载图片纹理时会 `#include <SDL3_image/SDL_image.h>` 并调 `IMG_LoadTyped_IO`（只此一个函数）。这里没有引整套 SDL_image + stb_image（与轻量化相悖，且解码能力仓库里已有），而是自己实现它：[`include/SDL3_image/SDL_image.h`](src/nativeCpp/include/SDL3_image/SDL_image.h) 只声明这一个函数，[`src/SdlImage.cpp`](src/nativeCpp/src/SdlImage.cpp) 把字节交给宿主的解码回调（Kotlin 侧复用 libpng / libjpeg-turbo / libwebp / giflib 的门面），拿回 RGBA 包成 SDL_Surface。给 RGBA32 是有意的 —— 后端对其它格式会先做一次转换。**新增链接的第三方库为零**：这些库本来就已经在可执行文件里了。
+  - 资源读取走 [`src/ResourceFileInterface.cpp`](src/nativeCpp/src/ResourceFileInterface.cpp)：先问宿主的 `read_file` 回调（classpath），**宿主不认识再退回真实文件系统**。回退不是可选项 —— 字体是磁盘文件（`C:/Windows/Fonts/…`），少了它界面文字会整片消失，而日志里只会看到「字体加载失败」，看不出跟资源加载有关。
+  - RML 里引用图片：路径以 `/` 开头即 classpath 根相对（`SystemInterface::JoinPath` 对 `/` 开头的路径会剥掉前缀直接返回，与文档位置无关）。⚠️ RCSS **没有 CSS 的 `background-image`**，图片装饰器要写成 `decorator: image( /ui/sample.png )`（会拉伸铺满元素）。
+  - ⚠️ 资源回调（`ll_ui_set_resource_loader`）要在**加载字体之前**注册：字体同样走文件接口，而这个回调是文件接口判断「该路径是不是宿主资源」的依据。
   - ⚠️ **不要给链接补 `-lstdc++`**：K/N 自己的 runtime 就是 C++ 写的、已经链了 libstdc++，再加一次会 `ld.lld: duplicate symbol: std::bad_alloc::~bad_alloc()`。
   - ⚠️ **RmlUi 的尺寸口径与 CSS 直觉不同**（容易踩，症状是「内容只铺满窗口一角、其余一片黑」）：
     - `Context::SetDimensions` 收的尺寸**就是像素** —— 它同时是渲染视口与文档根盒的尺寸；`SetDensityIndependentPixelRatio` 才是 dp→px 的乘数（`ComputeLength` 里 `Unit::DP × dp_ratio`）。所以正确写法是 `SetDimensions(窗口像素尺寸)` + `SetDensityIndependentPixelRatio(显示缩放)`。
@@ -234,7 +237,7 @@ gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
     否则链接会因 exe 被旧进程占用报 `AccessDeniedException`。
   - **UI 实验**（RmlUi 视图层 + SDL3 GPU/Vulkan 出帧）：`.\build\bin\mingwX64\debugExecutable\lolosia-backend.exe ui` —— 首个参数是 `ui` 时不进服务器启动路径。
     范围：RML/RCSS 描述界面（**flexbox 自动排版，不手算坐标**）+ data-model 数据绑定（Kotlin 的 ViewModel ↔ 文档变量，按钮走 `data-event-click="action('x')"`），界面在 `resources/ui/probe.rml`；
-    图片未接（`background-image` 会缺图，见 §7 的 SDL_image 占位）；关窗即退出。图形栈的构建约定见 §7。
+    图片可用：资源从 classpath 读、解码复用已有的 C 编解码库（见 §7）；关窗即退出。图形栈的构建约定见 §7。
 
 - 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64` / `linkReleaseExecutableLinuxX64`；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
@@ -284,9 +287,11 @@ src/commonMain/kotlin/…/ui/     UI 实验里与平台无关的部分：mvvm/�
                                 + UiExperiment.kt（expect fun runUiExperiment）
 src/mingwX64Main/kotlin/…/ui/   UiExperiment.mingw.kt：唯一接触 ll_ui_* 的地方 —— 声明数据模型字段、订阅 ViewModel、转发 action、跑帧循环
 src/linuxMain/kotlin/…/ui/      UiExperiment.linux.kt：占位 actual（linux 目标还没有 SDL3）
-src/commonMain/resources/ui/    probe.rml：实验界面（RML + 内联 RCSS，flexbox 排版 + data-model 绑定）
-src/nativeCpp/                  自研 C/C++ 门面：include/lolosia_ui.h（ll_ui_* 的 C ABI）+ src/LolosiaUi.cpp（RmlUi 数据模型与帧循环）+
-                                src/SdlImageStub.cpp（SDL_image 占位）+ include/SDL3_image/（占位头）+ build.ps1（连 RmlUi 后端胶水一起编）
+src/commonMain/resources/ui/    probe.rml（实验界面：RML + 内联 RCSS，flexbox 排版 + data-model 绑定）与 sample.png（图片链路的测试图案）
+src/nativeCpp/                  自研 C/C++ 门面：include/lolosia_ui.h（ll_ui_* 的 C ABI）+ src/LolosiaUi.cpp（数据模型与帧循环）+
+                                src/ResourceFileInterface.cpp（资源读取：先问宿主 classpath，再退回磁盘）+
+                                src/SdlImage.cpp（IMG_LoadTyped_IO 走宿主解码）+ include/SDL3_image/（只要那一个函数的声明）+
+                                build.ps1（连 RmlUi 后端胶水一起编）
 src/nativeInterop/cinterop/     第三方与自研 C 库的绑定定义（zlib / png / webp / jpeg / gif 各一个 .def，外加 lolosia.def）
 src/linuxMain/kotlin/…/          两个 linux 目标共享的平台实现（.linux.kt）：
                                 api/ApiClient / classpath/EmbeddedClasspath / fs/Mkdir / proc/Shell

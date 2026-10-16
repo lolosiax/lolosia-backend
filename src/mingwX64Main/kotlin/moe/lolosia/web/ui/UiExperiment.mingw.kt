@@ -1,13 +1,22 @@
 package moe.lolosia.web.ui
 
 import kotlinx.cinterop.*
+import moe.lolosia.thirdparty.RgbaImage
+import moe.lolosia.thirdparty.gif.Gif
+import moe.lolosia.thirdparty.jpeg.Jpeg
+import moe.lolosia.thirdparty.png.Png
+import moe.lolosia.thirdparty.webp.Webp
 import moe.lolosia.web.ui.experiment.ModelField
 import moe.lolosia.web.ui.experiment.UiProbeViewModel
 import moe.lolosia.web.ui.mvvm.Property
 import moe.lolosia.web.ui.native.*
+import moe.lolosia.web.util.classpath.Classpath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
+import moe.lolosia.web.util.image.Image
+import moe.lolosia.web.util.image.ImageFormat
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.Logger
+import platform.posix.memcpy
 
 private const val WINDOW_TITLE = "洛洛希雅 · RmlUi 布局实验"
 private const val WINDOW_WIDTH = 1120
@@ -53,8 +62,17 @@ actual fun runUiExperiment(): Int {
     // 动作回调不能捕获外部变量（staticCFunction 要求无捕获），
     // 因此把 ViewModel 的稳定引用作为 user_data 交给 C 侧，回调时原样回传
     val viewModelRef = StableRef.create(viewModel)
+    // 资源回调同理：classpath 引用也经 user_data 传过去
+    val resourcesRef = StableRef.create(UiResourceHolder(classpath))
     var subscriptions: List<Property.Subscription> = emptyList()
     try {
+        // 资源回调要排在加载字体之前：字体同样走 RmlUi 的文件接口，
+        // 而资源回调是文件接口判断「这个路径是不是宿主资源」的依据。
+        ll_ui_set_resource_loader(
+            staticCFunction(::handleReadFile),
+            staticCFunction(::handleDecodeImage),
+            resourcesRef.asCPointer(),
+        )
         loadFont(log)
 
         val bound = bindModel(viewModel, log)
@@ -85,6 +103,7 @@ actual fun runUiExperiment(): Int {
     } finally {
         subscriptions.forEach { it.cancel() }
         viewModelRef.dispose()
+        resourcesRef.dispose()
         ll_ui_destroy()
     }
 }
@@ -157,4 +176,68 @@ private fun handleAction(userData: COpaquePointer?, name: CPointer<ByteVar>?) {
     val viewModel = userData?.asStableRef<UiProbeViewModel>()?.get() ?: return
     // name 由库内部持有、只在本次调用期间有效，立刻转成 Kotlin 字符串
     viewModel.dispatch(name?.toKString().orEmpty())
+}
+
+/** 资源回调要用的宿主上下文：资源从 classpath 取（发布时是内嵌 zip，磁盘上并不存在）。 */
+private class UiResourceHolder(val classpath: Classpath)
+
+/**
+ * 读一个资源文件（C 侧 RmlUi 要加载文档、样式、图片时都会走这里）。
+ *
+ * 两次调用约定：`out` 为空或容量不足时只回所需字节数，容量够才写数据。
+ * 返回负数是失败（文件不存在等），C 侧会把它当「资源缺失」处理。
+ */
+private fun handleReadFile(
+    userData: COpaquePointer?,
+    path: CPointer<ByteVar>?,
+    out: CPointer<UByteVar>?,
+    capacity: Int,
+): Int {
+    val holder = userData?.asStableRef<UiResourceHolder>()?.get() ?: return -1
+    val name = path?.toKString() ?: return -1
+    val bytes = holder.classpath.read(name) ?: return -1
+    if (out == null || capacity < bytes.size) return bytes.size
+    bytes.usePinned { memcpy(out, it.addressOf(0), bytes.size.convert()) }
+    return bytes.size
+}
+
+/**
+ * 把编码字节解成 RGBA8，复用 thirdparty 下各图像库门面（与 `Image` 内部用的是同一批实现）。
+ *
+ * 两次调用约定同上；第一次（`out` 为空）只按文件头报尺寸，不解码像素，
+ * 所以这里先用 `Image.sizeOf`，避免为了探大小白解一遍。
+ */
+private fun handleDecodeImage(
+    userData: COpaquePointer?,
+    bytes: CPointer<UByteVar>?,
+    size: Int,
+    out: CPointer<UByteVar>?,
+    capacity: Int,
+    outWidth: CPointer<IntVar>?,
+    outHeight: CPointer<IntVar>?,
+): Int {
+    if (userData?.asStableRef<UiResourceHolder>()?.get() == null) return -1
+    if (bytes == null || size <= 0) return -1
+
+    val data = ByteArray(size).also { buffer -> buffer.usePinned { memcpy(it.addressOf(0), bytes, size.convert()) } }
+    val dimensions = Image.sizeOf(data) ?: return -1
+    outWidth?.pointed?.value = dimensions.width
+    outHeight?.pointed?.value = dimensions.height
+
+    val needed = dimensions.width * dimensions.height * 4
+    if (out == null || capacity < needed) return needed
+
+    val rgba = decodeRgba(Image.typeOf(data), data) ?: return -1
+    if (rgba.pixels.size != needed) return -1
+    rgba.pixels.usePinned { memcpy(out, it.addressOf(0), needed.convert()) }
+    return needed
+}
+
+/** 按文件头识别结果分派到对应的解码门面；识别不出（或格式不支持）返回 `null`。 */
+private fun decodeRgba(format: ImageFormat, bytes: ByteArray): RgbaImage? = when (format) {
+    ImageFormat.PNG -> Png.decode(bytes)
+    ImageFormat.JPEG -> Jpeg.decode(bytes)
+    ImageFormat.GIF -> Gif.decode(bytes)
+    ImageFormat.WEBP -> Webp.decode(bytes)
+    ImageFormat.UNKNOWN -> null
 }
