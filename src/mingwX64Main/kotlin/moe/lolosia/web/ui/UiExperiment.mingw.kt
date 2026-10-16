@@ -85,6 +85,14 @@ actual fun runUiExperiment(): Int {
             return 1
         }
 
+        // 调试器要在文档之后启用：它自己往上下文里挂几个文档，晚加载才画在最上层。
+        // 启不来不算致命（界面照常可用），但要说清楚。
+        if (ll_ui_enable_debugger() == 0) {
+            log.info { "内置调试器已启用：F8 开关（元素树 / 数据模型 / 日志 / 元素边框）" }
+        } else {
+            log.warn { "内置调试器启用失败：${lastError()}" }
+        }
+
         log.info { "窗口就绪（$WINDOW_WIDTH×$WINDOW_HEIGHT，数据模型字段 ${viewModel.fields.size} 个），关窗退出" }
         while (true) {
             when (val frame = ll_ui_frame()) {
@@ -98,6 +106,14 @@ actual fun runUiExperiment(): Int {
                     log.error { "渲染失败（$frame）：${lastError()}" }
                     return 1
                 }
+            }
+
+            // 表单控件改过值：等这一帧的事件处理（含视图层写回数据模型）跑完再读回来，
+            // 免得当场读到写之前的旧值。
+            if (viewModel.viewSyncPending) {
+                viewModel.viewSyncPending = false
+                viewModel.fields.forEach { it.pullFromView(log) }
+                viewModel.onFormSynced()
             }
         }
     } finally {
@@ -161,6 +177,7 @@ private fun bindModel(viewModel: UiProbeViewModel, log: Logger): List<Property.S
 private fun ModelField.bindToView(): Int = when (this) {
     is ModelField.Text -> name.cString { n -> source.value.cString { v -> ll_ui_model_bind_string(n, v) } }
     is ModelField.Integer -> name.cString { n -> ll_ui_model_bind_int(n, source.value) }
+    is ModelField.Decimal -> name.cString { n -> ll_ui_model_bind_float(n, source.value) }
     is ModelField.Flag -> name.cString { n -> ll_ui_model_bind_bool(n, if (source.value) 1 else 0) }
 }
 
@@ -168,7 +185,62 @@ private fun ModelField.bindToView(): Int = when (this) {
 private fun ModelField.pushToView(): Int = when (this) {
     is ModelField.Text -> name.cString { n -> source.value.cString { v -> ll_ui_model_set_string(n, v) } }
     is ModelField.Integer -> name.cString { n -> ll_ui_model_set_int(n, source.value) }
+    is ModelField.Decimal -> name.cString { n -> ll_ui_model_set_float(n, source.value) }
     is ModelField.Flag -> name.cString { n -> ll_ui_model_set_bool(n, if (source.value) 1 else 0) }
+}
+
+/**
+ * 把视图层（表单控件）可能刚改过的值读回 [source]。
+ *
+ * 这是 MVVM 里那条反向数据流：视图不是只读的，输入框里敲的字、滑杆拖到的位置都写进了
+ * 视图层的数据模型，宿主不读回来就会一直拿着旧值 —— 而且下次推送时会把用户的输入盖掉。
+ * 单个字段读失败只记一条日志，不影响其它字段。
+ */
+private fun ModelField.pullFromView(log: Logger) {
+    if (this is ModelField.Text) {
+        val next = readModelString(name)
+        if (next == null) log.error { "读回字段失败：$name（${lastError()}）" } else source.value = next
+        return
+    }
+    if (this is ModelField.Integer) {
+        val next = readModelInt(name)
+        if (next == null) log.error { "读回字段失败：$name（${lastError()}）" } else source.value = next
+        return
+    }
+    if (this is ModelField.Decimal) {
+        val next = readModelFloat(name)
+        if (next == null) log.error { "读回字段失败：$name（${lastError()}）" } else source.value = next
+        return
+    }
+    if (this is ModelField.Flag) {
+        val next = readModelBool(name)
+        if (next == null) log.error { "读回字段失败：$name（${lastError()}）" } else source.value = next
+    }
+}
+
+/** 读回字符串字段；与资源回调同一套「两次调用」约定（先问字节数，再取内容）。失败返回 null。 */
+private fun readModelString(name: String): String? = name.cString { n ->
+    val size = ll_ui_model_get_string(n, null, 0)
+    if (size < 0) return@cString null
+    if (size == 0) return@cString ""
+    val buffer = ByteArray(size)
+    val written = buffer.usePinned { ll_ui_model_get_string(n, it.addressOf(0), size) }
+    if (written != size) null else buffer.decodeToString()
+}
+
+private fun readModelInt(name: String): Int? = memScoped {
+    val out = alloc<IntVar>()
+    if (name.cString { ll_ui_model_get_int(it, out.ptr) } == 0) out.value else null
+}
+
+private fun readModelFloat(name: String): Float? = memScoped {
+    val out = alloc<FloatVar>()
+    if (name.cString { ll_ui_model_get_float(it, out.ptr) } == 0) out.value else null
+}
+
+private fun readModelBool(name: String): Boolean? = memScoped {
+    val out = alloc<IntVar>()
+    if (name.cString { ll_ui_model_get_bool(it, out.ptr) } == 0) out.value != 0 else null
 }
 
 /** 文档里 `data-event-click="xxx"` 的回调；本函数不能捕获任何外部变量，上下文只能走 user_data。 */

@@ -192,11 +192,20 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - 四层各有一个一次性重建脚本，**有先后依赖**：[`build-sdl3.ps1`](thirdparty/build-sdl3.ps1) → [`build-freetype.ps1`](thirdparty/build-freetype.ps1)（RmlUi 的字体引擎）→ [`build-rmlui.ps1`](thirdparty/build-rmlui.ps1)（核心库）→ [`src/nativeCpp/build.ps1`](src/nativeCpp/build.ps1)（门面 + RmlUi 的 SDL_GPU 后端胶水）。产物一律落 `thirdparty/<目标>/` 与 `thirdparty/include/`，cinterop 只需一个 libraryPath。
   - 与 `build-libs.ps1` 的差异：这几个脚本自己找 cmake / ninja（本机没有系统级 cmake，`python -m pip install cmake ninja` 即可，脚本会在 python 的用户级 Scripts 目录里找 —— 别用 `& python` 直接探，PATH 上的商店占位 stub 会抛错）；公共的工具链定位与源码下载解压抽在 [`thirdparty/toolchain.ps1`](thirdparty/toolchain.ps1)，各脚本 dot-source 它。
   - 交叉编译的坑都用**定点补丁**解决，且补丁失配会直接报错（不会静默失效）：SDL3 的 `SDL_assert.h` / `SDL_intrin.h`（clang 与 mingw 的 `<intrin.h>` 在 C++ 下冲突，而 CMake 给目标挂了 PCH）、FreeType 的 `CMakeLists.txt`（去掉 `ftver.rc`：windres 预处理要能用的 gcc，K/N 的 sysroot 里只有缺 cc1 的驱动壳）。
-  - RmlUi 只编 `rmlui_core`（不出 samples / tests / Lua / Lottie / SVG / 内置调试器）。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 build-rmlui.ps1）。
+  - RmlUi 出两个静态库：`rmlui_core`（`librmlui.a`）与内置调试器 `rmlui_debugger`（`librmlui_debugger.a`，见下面那条）；不出 samples / tests / Lua / Lottie / SVG 插件。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 build-rmlui.ps1）。
+  - **内置调试器**（查元素树 / 盒模型、看与改数据模型、看日志、画元素边框）：门面只暴露 `ll_ui_enable_debugger()`，**F8 开关**（按键钩子挂在 `Backend::ProcessEvents(context, &onKeyDown, true)` 的第二个参数上；返回 `true` 放行、`false` 吃掉，与上游 `Samples/shell` 一致）。要点：
+    - 调试器往**宿主上下文**里加自己的文档（不是另开 context），字体是内嵌的 Courier Prime（只有拉丁字形、界面文案英文），与宿主字体互不干扰；启用时机放在 `ll_ui_load_document` 之后，让它画的菜单压在主文档之上。
+    - 它会把**全局系统接口**换成自己的包装（以便截获日志进它的日志面板），所以销毁时要先 `Rml::Debugger::Shutdown()` 再 `RemoveContext` —— 它会把自己的文档从上下文摘掉并还原系统接口。
+    - `librmlui_debugger.a` 要排在 `librmlui.a` **之前**（引用者在左），见 `src/nativeInterop/cinterop/lolosia.def`。
   - RmlUi 的 SDL_GPU 后端加载图片纹理时会 `#include <SDL3_image/SDL_image.h>` 并调 `IMG_LoadTyped_IO`（只此一个函数）。这里没有引整套 SDL_image + stb_image（与轻量化相悖，且解码能力仓库里已有），而是自己实现它：[`include/SDL3_image/SDL_image.h`](src/nativeCpp/include/SDL3_image/SDL_image.h) 只声明这一个函数，[`src/SdlImage.cpp`](src/nativeCpp/src/SdlImage.cpp) 把字节交给宿主的解码回调（Kotlin 侧复用 libpng / libjpeg-turbo / libwebp / giflib 的门面），拿回 RGBA 包成 SDL_Surface。给 RGBA32 是有意的 —— 后端对其它格式会先做一次转换。**新增链接的第三方库为零**：这些库本来就已经在可执行文件里了。
   - 资源读取走 [`src/ResourceFileInterface.cpp`](src/nativeCpp/src/ResourceFileInterface.cpp)：先问宿主的 `read_file` 回调（classpath），**宿主不认识再退回真实文件系统**。回退不是可选项 —— 字体是磁盘文件（`C:/Windows/Fonts/…`），少了它界面文字会整片消失，而日志里只会看到「字体加载失败」，看不出跟资源加载有关。
   - RML 里引用图片：路径以 `/` 开头即 classpath 根相对（`SystemInterface::JoinPath` 对 `/` 开头的路径会剥掉前缀直接返回，与文档位置无关）。⚠️ RCSS **没有 CSS 的 `background-image`**，图片装饰器要写成 `decorator: image( /ui/sample.png )`（会拉伸铺满元素）。
   - ⚠️ 资源回调（`ll_ui_set_resource_loader`）要在**加载字体之前**注册：字体同样走文件接口，而这个回调是文件接口判断「该路径是不是宿主资源」的依据。
+  - **表单控件的双向绑定**：RML 侧写 `data-value="字段名"`（输入框 / 下拉 / 滑杆）与 `data-checked="布尔字段名"`（复选框 / 单选），用户改值由 RmlUi 直接写进数据模型。宿主要把值同步回自己的 ViewModel，就用 `ll_ui_model_get_*` 读回（`ll_ui_model_set_*` 的对称函数，字符串按「两次调用」约定取字节数）。
+    - **别在 change 动作回调里当场读**：同一次 change 事件里，视图层写回数据模型与宿主的 action 监听器谁先被调用没有保证。`UiExperiment.mingw.kt` 的做法是只置一个标记，等本帧跑完（`ll_ui_frame` 返回后）再统一读回 —— 与监听器顺序无关。
+    - ⚠️ RmlUi **不带默认样式表**（上游样例用的 `rml.rcss` 是样例资源，没进我们的 classpath）：`<p>` 默认行内（不写 `display: block` 会挤成一行），输入框 / 滑杆 / 复选框的**子元素**（`slidertrack` / `sliderbar` / `sliderprogress` / `scrollbarvertical` 下的那几个）都是控件自己造的，不给尺寸与颜色就完全不可见。`input` 的 type 会变成同名 class（`input.text` / `input.checkbox` / `input.range`），选择器按这个写。
+    - 动态样式用 `data-style-<属性>`（如 `data-style-opacity="opacity"`），动态 class 用 `data-class-<类名>`；属性名规则是 `data-[类型]-[修饰符]`（见 `ElementUtilities::ApplyDataViewsControllers`）。
+  - ⚠️ **RmlUi 的日志默认落 stderr、但是块缓冲的**：管道 / 重定向到文件时，不 `fflush(stderr)` 就一条也看不到（字体加载、RML/RCSS 报错全在里面）。`ll_log_info` / `ll_log_error` 已统一走「系统接口 + fflush」（系统接口那份是给调试器日志面板用的），自己加日志请用这两个，别直接 `Rml::Log::Message`。
   - ⚠️ **不要给链接补 `-lstdc++`**：K/N 自己的 runtime 就是 C++ 写的、已经链了 libstdc++，再加一次会 `ld.lld: duplicate symbol: std::bad_alloc::~bad_alloc()`。
   - ⚠️ **RmlUi 的尺寸口径与 CSS 直觉不同**（容易踩，症状是「内容只铺满窗口一角、其余一片黑」）：
     - `Context::SetDimensions` 收的尺寸**就是像素** —— 它同时是渲染视口与文档根盒的尺寸；`SetDensityIndependentPixelRatio` 才是 dp→px 的乘数（`ComputeLength` 里 `Unit::DP × dp_ratio`）。所以正确写法是 `SetDimensions(窗口像素尺寸)` + `SetDensityIndependentPixelRatio(显示缩放)`。
@@ -236,8 +245,15 @@ gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
   - **重启**：先杀旧的 `lolosia-backend.exe`（`Get-Process lolosia-backend | Stop-Process -Force`）再跑；
     否则链接会因 exe 被旧进程占用报 `AccessDeniedException`。
   - **UI 实验**（RmlUi 视图层 + SDL3 GPU/Vulkan 出帧）：`.\build\bin\mingwX64\debugExecutable\lolosia-backend.exe ui` —— 首个参数是 `ui` 时不进服务器启动路径。
-    范围：RML/RCSS 描述界面（**flexbox 自动排版，不手算坐标**）+ data-model 数据绑定（Kotlin 的 ViewModel ↔ 文档变量，按钮走 `data-event-click="action('x')"`），界面在 `resources/ui/probe.rml`；
-    图片可用：资源从 classpath 读、解码复用已有的 C 编解码库（见 §7）；关窗即退出。图形栈的构建约定见 §7。
+    范围：RML/RCSS 描述界面（**flexbox 自动排版，不手算坐标**）+ data-model 数据绑定（Kotlin 的 ViewModel ↔ 文档变量，按钮走 `data-event-click="action('x')"`，表单控件走 `data-value` / `data-checked` 并读回 ViewModel），界面在 `resources/ui/probe.rml`；
+    图片可用：资源从 classpath 读、解码复用已有的 C 编解码库（见 §7）；**F8 开内置调试器**（元素树 / 数据模型 / 日志 / 元素边框）；关窗即退出。图形栈的构建约定见 §7。
+    排障：RmlUi 的日志走 stderr（直接跑控制台里就能看到）；要留档就重定向到文件 —— 但如果哪天日志「消失」，先怀疑 stderr 缓冲（见 §7 那条 `fflush`）。
+  - **UI 冒烟帮手**（Windows 专用，手动跑，`tools/ui-smoke/`，不进 Gradle）：改完界面想确认「到底画成什么样」时用，
+    别指望它们能替你点按钮 —— SDL3 只处理窗口有鼠标焦点时的鼠标消息，`PostMessage` 注入的点击会被丢掉（键盘消息不丢，可以注入）。
+    - `tools/ui-smoke/CaptureUi.ps1`：抓窗口客户区到 PNG（Vulkan 出帧，`PrintWindow` 会抓到黑屏，所以走置顶 + `CopyFromScreen`）。
+      `-ResizeTo WxH` 先把窗口拉到指定客户区尺寸再一次看全整页（内容超出视口时截图只能看到上半页，注入滚轮翻页同样会被 SDL 丢掉）。
+      默认输出 `build/ui-shot.png`；抓完可以直接用「看图」的方式读那张 PNG 核对布局。
+    - `tools/ui-smoke/UiProbe.cs`：从截图里按填充色反查控件位置（`LocateButtons` / `ColumnStats`），用法见文件头注释。
 
 - 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64` / `linkReleaseExecutableLinuxX64`；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
@@ -287,8 +303,9 @@ src/commonMain/kotlin/…/ui/     UI 实验里与平台无关的部分：mvvm/�
                                 + UiExperiment.kt（expect fun runUiExperiment）
 src/mingwX64Main/kotlin/…/ui/   UiExperiment.mingw.kt：唯一接触 ll_ui_* 的地方 —— 声明数据模型字段、订阅 ViewModel、转发 action、跑帧循环
 src/linuxMain/kotlin/…/ui/      UiExperiment.linux.kt：占位 actual（linux 目标还没有 SDL3）
-src/commonMain/resources/ui/    probe.rml（实验界面：RML + 内联 RCSS，flexbox 排版 + data-model 绑定）与 sample.png（图片链路的测试图案）
-src/nativeCpp/                  自研 C/C++ 门面：include/lolosia_ui.h（ll_ui_* 的 C ABI）+ src/LolosiaUi.cpp（数据模型与帧循环）+
+src/commonMain/resources/ui/    probe.rml（实验界面：RML + 内联 RCSS，flexbox 排版 + data-model 绑定 + 表单控件）与 sample.png（图片链路的测试图案）
+src/nativeCpp/                  自研 C/C++ 门面：include/lolosia_ui.h（ll_ui_* 的 C ABI：模型字段的 bind/set/get + 资源回调 + 调试器开关）+
+                                src/LolosiaUi.cpp（数据模型、帧循环、F8 键钩子、日志出口）+
                                 src/ResourceFileInterface.cpp（资源读取：先问宿主 classpath，再退回磁盘）+
                                 src/SdlImage.cpp（IMG_LoadTyped_IO 走宿主解码）+ include/SDL3_image/（只要那一个函数的声明）+
                                 build.ps1（连 RmlUi 后端胶水一起编）
@@ -298,12 +315,13 @@ src/linuxMain/kotlin/…/          两个 linux 目标共享的平台实现（.l
 src/mingwX64Main/kotlin/…/      Windows 平台实现（.mingw.kt）：ApiClient / EmbeddedClasspath / Mkdir / Shell（无入口）
 thirdparty/                     预编译 C 静态库与头文件（入库产物，按 mingwX64 / linuxArm64 / linuxX64 三份）+ build-libs.ps1（图像编解码）
                                 + UI 实验那四层的一次性重建脚本（build-sdl3 / build-freetype / build-rmlui）与共用的 toolchain.ps1
-                                （liblolosia.a 由 src/nativeCpp/build.ps1 产出到同一目录；四层的依赖顺序见 §7）
+                                （liblolosia.a 由 src/nativeCpp/build.ps1 产出到同一目录，RmlUi 的 librmlui.a + librmlui_debugger.a 由 build-rmlui.ps1 产出；四层的依赖顺序见 §7）
 router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller）/ InterceptorProcessor（@Interceptor）/
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、
                                 NativeClasspath.kt（zip 合并 + windres/objcopy 嵌入 + 链接参数）、extension/
 sql/                            建表脚本（15 表，含 sys_role.parent_id 与权限规则两表、媒体库五表与 folder_tag；无种子规则 —— 默认值在 permissions.yaml）+ migrate_rbac_groups.sql（历史库一次性迁移）
+tools/ui-smoke/                 UI 实验的冒烟帮手（Windows 专用、手动跑、不进 Gradle）：CaptureUi.ps1（抓客户区截图）+ UiProbe.cs（截图里按填充色反查控件位置）。用法与限制见 §9，别把这类脚本塞进 src/*Test（那是 Gradle 跑的 Kotlin 测试源集）
 ```
 
 ## 11. 深度材料

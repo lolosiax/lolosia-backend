@@ -18,6 +18,7 @@
 #include "RmlUi_Backend.h"
 
 #include <RmlUi/Core.h>
+#include <RmlUi/Debugger.h>
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -52,6 +53,7 @@ struct UiState {
     bool bools[kMaxVars];
     ll_ui_action_callback action;
     void* action_user_data;
+    bool debugger;
     bool created;
     char error[512];
 };
@@ -112,6 +114,22 @@ void onAction(Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& argumen
     g_state.action(g_state.action_user_data, name.c_str());
 }
 
+/**
+ * 按键钩子：后端把每个 key down 在交给文档之前、之后各调一次（由 [priority] 区分）。
+ * 约定是「返回 true 放行、false 吃掉」（见 Backends/RmlUi_Backend.h 与上游 Samples/shell）。
+ *
+ * 只接管 F8：切换内置调试器的显示。没启用调试器时一律放行。
+ */
+bool onKeyDown(Rml::Context*, Rml::Input::KeyIdentifier key, int, float, bool priority) {
+    if (!priority || !g_state.debugger) return true;
+    if (key != Rml::Input::KI_F8) return true;
+
+    const bool visible = !Rml::Debugger::IsVisible();
+    Rml::Debugger::SetVisible(visible);
+    ll_log_info(visible ? "调试器：显示（再按 F8 隐藏）" : "调试器：隐藏");
+    return false;
+}
+
 }  // namespace
 
 LlResourceCallbacks& ll_resource_callbacks() {
@@ -120,13 +138,21 @@ LlResourceCallbacks& ll_resource_callbacks() {
 }
 
 /**
- * 往 RmlUi 的日志通道打一条。走系统接口而不是 Rml::Log::Message：
- * 后者受 RmlUi 的日志级别过滤（默认会把 INFO 滤掉），而系统接口是后端自己报
- * 「Using SDL device driver」用的通道，能稳定落到 stderr。
+ * 往 RmlUi 的日志通道打一条，然后冲一下 stderr。
+ *
+ * 为什么要走系统接口而不是 Rml::Log::Message：后者也是转到系统接口，绕不开下面的问题。
+ * 为什么要 fflush：RmlUi 在非 Win32-native 构建下的默认实现是 fprintf(stderr)（见 Source/Core/LogDefault.cpp），
+ * 而 stderr 被重定向到文件时是块缓冲的 —— 不冲一下，从字体加载到 RML/RCSS 报错全都攒在缓冲区里，
+ * 进程还在跑的时候一条也看不到。
+ *
+ * 系统接口取全局那一份、而不是后端自己那一份：调试器启用后会把全局系统接口换成它的包装
+ * （DebuggerSystemInterface），经它打日志才会出现在调试器的日志面板里。
  */
 static void logToSystem(Rml::Log::Type level, const char* message) {
-    Rml::SystemInterface* system = Backend::GetSystemInterface();
+    Rml::SystemInterface* system = Rml::GetSystemInterface();
+    if (system == nullptr) system = Backend::GetSystemInterface();
     if (system != nullptr) system->LogMessage(level, message);
+    fflush(stderr);
 }
 
 void ll_log_info(const char* message) { logToSystem(Rml::Log::LT_INFO, message); }
@@ -141,6 +167,7 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     g_state.slot_count = 0;
     g_state.action = nullptr;
     g_state.action_user_data = nullptr;
+    g_state.debugger = false;
     g_state.document = nullptr;
     g_state.context = nullptr;
     g_state.created = true;
@@ -347,6 +374,41 @@ int32_t ll_ui_model_set_bool(const char* name, int32_t value) {
     return 0;
 }
 
+int32_t ll_ui_model_get_string(const char* name, char* out, int32_t capacity) {
+    const int index = requireSlot(name, VarKind::String);
+    if (index < 0) return -1;
+    const Rml::String& value = g_state.strings[index];
+    const int32_t size = static_cast<int32_t>(value.size());
+    if (out == nullptr || capacity < size) return size;
+    if (size > 0) memcpy(out, value.data(), static_cast<size_t>(size));
+    clearError();
+    return size;
+}
+
+int32_t ll_ui_model_get_int(const char* name, int32_t* out) {
+    const int index = requireSlot(name, VarKind::Int);
+    if (index < 0 || out == nullptr) return -1;
+    *out = g_state.ints[index];
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_get_float(const char* name, float* out) {
+    const int index = requireSlot(name, VarKind::Float);
+    if (index < 0 || out == nullptr) return -1;
+    *out = g_state.floats[index];
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_get_bool(const char* name, int32_t* out) {
+    const int index = requireSlot(name, VarKind::Bool);
+    if (index < 0 || out == nullptr) return -1;
+    *out = g_state.bools[index] ? 1 : 0;
+    clearError();
+    return 0;
+}
+
 void ll_ui_set_action_callback(ll_ui_action_callback callback, void* user_data) {
     g_state.action = callback;
     g_state.action_user_data = user_data;
@@ -385,11 +447,31 @@ int32_t ll_ui_load_document(const char* rml_utf8) {
     return 0;
 }
 
+int32_t ll_ui_enable_debugger(void) {
+    if (g_state.context == nullptr) {
+        setError("上下文尚未初始化");
+        return -1;
+    }
+    if (g_state.debugger) {
+        clearError();
+        return 0;
+    }
+    // 它自己往上下文里挂几个文档（菜单 / 日志 / 数据模型 / 元素信息 / 钩子），
+    // 并接管全局系统接口以便截获日志；这些都是 RmlUi 官方的调试器插件在管，宿主不用操心。
+    if (!Rml::Debugger::Initialise(g_state.context)) {
+        setError("Rml::Debugger::Initialise 失败（详见上方 RmlUi 日志）");
+        return -1;
+    }
+    g_state.debugger = true;
+    clearError();
+    return 0;
+}
+
 int32_t ll_ui_frame(void) {
     if (g_state.context == nullptr) return -1;
 
     // power_save：没有事件、也不需要动画时阻塞等待（最多等下一帧更新），不空转烧 CPU
-    if (!Backend::ProcessEvents(g_state.context, nullptr, true)) return 1;
+    if (!Backend::ProcessEvents(g_state.context, &onKeyDown, true)) return 1;
 
     g_state.context->Update();
     Backend::BeginFrame();
@@ -401,6 +483,12 @@ int32_t ll_ui_frame(void) {
 const char* ll_ui_last_error(void) { return g_state.error; }
 
 void ll_ui_destroy(void) {
+    // 调试器要排在 RemoveContext 之前收：它得把自己挂进上下文的那些文档摘掉、
+    // 并把被它接管的系统接口还原（Rml::Shutdown 里也能收，但那时代价是上下文已经没了）。
+    if (g_state.debugger) {
+        Rml::Debugger::Shutdown();
+        g_state.debugger = false;
+    }
     // 顺序要紧：先撤 RmlUi（要经渲染接口释放 GPU 资源），再关后端的设备与窗口
     if (g_state.context != nullptr) {
         Rml::RemoveContext(kContextName);

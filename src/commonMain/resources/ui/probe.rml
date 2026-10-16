@@ -22,6 +22,33 @@ body
 	color: #d7dae3;
 	background-color: #12141a;
 	padding: 24dp;
+	/* 内容比视口高（实验页面堆的东西多）：让 body 自己滚，别把下面的控件裁掉 */
+	overflow-y: auto;
+}
+
+/* 滚动条的子元素同样是控件自己造的：不给尺寸与颜色就是不可见的（这里给一套最简的） */
+scrollbarvertical
+{
+	width: 10dp;
+	margin-left: 6dp;
+}
+
+scrollbarvertical slidertrack
+{
+	background-color: #1b1f29;
+}
+
+scrollbarvertical sliderbar
+{
+	width: 10dp;
+	min-height: 40dp;
+	border-radius: 5dp;
+	background-color: #38455a;
+}
+
+scrollbarvertical sliderbar:hover
+{
+	background-color: #5a6f92;
 }
 
 header
@@ -187,6 +214,20 @@ button:active
 	color: #a9e8c1;
 }
 
+/* .panel 里的段落：RmlUi 不带默认样式表，<p> 默认是行内 —— 不给 display 两段会挤成一行 */
+.panel p
+{
+	display: block;
+	margin: 0 0 6dp 0;
+}
+
+/* 反向数据流的回执：改完表单控件后由 Kotlin 的 ViewModel 写回这里 */
+.panel p.echo
+{
+	color: #7fe6a3;
+	margin: 8dp 0 0 0;
+}
+
 /* 图片：RmlUi 没有 CSS 的 background-image，图片装饰器要写成 decorator: image(<路径>)。
    路径以 / 开头 = classpath 根相对（RmlUi 的 JoinPath 会剥掉开头的 / 直接返回）。 */
 .banner
@@ -200,6 +241,102 @@ button:active
 	background-color: #1b1f29;
 	decorator: image( /ui/sample.png );
 	color: #f2f4f8;
+}
+
+/* ------------------------------------------------------------------
+   表单控件：RmlUi 只管行为与取值，外观得自己给（它自带的 rml.rcss 是样例资源，没进我们的
+   classpath）。这几个控件是拿来验证「控件能不能用 flexbox 摆好 + 能不能双向绑定」的，够用即可。
+   input 的 type 会变成同名 class（见 ElementFormControlInput::OnAttributeChange）：
+   input.text / input.checkbox / input.range。
+   ------------------------------------------------------------------ */
+.form
+{
+	display: flex;
+	flex-direction: column;
+	margin-top: 18dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+}
+
+.field
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 10dp;
+}
+
+.field-label
+{
+	display: inline-block;
+	width: 260dp;
+	font-size: 14dp;
+	color: #8d94a4;
+}
+
+.field-control
+{
+	display: inline-block;
+	box-sizing: border-box;
+	width: 200dp;
+	height: 30dp;
+	padding: 0 8dp;
+	border-radius: 6dp;
+	background-color: #11141b;
+	border: 1dp #38455a;
+	color: #d7dae3;
+	font-size: 14dp;
+}
+
+.field-control:hover
+{
+	border-color: #5a6f92;
+}
+
+/* 复选框：选中态直接用背景色表示（上游样例用的是贴图） */
+input.checkbox
+{
+	display: inline-block;
+	width: 18dp;
+	height: 18dp;
+	margin: 0 8dp 0 0;
+	border-radius: 4dp;
+	background-color: #11141b;
+	border: 1dp #38455a;
+}
+
+input.checkbox:checked
+{
+	background-color: #7fe6a3;
+	border-color: #7fe6a3;
+}
+
+/* 滑杆的轨道 / 已选段 / 把手都是控件自己造的子元素，不给尺寸与颜色就是不可见的 */
+input.range slidertrack
+{
+	background-color: #2b3140;
+	border-radius: 4dp;
+}
+
+input.range sliderprogress
+{
+	background-color: #7fe6a3;
+	border-radius: 4dp;
+}
+
+input.range sliderbar
+{
+	width: 14dp;
+	height: 22dp;
+	border-radius: 4dp;
+	background-color: #d7dae3;
+}
+
+input.range sliderbar:hover
+{
+	background-color: #ffffff;
 }
 </style>
 </head>
@@ -251,6 +388,38 @@ button:active
 	<p class="section-title" style="margin-top: 22dp;">图片：资源从 classpath 读、解码复用已有的 C 编解码库</p>
 	<div class="banner">
 		<span>这块背景是 background-image（decorator 路径）；标题左边的图标是 &lt;img&gt;（元素路径）。</span>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">表单控件：data-value / data-checked 是双向绑定，改完由宿主读回 ViewModel（F8 开调试器看数据模型）</p>
+	<div class="form">
+		<div class="field">
+			<span class="field-label">昵称（input.text → 字符串）</span>
+			<input type="text" class="field-control" data-value="nickname" data-event-change="action('sync-form')"/>
+		</div>
+		<div class="field">
+			<span class="field-label">主题（select → 字符串）</span>
+			<select class="field-control" data-value="theme" data-event-change="action('sync-form')">
+				<option value="dark">深色</option>
+				<option value="light">浅色</option>
+				<option value="auto">跟随系统</option>
+			</select>
+		</div>
+		<div class="field">
+			<span class="field-label">不透明度（input.range → 浮点）</span>
+			<input type="range" class="field-control" min="0" max="1" step="0.05" data-value="opacity" data-event-change="action('sync-form')"/>
+		</div>
+		<div class="field">
+			<label class="field-label">
+				<input type="checkbox" data-checked="agree" data-event-change="action('sync-form')"/>
+				我同意（input.checkbox → 布尔）
+			</label>
+		</div>
+	</div>
+
+	<div class="panel" data-class-panel-active="agree" data-style-opacity="opacity">
+		<p>滑杆直接改这块的不透明度：opacity = {{ opacity | format(2) }}</p>
+		<p>数据模型当前值：昵称 = {{ nickname }}，主题 = {{ theme }}，同意 = <span data-if="agree">是</span><span data-if="!agree">否</span></p>
+		<p class="echo">{{ formEcho }}</p>
 	</div>
 </body>
 </rml>

@@ -19,7 +19,7 @@
       thirdparty/include/SDL3/**          thirdparty/build-sdl3.ps1
       thirdparty/<目标>/libSDL3.a
       thirdparty/include/RmlUi/**         thirdparty/build-rmlui.ps1
-      thirdparty/<目标>/librmlui*.a
+      thirdparty/<目标>/librmlui*.a      thirdparty/build-rmlui.ps1（含内置调试器 librmlui_debugger.a）
       thirdparty/include/freetype2/**     thirdparty/build-freetype.ps1
       thirdparty/<目标>/libfreetype.a
       <repo>/build/thirdparty/tree/RmlUi-*/Backends/**（后端胶水的源码，随 build-rmlui.ps1 落到那里）
@@ -75,6 +75,7 @@ $required = @(
     @{ Path = (Join-Path $libOut 'libSDL3.a'); Hint = 'thirdparty/build-sdl3.ps1' },
     @{ Path = (Join-Path $includeRoot 'RmlUi/Core.h'); Hint = 'thirdparty/build-rmlui.ps1' },
     @{ Path = (Join-Path $libOut 'librmlui.a'); Hint = 'thirdparty/build-rmlui.ps1' },
+    @{ Path = (Join-Path $libOut 'librmlui_debugger.a'); Hint = 'thirdparty/build-rmlui.ps1' },
     @{ Path = (Join-Path $includeRoot 'freetype2/ft2build.h'); Hint = 'thirdparty/build-freetype.ps1' },
     @{ Path = (Join-Path $libOut 'libfreetype.a'); Hint = 'thirdparty/build-freetype.ps1' }
 )

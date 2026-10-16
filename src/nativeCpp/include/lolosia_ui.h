@@ -13,6 +13,7 @@
  *     ll_ui_model_bind_int("count", 0);
  *     ll_ui_set_action_callback(&onAction);              // 文档里 action('x') 会回到这里
  *     ll_ui_load_document(rml_text);                     // ……再加载引用它们的文档
+ *     ll_ui_enable_debugger();                           // 可选：F8 开关内置调试器
  *     while (ll_ui_frame() == 0) { }                     // 事件 / 更新 / 渲染 / 呈现
  *     ll_ui_destroy();
  *
@@ -64,6 +65,26 @@ int32_t ll_ui_model_set_float(const char* name, float value);
 int32_t ll_ui_model_set_bool(const char* name, int32_t value);
 
 /*
+ * 读回字段的当前值。
+ *
+ * 表单类控件（输入框、复选框、下拉、滑杆）是双向的：用户在界面上改值，视图层会直接写进
+ * 数据模型。宿主若想让自己的状态跟上，就得把值读回来 —— 只在文档加载时声明一次初始值是不够的，
+ * 否则宿主手里的旧值会在下一次推送时把用户的输入盖掉。
+ *
+ * 返回值与 ll_ui_model_set_* 对齐：0 表示成功，负数表示名字不存在或类型不符；
+ * ll_ui_model_get_string 例外，按资源回调那套「两次调用」约定返回字节数
+ * （out 为空或容量不足时只报所需字节数，**不写终止符**）：
+ *
+ *     int32_t size = ll_ui_model_get_string("name", NULL, 0);
+ *     char* buffer = malloc(size);
+ *     ll_ui_model_get_string("name", buffer, size);
+ */
+int32_t ll_ui_model_get_string(const char* name, char* out, int32_t capacity);
+int32_t ll_ui_model_get_int(const char* name, int32_t* out);
+int32_t ll_ui_model_get_float(const char* name, float* out);
+int32_t ll_ui_model_get_bool(const char* name, int32_t* out);
+
+/*
  * 文档触发的动作回调（data-event-click="action('refresh')" 之类）。
  *
  * user_data 原样回传，供宿主携带自己的上下文（Kotlin 侧通常放一个 StableRef）；
@@ -99,6 +120,18 @@ typedef int32_t (*ll_ui_decode_image)(void* user_data, const uint8_t* bytes, int
                                       int32_t* out_width, int32_t* out_height);
 
 void ll_ui_set_resource_loader(ll_ui_read_file read_file, ll_ui_decode_image decode_image, void* user_data);
+
+/*
+ * 启用 RmlUi 内置调试器（查元素树与盒模型、看 / 改数据模型、看日志、画元素边框）。
+ * F8 切换显示 / 隐藏；窗口关闭时自动随 ll_ui_destroy 收拾干净。成功返回 0。
+ *
+ * 在 ll_ui_load_document() 之后调用：调试器会往上下文里加几个自己的文档，
+ * 晚于主文档加载才能稳定画在最上层（它自己也会把钩子文档提到最前，所以不算硬性要求）。
+ *
+ * 该调试器的字体是内嵌的（只有拉丁字形），界面文案为英文，与宿主加载的字体互不干扰；
+ * 但它会接管全局系统接口以便截获日志，因此启用后 ll_ui_* 打的日志也会进它的日志面板。
+ */
+int32_t ll_ui_enable_debugger(void);
 
 /*
  * 跑一帧：处理输入事件 → 更新 → 渲染 → 呈现。

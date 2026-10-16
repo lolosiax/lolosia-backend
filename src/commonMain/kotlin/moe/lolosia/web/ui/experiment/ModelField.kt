@@ -29,6 +29,11 @@ sealed interface ModelField {
         override fun observe(handler: () -> Unit): Property.Subscription = source.observe { handler() }
     }
 
+    /** 浮点字段，通常配滑杆这类连续量。 */
+    class Decimal(override val name: String, val source: Property<Float>) : ModelField {
+        override fun observe(handler: () -> Unit): Property.Subscription = source.observe { handler() }
+    }
+
     /** 布尔字段，通常配 `data-if` / `data-class-*` 用。 */
     class Flag(override val name: String, val source: Property<Boolean>) : ModelField {
         override fun observe(handler: () -> Unit): Property.Subscription = source.observe { handler() }

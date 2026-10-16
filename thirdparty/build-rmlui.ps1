@@ -13,9 +13,10 @@
     而是把 FREETYPE_INCLUDE_DIR_* / FREETYPE_LIBRARY 三个缓存变量直接指过去，
     CMake 自带的 FindFreetype.cmake 会原样采纳，不依赖任何 pkg-config / config 文件。
 
-    只出核心静态库，不编 samples / tests / Lua 绑定 / Lottie / SVG 插件 / 内置调试器（rmlui_debugger）：
-      - librmlui.a   Rml::* 全部内容 + 默认的 FreeType 字体引擎
-    要内置调试器（查元素树、改属性、看布局）时再把 rmlui_debugger 加回下面的 --target 列表。
+    出两个静态库，不编 samples / tests / Lua 绑定 / Lottie / SVG 插件：
+      - librmlui.a           Rml::* 全部内容 + 默认的 FreeType 字体引擎
+      - librmlui_debugger.a  内置调试器（查元素树、看数据模型、看日志、画元素边框）；
+                             F8 开关，宿主经 Rml::Debugger::* 接入，见 lolosia_ui.h 的 ll_ui_enable_debugger
     后端（Backends/ 下的 SDL_GPU 那几个 .cpp）不在这个脚本里 —— 它们不产出独立库，
     由 src/nativeCpp/build.ps1 连同自研门面一起编进 liblolosia.a。
 
@@ -97,6 +98,7 @@ $cfg = @(
     '-DCMAKE_BUILD_TYPE=Release',
     '-DBUILD_SHARED_LIBS=OFF',
     # 只要核心与调试器，样例 / 测试 / Lua / 插件全关
+    # （调试器不在这些开关里，它是 Source/Debugger 下的独立目标，一直在建）
     '-DRMLUI_SAMPLES=OFF',
     '-DBUILD_TESTING=OFF',
     '-DRMLUI_LUA_BINDINGS=OFF',
@@ -117,7 +119,7 @@ $cfg = @(
 if ($LASTEXITCODE -ne 0) { Stop-WithError "cmake configure 失败：rmlui [$Target]" }
 
 Write-Step "cmake build      rmlui $Version [$Target]"
-& $cmake '--build' $buildDir '--target' 'rmlui_core' '--parallel'
+& $cmake '--build' $buildDir '--target' 'rmlui_core' 'rmlui_debugger' '--parallel'
 if ($LASTEXITCODE -ne 0) { Stop-WithError "cmake build 失败：rmlui [$Target]" }
 
 # ---------------------------------------------------------------- 5. 收产物
