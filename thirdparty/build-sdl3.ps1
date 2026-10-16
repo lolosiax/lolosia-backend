@@ -43,10 +43,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# 工具链定位、源码下载解压、CMake 路径转换都走共享脚本（见 toolchain.ps1）
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+
+$repoRoot = Get-LolosiaRepoRoot
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
-$srcDir = Join-Path $WorkDir 'src'
-$treeDir = Join-Path $WorkDir 'tree'
 $buildDir = Join-Path $WorkDir "cmake/$Target/sdl3"
 $prefixDir = Join-Path $WorkDir "deps/$Target/sdl3"
 $incOut = Join-Path $PSScriptRoot 'include'
@@ -57,95 +58,24 @@ function Warn([string]$m) { Write-Host "!!  $m" -ForegroundColor Yellow }
 function Fail([string]$m) { throw $m }
 
 # ------------------------------------------------ 0. 定位 cmake / ninja
-function Resolve-Tool([string]$Name) {
-    $cmd = Get-Command "$Name.exe" -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-
-    $candidates = @()
-    if ($env:APPDATA) {
-        $pyUser = Join-Path $env:APPDATA 'Python'
-        if (Test-Path $pyUser) {
-            $candidates += Get-ChildItem $pyUser -Directory -Filter 'Python3*' -ErrorAction SilentlyContinue |
-                ForEach-Object { Join-Path $_.FullName 'Scripts' }
-        }
-    }
-    $sysScripts = (& python -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2>$null)
-    if ($sysScripts) { $candidates += $sysScripts.Trim() }
-
-    foreach ($dir in $candidates) {
-        $p = Join-Path $dir "$Name.exe"
-        if (Test-Path $p) { return $p }
-    }
-    Fail "找不到 $Name。安装：python -m pip install cmake ninja（装完无需加 PATH，本脚本会自行定位）"
-}
-
-$cmake = Resolve-Tool 'cmake'
-$ninja = Resolve-Tool 'ninja'
+$cmake = Resolve-BuildTool 'cmake'
+$ninja = Resolve-BuildTool 'ninja'
 Write-Host "    cmake   : $cmake"
 Write-Host "    ninja   : $ninja"
 
 # ------------------------------------------------ 1. 定位 Kotlin/Native 工具链
 Info '定位 Kotlin/Native 自带交叉工具链'
-
-$versionsToml = Join-Path $repoRoot 'gradle/libs.versions.toml'
-$kotlinVersion = (Select-String -Path $versionsToml -Pattern '^\s*kotlin\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-$deps = Join-Path $env:USERPROFILE '.konan/dependencies'
-if (-not (Test-Path $deps)) { Fail "找不到 $deps，请先执行一次 Gradle 构建以下载 Kotlin/Native 依赖" }
-
-$llvmHome = Get-ChildItem $deps -Directory -Filter 'llvm-*-windows-essentials-*' |
-    Sort-Object Name -Descending | Select-Object -First 1
-$msysHome = Get-ChildItem $deps -Directory -Filter 'msys2-mingw-w64-x86_64-*' | Select-Object -First 1
-foreach ($d in @($llvmHome, $msysHome)) {
-    if (-not $d) { Fail "Kotlin/Native 依赖不完整（缺 llvm 或 msys2-mingw），请先执行一次 Gradle 构建" }
-}
-
-$clang = Join-Path $llvmHome.FullName 'bin/clang.exe'
-# SDL3 在 Windows 上会 enable_language(CXX)（src/core/windows/*.cpp 是 C++），
-# 不给它指 clang++ 的话 CMake 会自己在 sysroot 里翻出 c++.exe，而那是台残废的 GCC 驱动（缺 cc1plus）
-$clangxx = Join-Path $llvmHome.FullName 'bin/clang++.exe'
-$sysroot = $msysHome.FullName
-$windres = Join-Path $msysHome.FullName 'bin/windres.exe'
-foreach ($p in @($clang, $clangxx, $sysroot, $windres)) {
-    if (-not (Test-Path $p)) { Fail "缺文件：$p" }
-}
-Write-Host "    clang   : $clang"
-Write-Host "    clang++ : $clangxx"
-Write-Host "    sysroot : $sysroot"
-Write-Host "    windres : $windres"
-Write-Host "    kotlin  : $kotlinVersion"
+$tool = Get-KonanToolchain $Target
+Write-ToolchainSummary $tool
+$clang = $tool.Clang
+$clangxx = $tool.ClangXX
+$sysroot = $tool.Sysroot
+$windres = $tool.Windres
 
 # ------------------------------------------------ 2. 下载解压（源码不入库）
-$tarball = Join-Path $srcDir "SDL3-$Version.tar.gz"
-$sdlTree = Join-Path $treeDir "SDL3-$Version"
-
-if ($Force) {
-    Info '清理旧的构建目录'
-    foreach ($p in @($buildDir, $prefixDir, $sdlTree)) {
-        if (Test-Path $p) { Remove-Item $p -Recurse -Force }
-    }
-    if (Test-Path $tarball) { Remove-Item $tarball -Force }
-}
-New-Item -ItemType Directory -Force -Path $srcDir, $treeDir | Out-Null
-
-if (-not (Test-Path $tarball)) {
-    Info "下载 SDL3 $Version"
-    $url = "https://github.com/libsdl-org/SDL/releases/download/release-$Version/SDL3-$Version.tar.gz"
-    Invoke-WebRequest -Uri $url -OutFile $tarball -UseBasicParsing -TimeoutSec 600
-    $magic = [System.IO.File]::ReadAllBytes($tarball)[0..1]
-    if ($magic[0] -eq 0x3C -and $magic[1] -eq 0x21) {
-        Remove-Item $tarball -Force
-        Fail "下载到的是 HTML 而非 tarball，源地址已失效（$url）"
-    }
-} else {
-    Write-Host "    已存在 SDL3-$Version.tar.gz"
-}
-
-if (-not (Test-Path $sdlTree)) {
-    Info "解压 SDL3 $Version"
-    & tar -xzf $tarball -C $treeDir
-    if ($LASTEXITCODE -ne 0) { Fail "解压失败：$tarball" }
-}
-if (-not (Test-Path (Join-Path $sdlTree 'CMakeLists.txt'))) { Fail "源码目录不完整：$sdlTree" }
+$sdlTree = Get-ThirdpartySource -Name "SDL3-$Version" `
+    -Url "https://github.com/libsdl-org/SDL/releases/download/release-$Version/SDL3-$Version.tar.gz" `
+    -WorkDir $WorkDir -Force:$Force
 
 # ---------------------------------------------------------------- 2.5 打补丁
 # 共同的背景：SDL3 在 mingw-w64 下会 `#include <intrin.h>`，而 clang 自带的 intrin.h 会先把
@@ -200,27 +130,23 @@ foreach ($patch in $sdlPatches) {
 }
 
 # ------------------------------------------------ 3. CMake 交叉构建（静态库）
-# CMake 会把这些路径原样写进生成的 *.cmake 里，Windows 反斜杠会被当成转义
-# （CMakeRCCompiler.cmake 里的 \U 直接报 Invalid character escape），统一换成正斜杠。
-function CmPath([string]$p) { return ($p -replace '\\', '/') }
-
 # 缓存目录一次性用，重跑时先清掉，避免上一轮的坏缓存把 configure 卡死
 if (Test-Path $buildDir) { Remove-Item $buildDir -Recurse -Force }
 
 Info "cmake configure  sdl3 [$Target]"
 $cfg = @(
-    '-S', (CmPath $sdlTree), '-B', (CmPath $buildDir), '-G', 'Ninja',
-    "-DCMAKE_MAKE_PROGRAM=$(CmPath $ninja)",
+    '-S', (ConvertTo-CmPath $sdlTree), '-B', (ConvertTo-CmPath $buildDir), '-G', 'Ninja',
+    "-DCMAKE_MAKE_PROGRAM=$(ConvertTo-CmPath $ninja)",
     '-DCMAKE_SYSTEM_NAME=Windows',
     '-DCMAKE_SYSTEM_PROCESSOR=x86_64',
     # 交叉编译不做 try_run，试编译产物直接当静态库，省掉链接器依赖
     '-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY',
-    "-DCMAKE_C_COMPILER=$(CmPath $clang)",
+    "-DCMAKE_C_COMPILER=$(ConvertTo-CmPath $clang)",
     '-DCMAKE_C_COMPILER_TARGET=x86_64-w64-mingw32',
-    "-DCMAKE_CXX_COMPILER=$(CmPath $clangxx)",
+    "-DCMAKE_CXX_COMPILER=$(ConvertTo-CmPath $clangxx)",
     '-DCMAKE_CXX_COMPILER_TARGET=x86_64-w64-mingw32',
-    "-DCMAKE_SYSROOT=$(CmPath $sysroot)",
-    "-DCMAKE_RC_COMPILER=$(CmPath $windres)",
+    "-DCMAKE_SYSROOT=$(ConvertTo-CmPath $sysroot)",
+    "-DCMAKE_RC_COMPILER=$(ConvertTo-CmPath $windres)",
     '-DCMAKE_BUILD_TYPE=Release',
     # 静态库优先：只出 libSDL3.a，不出 dll 与导入库
     '-DSDL_SHARED=OFF',

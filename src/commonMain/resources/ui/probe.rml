@@ -1,0 +1,201 @@
+<rml>
+<head>
+<style>
+/* ------------------------------------------------------------------
+   这个文档用来验证「不手算 x/y」：下面所有位置都由 flexbox 与盒模型算出来，
+   没有一处写死坐标。改布局只需要动这里的 flex-* / 尺寸。
+   ------------------------------------------------------------------ */
+
+body
+{
+	font-family: lolosia-ui;
+	font-size: 15dp;
+	color: #d7dae3;
+	background-color: #12141a;
+	padding: 24dp;
+}
+
+header
+{
+	display: block;
+	margin-bottom: 22dp;
+}
+
+h1
+{
+	display: block;
+	font-size: 26dp;
+	font-weight: bold;
+	color: #f2f4f8;
+	margin: 0 0 6dp 0;
+}
+
+.subtitle
+{
+	display: block;
+	font-size: 14dp;
+	color: #8d94a4;
+	margin: 0;
+}
+
+.section-title
+{
+	display: block;
+	font-size: 13dp;
+	color: #8d94a4;
+	margin: 0 0 10dp 0;
+}
+
+/* 卡片行：一行三张等宽卡片，宽度全靠 flex: 1 平分（RmlUi 的 flex 不支持 gap，用 margin 代替） */
+.cards
+{
+	display: flex;
+	flex-direction: row;
+	align-items: stretch;
+}
+
+.card
+{
+	display: block;
+	flex: 1;
+	margin-right: 14dp;
+	padding: 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+}
+
+.card.last
+{
+	margin-right: 0;
+}
+
+.card-label
+{
+	display: block;
+	font-size: 13dp;
+	color: #8d94a4;
+	margin: 0 0 8dp 0;
+}
+
+.card-value
+{
+	display: block;
+	font-size: 26dp;
+	color: #7fe6a3;
+	margin: 0;
+}
+
+.card-value.small
+{
+	font-size: 15dp;
+	color: #d7dae3;
+}
+
+/* 工具条：按钮横向排布，靠 justify-content 与 align-items 对齐 */
+.toolbar
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: flex-start;
+	margin-top: 20dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+}
+
+button
+{
+	display: inline-block;
+	margin-right: 12dp;
+	padding: 8dp 18dp;
+	border-radius: 8dp;
+	background-color: #26303f;
+	border: 1dp #38455a;
+	color: #d7dae3;
+	cursor: pointer;
+}
+
+button:hover
+{
+	background-color: #33415a;
+	border-color: #5a6f92;
+}
+
+button:active
+{
+	background-color: #3f5170;
+}
+
+.hint
+{
+	display: block;
+	margin: 18dp 0 0 0;
+	font-size: 14dp;
+	color: #8d94a4;
+}
+
+/* data-class-panel-active 生效时套上的样式 */
+.panel
+{
+	display: block;
+	margin-top: 18dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+	font-size: 14dp;
+	color: #8d94a4;
+}
+
+.panel.panel-active
+{
+	background-color: #14291d;
+	border: 1dp #2e6b47;
+	color: #a9e8c1;
+}
+</style>
+</head>
+
+<body data-model="main">
+	<header>
+		<h1>{{ title }}</h1>
+		<p class="subtitle">{{ subtitle }}</p>
+	</header>
+
+	<p class="section-title">下面三张卡片是 flex 行里的 flex: 1 —— 宽度由布局算出，没有写死坐标</p>
+	<div class="cards">
+		<div class="card">
+			<p class="card-label">点击计数</p>
+			<p class="card-value">{{ count }}</p>
+		</div>
+		<div class="card">
+			<p class="card-label">高亮开关</p>
+			<p class="card-value" data-if="highlighted">开</p>
+			<p class="card-value" data-if="!highlighted">关</p>
+		</div>
+		<div class="card last">
+			<p class="card-label">最近动作</p>
+			<p class="card-value small">{{ lastAction }}</p>
+		</div>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">按钮点击走 data-event-click → C++ 回调 → Kotlin 的 ViewModel → 数据模型 → 重绘</p>
+	<div class="toolbar">
+		<button data-event-click="action('increment')">+1</button>
+		<button data-event-click="action('increment-ten')">+10</button>
+		<button data-event-click="action('reset')">归零</button>
+		<button data-event-click="action('toggle-highlight')">切换高亮</button>
+	</div>
+
+	<p class="hint" data-if="count > 0">已经点了 {{ count }} 次；这一行由 data-if="count > 0" 控制。</p>
+	<p class="hint" data-if="count == 0">还没点过按钮。</p>
+
+	<div class="panel" data-class-panel-active="highlighted">
+		<span data-if="highlighted">data-class-panel-active 生效：块样式随数据变了。</span>
+		<span data-if="!highlighted">data-class-panel-active 还没生效，点「切换高亮」试试。</span>
+	</div>
+</body>
+</rml>

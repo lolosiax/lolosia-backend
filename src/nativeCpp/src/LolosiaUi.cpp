@@ -1,35 +1,55 @@
-// LolosiaUi.cpp —— ll_ui_* 的实现：SDL3 窗口 + SDL3 GPU（Windows / Linux 上即 Vulkan）的帧循环。
+// LolosiaUi.cpp —— ll_ui_* 的实现：RmlUi 的 SDL_GPU 后端 + 数据模型 + 帧循环。
 //
-// 这一层刻意保持「没有 C++ 运行时依赖」：不用 STL、不用异常与 RTTI（编译参数 -fno-exceptions -fno-rtti），
-// 状态放文件级静态变量，字符串只落固定缓冲。Kotlin/Native 侧因此不必额外链 libstdc++。
-// 后续接入 RmlUi / FreeType 时，它们各自需要的 C++ 运行时在 build.ps1 里单独补链接参数。
+// 分工：
+//   - 窗口、GPU 设备、输入事件与 DPI 缩放、渲染接口全部交给 RmlUi 自带的后端
+//     （Backends/RmlUi_Backend_SDL_GPU.cpp 等三件套，见 src/nativeCpp/build.ps1 的编译清单）；
+//   - 本文件只做「把 RmlUi 的 C++ API 收成一套 C ABI」这件事：状态、错误信息、
+//     数据模型字段的转发表、以及把文档里的 action(...) 转发回宿主。
+//
+// 数据模型字段为什么要转发表：RmlUi 的 Bind(name, ptr) 绑的是「变量的地址」，
+// 指针必须在模型存活期间一直有效，而字段名是宿主运行时给的。
+// 于是这里用固定容量的一组静态槽位存值，按名字查下标。
 
 #define SDL_MAIN_HANDLED 1
 
 #include "lolosia_ui.h"
 
-#include <SDL3/SDL.h>
-// 入口点由 Kotlin/Native 提供，SDL 只管子系统初始化：这里要的是 SDL_SetMainReady 的声明
-// （SDL.h 不拉 SDL_main.h），调用它才会把主线程 ID 登记给 SDL。
-#include <SDL3/SDL_main.h>
-#include <stdio.h>
+#include "RmlUi_Backend.h"
+
+#include <RmlUi/Core.h>
 #include <string.h>
 
 namespace {
 
-/** 单窗口状态；SDL 窗口与 GPU 设备都挂在这里，由 ll_ui_create / ll_ui_destroy 成对管理。 */
+/** 数据模型名，与文档里的 data-model="main" 对应。 */
+constexpr const char* kContextName = "main";
+constexpr const char* kModelName = "main";
+
+/** 数据模型字段上限：固定容量换「无动态分配」，超出时明确报错而不是静默丢弃。 */
+constexpr int kMaxVars = 32;
+
+enum class VarKind { String, Int, Float, Bool };
+
+struct VarSlot {
+    Rml::String name;
+    VarKind kind;
+};
+
+/** 单窗口状态；生命周期由 ll_ui_create / ll_ui_destroy 划定。 */
 struct UiState {
-    SDL_Window* window;
-    SDL_GPUDevice* device;
-    SDL_GPUCommandBuffer* commands;
-    SDL_GPUTexture* swapchain;
-    bool initialized;
-    bool claimed;
-    bool quit_requested;
-    bool frame_open;
-    int32_t frame_width;
-    int32_t frame_height;
-    SDL_FColor clear_color;
+    Rml::Context* context;
+    Rml::ElementDocument* document;
+    Rml::DataModelConstructor model;
+    Rml::DataModelHandle handle;
+    VarSlot slots[kMaxVars];
+    int slot_count;
+    Rml::String strings[kMaxVars];
+    int32_t ints[kMaxVars];
+    float floats[kMaxVars];
+    bool bools[kMaxVars];
+    ll_ui_action_callback action;
+    void* action_user_data;
+    bool created;
     char error[512];
 };
 
@@ -40,242 +60,286 @@ void setError(const char* detail) {
     g_state.error[sizeof(g_state.error) - 1] = '\0';
 }
 
-/** 把 SDL 的最近一次错误拼进 last_error，形如「前缀：SDL 报错」。 */
-void setSdlError(const char* prefix) {
-    snprintf(g_state.error, sizeof(g_state.error), "%s：%s", prefix, SDL_GetError());
+void setNamedError(const char* prefix, const char* name) {
+    snprintf(g_state.error, sizeof(g_state.error), "%s：%s", prefix, name == nullptr ? "(空)" : name);
     g_state.error[sizeof(g_state.error) - 1] = '\0';
 }
 
-/** 取 UTF-8 串的首个码点，供 LL_UI_EVENT_TEXT 使用；序列被截断时返回 0（调用方据此丢弃该事件）。 */
-uint32_t firstCodepoint(const char* text) {
-    if (text == NULL || text[0] == '\0') return 0;
-    const unsigned char* bytes = (const unsigned char*)text;
-    const unsigned char c0 = bytes[0];
-    if (c0 < 0x80) return c0;
-    if ((c0 & 0xE0) == 0xC0) {
-        if (bytes[1] == '\0') return 0;
-        return ((uint32_t)(c0 & 0x1F) << 6) | (uint32_t)(bytes[1] & 0x3F);
+void clearError() { g_state.error[0] = '\0'; }
+
+/** 按名字找槽位；要求类型一致，避免把 int 字段当 string 写。返回 -1 表示没有可用槽位。 */
+int findSlot(const char* name, VarKind kind) {
+    if (name == nullptr || name[0] == '\0') return -1;
+    for (int i = 0; i < g_state.slot_count; ++i) {
+        if (g_state.slots[i].name == name && g_state.slots[i].kind == kind) return i;
     }
-    if ((c0 & 0xF0) == 0xE0) {
-        if (bytes[1] == '\0' || bytes[2] == '\0') return 0;
-        return ((uint32_t)(c0 & 0x0F) << 12) | ((uint32_t)(bytes[1] & 0x3F) << 6) | (uint32_t)(bytes[2] & 0x3F);
-    }
-    if ((c0 & 0xF8) == 0xF0) {
-        if (bytes[1] == '\0' || bytes[2] == '\0' || bytes[3] == '\0') return 0;
-        return ((uint32_t)(c0 & 0x07) << 18) | ((uint32_t)(bytes[1] & 0x3F) << 12) |
-               ((uint32_t)(bytes[2] & 0x3F) << 6) | (uint32_t)(bytes[3] & 0x3F);
-    }
-    return 0;
+    return -1;
 }
 
-/** SDL 事件 → 扁平事件；不关心的类型返回 false。 */
-bool translate(const SDL_Event& event, ll_ui_event* out) {
-    switch (event.type) {
-        case SDL_EVENT_QUIT:
-        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-            out->kind = LL_UI_EVENT_QUIT;
-            return true;
-        case SDL_EVENT_WINDOW_RESIZED:
-        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            out->kind = LL_UI_EVENT_RESIZE;
-            out->x = event.window.data1;
-            out->y = event.window.data2;
-            return true;
-        case SDL_EVENT_MOUSE_MOTION:
-            out->kind = LL_UI_EVENT_MOUSE_MOVE;
-            out->x = (int32_t)event.motion.x;
-            out->y = (int32_t)event.motion.y;
-            out->dx = (int32_t)event.motion.xrel;
-            out->dy = (int32_t)event.motion.yrel;
-            return true;
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        case SDL_EVENT_MOUSE_BUTTON_UP:
-            out->kind = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? LL_UI_EVENT_MOUSE_DOWN : LL_UI_EVENT_MOUSE_UP;
-            out->x = (int32_t)event.button.x;
-            out->y = (int32_t)event.button.y;
-            out->code = event.button.button;
-            return true;
-        case SDL_EVENT_MOUSE_WHEEL:
-            // 一格滚轮按 120 归一，与常见 UI 框架的刻度一致
-            out->kind = LL_UI_EVENT_WHEEL;
-            out->dx = (int32_t)(event.wheel.x * 120.0f);
-            out->dy = (int32_t)(event.wheel.y * 120.0f);
-            return true;
-        case SDL_EVENT_KEY_DOWN:
-        case SDL_EVENT_KEY_UP:
-            out->kind = event.type == SDL_EVENT_KEY_DOWN ? LL_UI_EVENT_KEY_DOWN : LL_UI_EVENT_KEY_UP;
-            out->code = (int32_t)event.key.key;
-            out->x = (int32_t)event.key.mod;
-            return true;
-        case SDL_EVENT_TEXT_INPUT:
-            out->kind = LL_UI_EVENT_TEXT;
-            out->codepoint = firstCodepoint(event.text.text);
-            return out->codepoint != 0;
-        default:
-            return false;
+/** 取一个槽位（重名同类型则复用，否则新占一个）；返回 -1 表示已满或名字非法。 */
+int acquireSlot(const char* name, VarKind kind) {
+    if (name == nullptr || name[0] == '\0') return -1;
+    for (int i = 0; i < g_state.slot_count; ++i) {
+        if (g_state.slots[i].name == name) return g_state.slots[i].kind == kind ? i : -1;
     }
+    if (g_state.slot_count >= kMaxVars) return -1;
+    const int index = g_state.slot_count++;
+    g_state.slots[index].name = name;
+    g_state.slots[index].kind = kind;
+    return index;
+}
+
+/** 按名字找到已声明的槽位下标；找不到或类型不符时写错误信息。 */
+int requireSlot(const char* name, VarKind kind) {
+    const int index = findSlot(name, kind);
+    if (index < 0) {
+        setNamedError("数据模型里没有这个字段（或类型不符）", name);
+        return -1;
+    }
+    return index;
+}
+
+/** 文档里的 action('x') 落到这里，再转发给宿主注册的回调。 */
+void onAction(Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& arguments) {
+    if (g_state.action == nullptr) return;
+    Rml::String name;
+    if (!arguments.empty() && arguments[0].GetType() == Rml::Variant::STRING) {
+        name = arguments[0].Get<Rml::String>();
+    }
+    g_state.action(g_state.action_user_data, name.c_str());
 }
 
 }  // namespace
 
 int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
-    if (g_state.initialized) {
+    if (g_state.created) {
         setError("ll_ui 已初始化，同一进程只允许一个窗口");
         return -1;
     }
-    g_state.error[0] = '\0';
-    g_state.clear_color = SDL_FColor{0.09f, 0.09f, 0.12f, 1.0f};
+    clearError();
+    g_state.slot_count = 0;
+    g_state.action = nullptr;
+    g_state.action_user_data = nullptr;
+    g_state.document = nullptr;
+    g_state.context = nullptr;
+    g_state.created = true;
 
-    SDL_SetMainReady();
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        setSdlError("SDL_Init 失败");
-        return -1;
-    }
-    g_state.initialized = true;
-
-    g_state.window = SDL_CreateWindow(title, width, height, SDL_WINDOW_RESIZABLE);
-    if (g_state.window == NULL) {
-        setSdlError("SDL_CreateWindow 失败");
+    // 后端自己开窗、建 GPU 设备、接管输入，并把 SDL 事件翻译成 RmlUi 输入
+    if (!Backend::Initialize(title == nullptr ? "lolosia" : title, width, height, true)) {
+        setError("Backend::Initialize 失败：窗口或 GPU 设备创建不出来");
         ll_ui_destroy();
         return -1;
     }
 
-    // 只要有 Vulkan（SPIR-V 是 Vulkan 的着色器格式）。拿不到设备不算致命：
-    // 窗口照常存在，last_error 留下原因，绘制相关调用降级为空操作。
-    g_state.device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, NULL);
-    if (g_state.device == NULL) {
-        setSdlError("SDL_CreateGPUDevice(SPIRV) 失败，窗口可显示但不出帧");
-        return 0;
-    }
-    if (!SDL_ClaimWindowForGPUDevice(g_state.device, g_state.window)) {
-        setSdlError("SDL_ClaimWindowForGPUDevice 失败，窗口可显示但不出帧");
-        SDL_DestroyGPUDevice(g_state.device);
-        g_state.device = NULL;
-        return 0;
-    }
-    g_state.claimed = true;
-    return 0;
-}
-
-int32_t ll_ui_poll(ll_ui_event* out, int32_t timeout_ms) {
-    if (!g_state.initialized || out == NULL) return -1;
-    if (g_state.quit_requested) return -1;
-
-    SDL_Event event;
-    if (!SDL_WaitEventTimeout(&event, timeout_ms)) return 0;
-
-    // WaitEventTimeout 只取一个事件，同批事件留给下一次调用（调用方用 timeout_ms = 0 排空积压）
-    do {
-        if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-            g_state.quit_requested = true;
-            return -1;
-        }
-        memset(out, 0, sizeof(ll_ui_event));
-        if (translate(event, out)) return 1;
-    } while (SDL_PollEvent(&event));
-    return 0;
-}
-
-int32_t ll_ui_begin_frame(int32_t* out_width, int32_t* out_height) {
-    if (!g_state.initialized) return -1;
-    g_state.swapchain = NULL;
-    g_state.frame_width = 0;
-    g_state.frame_height = 0;
-
-    if (g_state.device == NULL) {
-        // 无 GPU 设备：只回报窗口尺寸，不产帧
-        SDL_GetWindowSizeInPixels(g_state.window, &g_state.frame_width, &g_state.frame_height);
-    } else {
-        g_state.commands = SDL_AcquireGPUCommandBuffer(g_state.device);
-        if (g_state.commands == NULL) {
-            setSdlError("SDL_AcquireGPUCommandBuffer 失败");
-            return -1;
-        }
-        Uint32 width = 0;
-        Uint32 height = 0;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(
-                g_state.commands, g_state.window, &g_state.swapchain, &width, &height)) {
-            // 窗口最小化等情形取不到交换链纹理：本帧跳过绘制，命令缓冲仍要提交
-            setSdlError("SDL_WaitAndAcquireGPUSwapchainTexture 失败");
-            g_state.swapchain = NULL;
-        }
-        g_state.frame_width = (int32_t)width;
-        g_state.frame_height = (int32_t)height;
-    }
-
-    if (out_width != NULL) *out_width = g_state.frame_width;
-    if (out_height != NULL) *out_height = g_state.frame_height;
-    g_state.frame_open = true;
-    return 0;
-}
-
-int32_t ll_ui_clear(float r, float g, float b, float a) {
-    if (!g_state.frame_open) return -1;
-    g_state.clear_color = SDL_FColor{r, g, b, a};
-    return 0;
-}
-
-int32_t ll_ui_end_frame(void) {
-    if (!g_state.frame_open) return -1;
-    g_state.frame_open = false;
-
-    if (g_state.device == NULL) return 0;
-
-    if (g_state.swapchain != NULL) {
-        SDL_GPUColorTargetInfo target = {};
-        target.texture = g_state.swapchain;
-        target.clear_color = g_state.clear_color;
-        target.load_op = SDL_GPU_LOADOP_CLEAR;
-        target.store_op = SDL_GPU_STOREOP_STORE;
-
-        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(g_state.commands, &target, 1, NULL);
-        if (pass == NULL) {
-            setSdlError("SDL_BeginGPURenderPass 失败");
-            SDL_CancelGPUCommandBuffer(g_state.commands);
-            g_state.commands = NULL;
-            return -1;
-        }
-        // 控件绘制将插在这里；本帧只有清屏
-        SDL_EndGPURenderPass(pass);
-    }
-
-    if (!SDL_SubmitGPUCommandBuffer(g_state.commands)) {
-        setSdlError("SDL_SubmitGPUCommandBuffer 失败");
-        g_state.commands = NULL;
+    // 渲染/系统接口必须在 Rml::Initialise() 之前挂上
+    Rml::SetSystemInterface(Backend::GetSystemInterface());
+    Rml::SetRenderInterface(Backend::GetRenderInterface());
+    if (!Rml::Initialise()) {
+        setError("Rml::Initialise 失败");
+        ll_ui_destroy();
         return -1;
     }
-    g_state.commands = NULL;
+
+    g_state.context = Rml::CreateContext(kContextName, Rml::Vector2i(width, height));
+    if (g_state.context == nullptr) {
+        setError("Rml::CreateContext 失败");
+        ll_ui_destroy();
+        return -1;
+    }
+
+    // 先建模型再加载文档：文档里的 data-bind-* / data-model 在解析时就要能找到变量
+    g_state.model = g_state.context->CreateDataModel(kModelName);
+    if (!g_state.model) {
+        setError("CreateDataModel 失败");
+        ll_ui_destroy();
+        return -1;
+    }
+    g_state.handle = g_state.model.GetModelHandle();
+    // 注册名为 action 的数据事件：文档里的 data-event-click="action('x')" 全靠它派发。
+    // 这一步失败必须报出来 —— 否则症状是「按钮点了完全没反应」，且没有任何线索可查。
+    if (!g_state.model.BindEventCallback("action", &onAction)) {
+        setError("BindEventCallback(action) 失败：文档里的 action(...) 不会触发");
+        ll_ui_destroy();
+        return -1;
+    }
     return 0;
 }
 
-const char* ll_ui_backend(void) {
-    if (g_state.device == NULL) return "";
-    const char* name = SDL_GetGPUDeviceDriver(g_state.device);
-    return name == NULL ? "" : name;
+int32_t ll_ui_load_font(const char* file_path, const char* family) {
+    if (file_path == nullptr || file_path[0] == '\0') {
+        setError("字体路径为空");
+        return -1;
+    }
+    if (family == nullptr || family[0] == '\0') {
+        setError("字体家族名为空");
+        return -1;
+    }
+    // 指定家族名 + fallback_face：RCSS 里写 font-family: <family> 就能命中，
+    // 其他家族缺字形时也会退到它
+    if (!Rml::LoadFontFace(file_path, family, Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Auto, true)) {
+        setNamedError("加载字体失败", file_path);
+        return -1;
+    }
+    clearError();
+    return 0;
 }
 
-const char* ll_ui_last_error(void) {
-    return g_state.error;
+int32_t ll_ui_model_bind_string(const char* name, const char* initial) {
+    const int index = acquireSlot(name, VarKind::String);
+    if (index < 0) {
+        setNamedError("数据模型字段声明失败（槽位已满、名字为空或与已有字段类型冲突）", name);
+        return -1;
+    }
+    g_state.strings[index] = initial == nullptr ? "" : initial;
+    if (!g_state.model.Bind(name, &g_state.strings[index])) {
+        setNamedError("Bind(string) 失败", name);
+        return -1;
+    }
+    clearError();
+    return 0;
 }
+
+int32_t ll_ui_model_bind_int(const char* name, int32_t initial) {
+    const int index = acquireSlot(name, VarKind::Int);
+    if (index < 0) {
+        setNamedError("数据模型字段声明失败（槽位已满、名字为空或与已有字段类型冲突）", name);
+        return -1;
+    }
+    g_state.ints[index] = initial;
+    if (!g_state.model.Bind(name, &g_state.ints[index])) {
+        setNamedError("Bind(int) 失败", name);
+        return -1;
+    }
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_bind_float(const char* name, float initial) {
+    const int index = acquireSlot(name, VarKind::Float);
+    if (index < 0) {
+        setNamedError("数据模型字段声明失败（槽位已满、名字为空或与已有字段类型冲突）", name);
+        return -1;
+    }
+    g_state.floats[index] = initial;
+    if (!g_state.model.Bind(name, &g_state.floats[index])) {
+        setNamedError("Bind(float) 失败", name);
+        return -1;
+    }
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_bind_bool(const char* name, int32_t initial) {
+    const int index = acquireSlot(name, VarKind::Bool);
+    if (index < 0) {
+        setNamedError("数据模型字段声明失败（槽位已满、名字为空或与已有字段类型冲突）", name);
+        return -1;
+    }
+    g_state.bools[index] = initial != 0;
+    if (!g_state.model.Bind(name, &g_state.bools[index])) {
+        setNamedError("Bind(bool) 失败", name);
+        return -1;
+    }
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_set_string(const char* name, const char* value) {
+    const int index = requireSlot(name, VarKind::String);
+    if (index < 0) return -1;
+    g_state.strings[index] = value == nullptr ? "" : value;
+    g_state.handle.DirtyVariable(name);
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_set_int(const char* name, int32_t value) {
+    const int index = requireSlot(name, VarKind::Int);
+    if (index < 0) return -1;
+    g_state.ints[index] = value;
+    g_state.handle.DirtyVariable(name);
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_set_float(const char* name, float value) {
+    const int index = requireSlot(name, VarKind::Float);
+    if (index < 0) return -1;
+    g_state.floats[index] = value;
+    g_state.handle.DirtyVariable(name);
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_model_set_bool(const char* name, int32_t value) {
+    const int index = requireSlot(name, VarKind::Bool);
+    if (index < 0) return -1;
+    g_state.bools[index] = value != 0;
+    g_state.handle.DirtyVariable(name);
+    clearError();
+    return 0;
+}
+
+void ll_ui_set_action_callback(ll_ui_action_callback callback, void* user_data) {
+    g_state.action = callback;
+    g_state.action_user_data = user_data;
+}
+
+int32_t ll_ui_load_document(const char* rml_utf8) {
+    if (g_state.context == nullptr) {
+        setError("上下文尚未初始化");
+        return -1;
+    }
+    if (rml_utf8 == nullptr || rml_utf8[0] == '\0') {
+        setError("文档内容为空");
+        return -1;
+    }
+
+    // 换文档：旧的在下次 Update 时才真正销毁，这里先取消引用
+    if (g_state.document != nullptr) {
+        g_state.context->UnloadDocument(g_state.document);
+        g_state.document = nullptr;
+    }
+
+    g_state.document = g_state.context->LoadDocumentFromMemory(rml_utf8, "lolosia://probe.rml");
+    if (g_state.document == nullptr) {
+        setError("LoadDocumentFromMemory 失败：RML 语法错误或引用了未声明的数据模型字段（详见上方 RmlUi 日志）");
+        return -1;
+    }
+    g_state.document->Show();
+    clearError();
+    return 0;
+}
+
+int32_t ll_ui_frame(void) {
+    if (g_state.context == nullptr) return -1;
+
+    // power_save：没有事件、也不需要动画时阻塞等待（最多等下一帧更新），不空转烧 CPU
+    if (!Backend::ProcessEvents(g_state.context, nullptr, true)) return 1;
+
+    g_state.context->Update();
+    Backend::BeginFrame();
+    g_state.context->Render();
+    Backend::PresentFrame();
+    return 0;
+}
+
+const char* ll_ui_last_error(void) { return g_state.error; }
 
 void ll_ui_destroy(void) {
-    if (g_state.device != NULL && g_state.claimed && g_state.window != NULL) {
-        SDL_ReleaseWindowFromGPUDevice(g_state.device, g_state.window);
+    // 顺序要紧：先撤 RmlUi（要经渲染接口释放 GPU 资源），再关后端的设备与窗口
+    if (g_state.context != nullptr) {
+        Rml::RemoveContext(kContextName);
+        g_state.context = nullptr;
     }
-    g_state.claimed = false;
-    g_state.swapchain = NULL;
-    if (g_state.device != NULL) {
-        SDL_DestroyGPUDevice(g_state.device);
-        g_state.device = NULL;
+    g_state.document = nullptr;
+    g_state.model = Rml::DataModelConstructor();
+    if (g_state.created) {
+        Rml::Shutdown();
+        Backend::Shutdown();
     }
-    if (g_state.window != NULL) {
-        SDL_DestroyWindow(g_state.window);
-        g_state.window = NULL;
-    }
-    if (g_state.initialized) {
-        SDL_Quit();
-    }
-    g_state.initialized = false;
-    g_state.quit_requested = false;
-    g_state.frame_open = false;
+    g_state.created = false;
+    g_state.slot_count = 0;
+    g_state.action = nullptr;
+    g_state.action_user_data = nullptr;
 }

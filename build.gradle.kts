@@ -1,4 +1,5 @@
 import com.fasterxml.jackson.databind.json.JsonMapper
+import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
@@ -28,9 +29,13 @@ fun curlCryptoLib(target: String): String =
 val thirdpartyDir = layout.projectDirectory.dir("thirdparty")
 val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif")
 
-// SDL3 静态库不自带 Windows 系统库，这些是它 INTERFACE_LINK_LIBRARIES 里的清单
-// （thirdparty/build-sdl3.ps1 结束时会打印最新的一份，升级 SDL3 后照抄过来）
-val sdl3LinkerOpts = listOf(
+// UI 实验那套图形栈（SDL3 → FreeType → RmlUi → liblolosia）静态链接所需的额外参数。
+// 内容是 SDL3 的 INTERFACE_LINK_LIBRARIES 清单 —— 它自己不带 Windows 系统库；
+// thirdparty/build-sdl3.ps1 结束时会打印最新的一份，升级 SDL3 后照抄过来。
+//
+// ⚠️ 不要在这里补 -lstdc++：Kotlin/Native 自己的 runtime 就是 C++ 写的、也已经链了 libstdc++，
+// 再加一次会让 std::bad_alloc 这类符号重复定义（ld.lld: duplicate symbol）。
+val uiStackLinkerOpts = listOf(
     "-lm", "-lkernel32", "-luser32", "-lgdi32", "-lwinmm", "-limm32",
     "-lole32", "-loleaut32", "-lversion", "-luuid", "-ladvapi32",
     "-lsetupapi", "-lshell32", "-ldinput8",
@@ -42,7 +47,7 @@ kotlin {
         binaries {
             executable {
                 entryPoint = "moe.lolosia.web.main"
-                linkerOpts(sdl3LinkerOpts)
+                linkerOpts(uiStackLinkerOpts)
             }
         }
         // UI 实验（moe.lolosia.web.ui）：C ABI 门面 liblolosia.a 与 SDL3 都在 thirdparty/mingwX64 下。
@@ -94,6 +99,15 @@ kotlin {
                     includeDirs.allHeaders(thirdpartyDir.dir("include").asFile)
                     extraOpts("-libraryPath", thirdpartyDir.dir(targetName).asFile.absolutePath)
                 }
+            }
+        }
+        // thirdparty/<目标>/*.a 只以路径形式（-libraryPath / linkerOpts）交给链接器，
+        // Gradle 看不见归档内容的变化 —— 不声明成输入的话，重建静态库后 link 会被判
+        // UP-TO-DATE，产出静默停留在旧库上（改了 C 代码却看不到效果）。
+        // classpath.res 那条链路有同样的问题，处理方式见 buildSrc/NativeClasspath.kt。
+        binaries.withType<Executable>().configureEach {
+            linkTaskProvider.configure {
+                inputs.files(layout.projectDirectory.dir("thirdparty/$targetName").asFileTree.matching { include("*.a") })
             }
         }
     }
