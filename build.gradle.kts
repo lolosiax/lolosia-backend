@@ -28,12 +28,33 @@ fun curlCryptoLib(target: String): String =
 val thirdpartyDir = layout.projectDirectory.dir("thirdparty")
 val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif")
 
+// SDL3 静态库不自带 Windows 系统库，这些是它 INTERFACE_LINK_LIBRARIES 里的清单
+// （thirdparty/build-sdl3.ps1 结束时会打印最新的一份，升级 SDL3 后照抄过来）
+val sdl3LinkerOpts = listOf(
+    "-lm", "-lkernel32", "-luser32", "-lgdi32", "-lwinmm", "-limm32",
+    "-lole32", "-loleaut32", "-lversion", "-luuid", "-ladvapi32",
+    "-lsetupapi", "-lshell32", "-ldinput8",
+)
+
 kotlin {
     // Windows：本地开发调试用
     mingwX64 {
         binaries {
             executable {
                 entryPoint = "moe.lolosia.web.main"
+                linkerOpts(sdl3LinkerOpts)
+            }
+        }
+        // UI 实验（moe.lolosia.web.ui）：C ABI 门面 liblolosia.a 与 SDL3 都在 thirdparty/mingwX64 下。
+        // 只给 mingwX64 建 cinterop —— linux 目标还没有交叉构建好的 SDL3（见 build-sdl3.ps1 的说明）。
+        compilations.getByName("main").cinterops {
+            create("lolosia") {
+                definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/lolosia.def"))
+                includeDirs.allHeaders(
+                    thirdpartyDir.dir("include").asFile,
+                    layout.projectDirectory.dir("src/nativeCpp/include").asFile,
+                )
+                extraOpts("-libraryPath", thirdpartyDir.dir("mingwX64").asFile.absolutePath)
             }
         }
     }

@@ -9,6 +9,7 @@ import moe.lolosia.web.generated.repositoryModules
 import moe.lolosia.web.generated.serviceModule
 import moe.lolosia.web.settings.ENV_SETTINGS_FILE
 import moe.lolosia.web.settings.loadAppSettings
+import moe.lolosia.web.ui.runUiExperiment
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.LogLevel
@@ -18,6 +19,9 @@ import moe.lolosia.web.util.platform.envOrNull
 /**
  * 应用程序主入口点：装载 classpath、加载配置、装配 Koin、启动 CIO 引擎。
  *
+ * 首个参数为 `ui` 时改走 UI 实验（SDL3 + Vulkan 窗口，见 `ui/UiExperiment.kt`），
+ * 不进服务器启动路径；否则按下面的规则解析端口。
+ *
  * 端口可用第一个命令行参数覆盖：`./ktor-template.kexe 7130`。
  * 优先级：命令行参数 > 环境变量 `KTOR_PORT` > 配置文件 `application.json` > 内置默认值。
  *
@@ -25,7 +29,15 @@ import moe.lolosia.web.util.platform.envOrNull
  * @since 2026-10-07 13:28
  */
 fun main(args: Array<String>) {
-    val portOverride = args.firstOrNull()?.toIntOrNull()
+    val first = args.firstOrNull()
+    // UI 实验会占住当前线程直到窗口关闭，也不参与 Koin 装配，因此先于一切启动逻辑分流
+    if (first == "ui") {
+        val code = runUiExperiment()
+        if (code != 0) Log.of("Main").error { "UI 实验退出码 $code" }
+        return
+    }
+
+    val portOverride = first?.toIntOrNull()
     val log = Log.of("Main")
 
     val cp = installPlatformClasspath()

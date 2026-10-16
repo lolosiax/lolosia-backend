@@ -188,6 +188,12 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - ⚠️ C 库只保留调用期间有效的裸指针（libpng 的 `png_image_begin_read_from_memory` 就是典型）：`usePinned` 必须覆盖到真正的解码调用为止，中途解 pin 只会得到「不报错但像素全错」。
   - ⚠️ `size_t` 三个目标都是 64 位可安全传递；`unsigned long` 不是（mingw 32 位 / linux 64 位），跨目标代码别写出具体宽度。
   - ⚠️ libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档，`build-libs.ps1` 已把它合并回单个 `libwebp.a`：K/N 的 ELF 链接（ld.gold）按归档逐个解析，分成两个归档时 `SharpYuv*` 会解析不到（arm64 / x64 都失败）。
+- **UI 实验的图形栈**（SDL3 + 自研门面 `liblolosia`）沿用同一套「产物入库、源码不入库」：
+  - SDL3 静态库用 [`thirdparty/build-sdl3.ps1`](thirdparty/build-sdl3.ps1) 重建（当前只支持 mingwX64），产物为 `thirdparty/mingwX64/libSDL3.a` + `thirdparty/include/SDL3/**`。
+    与 build-libs.ps1 的两点差异：它自己找 cmake / ninja（本机没有系统级 cmake，`python -m pip install cmake ninja` 即可），以及对 SDL 源码打两处 clang 兼容补丁（`SDL_assert.h` / `SDL_intrin.h` 里的 `<intrin.h>`，理由见脚本内注释；改版后补丁失配会直接报错）。
+  - 自研门面 [`liblolosia.a`](src/nativeCpp/build.ps1) 的 C++ 源码在 `src/nativeCpp/`，C ABI 声明在 [`lolosia_ui.h`](src/nativeCpp/include/lolosia_ui.h)（`ll_ui_*`），**产物同样落 `thirdparty/<目标>/`** —— cinterop 只需要一个 libraryPath，链接期 SDL3 也从这里解析。
+  - 该层用 `-fno-exceptions -fno-rtti` 编译、不引用 STL，因此不产生 libstdc++ 符号；将来引入 RmlUi / FreeType 这类需要 C++ 运行时的库时，在 `src/nativeCpp/build.ps1` 里补它们的头文件目录与链接参数。
+  - Kotlin 侧绑定包名 `moe.lolosia.web.ui.native`（`src/nativeInterop/cinterop/lolosia.def`）；**该 cinterop 只挂在 mingwX64 上**，linux 目标还没有交叉构建好的 SDL3。
 - **前端路径不许写死**：用 `generateConstants` 产出的 `VITE_DEFAULT`（值 = viteJar 的 `contextPath`）拼路由。
 - **配置只有一个入口** [`settings/AppSettings.kt`](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable`）。
   优先级（低→高，**按字段深合并**）：数据类默认值 < 内嵌 `application.json` < 磁盘 `application.json` < 环境变量 < 命令行端口。
@@ -219,10 +225,13 @@ gradlew compileKotlinMingwX64 compileKotlinLinuxArm64 compileKotlinLinuxX64
     只有要连前端一起验（例如确认内嵌 `static/home` 真能打开）才用 `runReleaseExecutableMingwX64` —— 它每次重启都会先重跑一遍 `vite build`。
   - **重启**：先杀旧的 `lolosia-backend.exe`（`Get-Process lolosia-backend | Stop-Process -Force`）再跑；
     否则链接会因 exe 被旧进程占用报 `AccessDeniedException`。
+  - **UI 实验**（SDL3 + Vulkan 2D 窗口）：`.\build\bin\mingwX64\debugExecutable\lolosia-backend.exe ui` —— 首个参数是 `ui` 时不进服务器启动路径。
+    当前范围只到「开窗 + Vulkan 逐帧清屏 + 输入事件喂给 ViewModel」，控件与布局尚未接（图形栈的构建约定见 §7）；关窗即退出。
 
 - 产物：`gradlew linkReleaseExecutableMingwX64` / `linkReleaseExecutableLinuxArm64` / `linkReleaseExecutableLinuxX64`；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
-- **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（Windows 上借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链）；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
+- **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（图像编解码）与 `thirdparty/build-sdl3.ps1` / `src/nativeCpp/build.ps1`（SDL3 与自研门面）
+  —— 都是借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
 - **没有自动化测试**（`commonTest` 只有依赖声明）；行为验证目前靠临时冒烟脚本（命令清单见 `doc/development-notes.md`）。
 - KSP 聚合输出**必须带源文件**：`Dependencies(aggregating = true, *sourceFiles)`。只写 `aggregating = true` 会漏扫未改动文件，症状是「**编译通过但接口全 404**」。
 - ⚠️ KSP 处理器**不要在首轮 `deferred`**（会让 KSP 重跑同一轮，而 sqlx4k 的 processor 没有去重标志，重复 `createNewFile` 直接抛 `FileAlreadyExistsException`）。
@@ -263,11 +272,17 @@ src/commonMain/resources/       application.json（内嵌默认配置）/ permis
 src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspath(Image) / EmptyClasspath、
                                 installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*、
                                 util/image/Image.kt(actual)、service/files/ThumbnailGenerator.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
-src/nativeInterop/cinterop/     第三方 C 库的绑定定义（zlib / png / webp / jpeg / gif 各一个 .def）
+src/commonMain/kotlin/…/ui/     UI 实验里与平台无关的部分：mvvm/（Property·Command）· input/（UiEvent·UiEventKind）· geometry/（UiSize）·
+                                experiment/（UiProbeViewModel）+ UiExperiment.kt（expect fun runUiExperiment）
+src/mingwX64Main/kotlin/…/ui/   UiExperiment.mingw.kt：真窗口与帧循环（走 cinterop 的 ll_ui_*）
+src/linuxMain/kotlin/…/ui/      UiExperiment.linux.kt：占位 actual（linux 目标还没有 SDL3）
+src/nativeCpp/                  自研 C/C++ 门面：include/lolosia_ui.h（ll_ui_* 的 C ABI）+ src/LolosiaUi.cpp（SDL3 窗口与 GPU 帧循环）+ build.ps1
+src/nativeInterop/cinterop/     第三方与自研 C 库的绑定定义（zlib / png / webp / jpeg / gif 各一个 .def，外加 lolosia.def）
 src/linuxMain/kotlin/…/          两个 linux 目标共享的平台实现（.linux.kt）：
                                 api/ApiClient / classpath/EmbeddedClasspath / fs/Mkdir / proc/Shell
 src/mingwX64Main/kotlin/…/      Windows 平台实现（.mingw.kt）：ApiClient / EmbeddedClasspath / Mkdir / Shell（无入口）
-thirdparty/                     预编译 C 静态库与头文件（入库产物，按 mingwX64 / linuxArm64 / linuxX64 三份）+ build-libs.ps1（一次性重建脚本）
+thirdparty/                     预编译 C 静态库与头文件（入库产物，按 mingwX64 / linuxArm64 / linuxX64 三份）+ build-libs.ps1（图像编解码）
+                                + build-sdl3.ps1（SDL3，一次性重建脚本；liblolosia.a 由 src/nativeCpp/build.ps1 产出到同一目录）
 router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller）/ InterceptorProcessor（@Interceptor）/
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、

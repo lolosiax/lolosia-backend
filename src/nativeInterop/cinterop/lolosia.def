@@ -1,0 +1,8 @@
+# liblolosia 绑定：自研 C ABI 门面（ll_ui_*），内部用 SDL3 的 GPU API 出帧（Windows / Linux 上即 Vulkan）。
+# 两个静态库都在 thirdparty/<目标>/ 下，cinterop 的 libraryPath 由 build.gradle.kts 指向该目录。
+package = moe.lolosia.web.ui.native
+
+headers = lolosia_ui.h
+headerFilter = lolosia_ui.h
+
+staticLibraries = liblolosia.a libSDL3.a
