@@ -1,6 +1,6 @@
 # 多模块化与 Gradle 根整理方案（Phase 2）
 
-> 状态：**Stage 0–2 已实施**（分支 `dev/modularization`），Stage 3（Android）未开始。实际偏差见 §3.2 与 §8。
+> 状态：**Stage 0–2 已实施**（分支 `dev/modularization`），**Stage 3 首版已跑通**（x86_64 模拟器上 Activity 打开现有 `probe.rml` 面板；KMP 模块的 `androidTarget()` 与实际业务接入仍待补）。实际偏差见 §3.2 与 §8。
 > 范围：只动 `backend/`。工作区根目录（`web/`、`ftp/`、`doc/`、根 `AGENTS.md` 等）**不动**。
 > 结论：采用 Phase 2 —— **Gradle 根只做聚合与发布，代码全部进 `backend/modules/`，根下不再保留 `src/`**。
 > 现行工程约定仍以 [AGENTS.md](../AGENTS.md) 为准；本方案落地后需要同步修订该文件的文件地图与命令清单。
@@ -615,20 +615,36 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
    gradlew deploy --dry-run
    ```
 
-### Stage 3：Android（可选，独立开关）
+### Stage 3：Android（首版已跑通，业务接入待续）
 
-1. 给 `:protocol` / `:core` / `:codecs` / `:client` 增加 `androidTarget()`，补齐 `androidMain` actual：
-   - `:core`：classpath / fs / env / termination 的 Android 实现；
-   - `:codecs`：`Image` / `ThumbnailGenerator` 的 Android 实现（优先 Android 平台编解码，必要时 JNI）；
-   - `:client`：RmlUi 宿主的 JNI 桥。
-2. `nativeCpp/build.ps1` 增加 NDK 构建分支，产出 `liblolosia.so` 到 `:app-android` 的 `jniLibs`。
-3. 新建 `:app-android`：Activity + 前台 Service（daemon 进程）+ 本地 loopback API；**不应用 `moe.lolosia`**。
-4. 在 `settings.gradle.kts` 用 `-PwithAndroid=true` 条件 include；`buildBinaries` 追加 `stageReleaseApk`。
-5. 验证：
+1. 首版没有给 `:protocol` / `:core` / `:codecs` / `:client` 加 `androidTarget()`：目标只是「Activity 打开现有 RmlUi 面板」，
+   加 Android 目标会连带补 `Image` / `XhrData` / `Classpath` 等一批 JVM actual，收益低于成本。
+   当前的做法是 JNI 级宿主：`modules/client/src/nativeCpp/android/LolosiaUiAndroid.cpp` 直接驱动 `ll_ui_*`，
+   数据模型初值与动作与桌面版 `UiProbeViewModel` 对齐。
+2. 原生库：`thirdparty/build-android.ps1 -Abi x86_64` 用 NDK r27c 交叉编译 SDL3（共享库）、FreeType / RmlUi（静态库）与
+   `liblolosia.so`，产物落 `thirdparty/androidJniLibs/x86_64/`。
+3. `modules/app-android` 是**独立 Gradle 构建**（自己的 `settings.gradle.kts`），因为 AGP 9 与 buildSrc 里的 KGP 2.4.20
+   共享 classpath 时会创建不兼容的 `KotlinAndroidTarget`。构建命令：`gradlew -p modules/app-android assembleDebug`。
+   两个方向的编排（单向、无回环）：
+   - 根 `buildBinaries` → `androidApp` → `:androidNative` → 下游 `assembleDebug`；
+   - 下游单独构建 → `preBuild` → 根 `:androidNative`（叶子任务）；
+   - 上游拉起下游时传 `-PlolosiaAndroidFromRoot=true`，下游跳过回调，避免嵌套根构建等根项目锁。
+4. `MainActivity` 继承 SDL3 的 `SDLActivity`，加载 `libSDL3.so` + `liblolosia.so`；
+   assets 直接引用 `modules/client/src/commonMain/resources`（`probe.rml` / `sample.png`），字体用系统 Noto CJK，
+   图片解码走 `BitmapFactory` + `libjnigraphics`。
+5. 后续（真正 Stage 3 的业务目标）：
+   - 给 `:protocol` / `:core` / `:codecs` / `:client` 增加 `androidTarget()`，补齐 `androidMain` actual；
+   - 把 JNI 宿主里的 probe 数据模型换回复用 `:client` 的 `UiProbeViewModel`（JNI 回调 / 共享状态）；
+   - `:app-android` 增加前台 Service + 本地 loopback API；
+   - `buildBinaries` 汇总 APK，并支持 arm64-v8a（x86_64 模拟器与 API 36 真机均已验证）。
+6. 首版验证：
    ```powershell
-   gradlew -PwithAndroid=true :modules:app-android:assembleRelease
-   gradlew -PwithAndroid=true buildBinaries
+   powershell -ExecutionPolicy Bypass -File thirdparty/build-android.ps1 -Abi x86_64
+   gradlew -p modules/app-android assembleDebug
+   adb install -r modules/app-android/build/outputs/apk/debug/lolosia-android-debug.apk
+   adb shell am start -n moe.lolosia.android/.MainActivity
    ```
+   在 `Medium_Phone_API_35`（x86_64）上确认面板渲染、中文与图片正常、`+1` 后计数与「最近动作」更新。
 
 ---
 
@@ -641,7 +657,7 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
 | 桌面 release 链接 | `gradlew :modules:app-desktop:linkReleaseExecutableMingwX64` | 产出 release exe，含 vite 产物 |
 | 本机调试运行 | `gradlew runDebug` | 工作目录为 `backend/`，能读到磁盘 `application.yaml` |
 | 本机 release 运行 | `gradlew runRelease` | 先跑 `vite build`，再启动 |
-| 全部二进制 | `gradlew buildBinaries` | `build/bin/` 下按命名表产出 exe / kexe；Android 启用时含 apk |
+| 全部二进制 | `gradlew buildBinaries` | `build/bin/` 下按命名表产出 exe / kexe；APK 由独立的 `modules/app-android` 构建产出 |
 | 部署 | `gradlew deploy` | 根任务读取根 `platforms.json`，上传 `:app-desktop` 的 release 二进制 |
 | 子模块无 deploy | `gradlew :modules:server:tasks --all`、`:modules:app-desktop:tasks --all` | 不应出现 `deploy` / `deploy<Server>` |
 | classpath 资源 | 启动后访问 `static/home`、`/ui` 资源 | `:server` 与 `:client` 的资源都在内嵌 zip 中 |
@@ -663,7 +679,7 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
 | SSH 插件污染所有模块 | `org.hidetake.ssh` 只在根应用；子模块不配置 `deploy` |
 | `run*` 工作目录错 | 根任务显式 `workingDir = rootDir`，不要直接依赖 KGP 的 `run*Executable*` 默认行为 |
 | Linux 宿主构建不出 mingw 产物 | `buildBinaries` 按宿主能力构建；Windows 作为完整发布宿主 |
-| Android 模块拖垮桌面构建 | `:app-android` 用 `-PwithAndroid=true` 条件 include；未启用时 `buildBinaries` 跳过 APK |
+| Android 模块拖垮桌面构建 | `modules/app-android` 是独立 Gradle 构建；根构建完全不知道 AGP 的存在 |
 | `platforms.json` 口令泄漏 | 文件 gitignored、只在根解析、不打印 Map；文档与提交里只用占位符 |
 | 改 `rootProject.name` 破坏部署 | 保持 `lolosia-backend`；需要改名时显式设置 `deploy.binary.name` / `unitName` 并同步远端目录 |
 | `build/bin` 残留旧版本 | `buildBinaries` 用 `Sync`，不是多个 `Copy` |
@@ -673,7 +689,7 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
 ## 11. 验收清单
 
 - [ ] `backend/` 根下不再有 `src/`、`router-ksp/`。
-- [ ] `settings.gradle.kts` 只 include `modules/` 下的项目；Android 由 `-PwithAndroid=true` 控制。
+- [ ] `settings.gradle.kts` 只 include 桌面/服务端模块；Android 壳是独立构建（`gradlew -p modules/app-android`）。
 - [ ] `platforms.json` 仍在 `backend/` 根，且仍被 `.gitignore` 覆盖。
 - [ ] 根 `deploy` 任务存在；`modules/server` 与 `modules/app-desktop` 下没有 `deploy*` 任务。
 - [ ] 根 `runDebug` / `runRelease` 按宿主平台执行正确目标，工作目录为 `backend/`。

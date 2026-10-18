@@ -41,3 +41,7 @@ include(":modules:client")
 include(":modules:server")
 // 唯一桌面入口：三个 native 可执行文件都在这里
 include(":modules:app-desktop")
+
+// Android 壳是独立构建（modules/app-android/settings.gradle.kts）：
+// AGP 与 buildSrc 里的 Kotlin Gradle Plugin 不能共享 classpath。
+// 构建命令：gradlew -p modules/app-android assembleDebug

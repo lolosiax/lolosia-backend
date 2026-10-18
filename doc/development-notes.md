@@ -38,6 +38,36 @@ gradlew :modules:app-desktop:linkReleaseExecutableLinuxX64     # 单目标：x64
 gradlew deploy<服务器名>                   # 构建 + 部署到开发板 / 云主机（见 §3）
 ```
 
+### Android（Stage 3 首版）
+
+```powershell
+# 1) 原生库：NDK r27c + ninja（源码/中间产物在 build/thirdparty，产物落 thirdparty/androidJniLibs）
+gradlew androidNative                       # 默认 x86_64 + arm64-v8a
+gradlew androidNative -PandroidAbis=x86_64  # 只构建模拟器那一份
+
+# 2) APK：独立 Gradle 构建（不要从根 settings include；AGP 与 buildSrc 的 KGP 会抢 classpath）
+gradlew -p modules/app-android assembleDebug
+
+# 3) 安装并启动
+adb install -r modules/app-android/build/outputs/apk/debug/lolosia-android-debug.apk
+adb shell am start -n moe.lolosia.android/.MainActivity
+```
+
+- 支持 `x86_64`（`Medium_Phone_API_35` 模拟器）与 `arm64-v8a`（已在 `2509FPN0BC` / API 36 真机验证）。
+  `gradlew androidNative` 默认构建两份；只调模拟器时用 `-PandroidAbis=x86_64`。
+- 真机安装若报 `INSTALL_FAILED_USER_RESTRICTED`（HyperOS/MIUI），先在开发者选项打开「USB 安装」，
+  并执行 `adb shell settings put global verifier_verify_adb_installs 0` 与
+  `adb shell settings put secure install_non_market_apps 1`，再 `adb install -r`。
+- 上游/下游装配（单向，禁止回环）：
+  - 根 `buildBinaries` → `androidApp` → `:androidNative` → 下游 `modules/app-android:assembleDebug`；
+  - 下游单独构建（含 IDEA 直接跑）→ `preBuild` → 根 `:androidNative`（叶子任务，不会回到 `androidApp`）；
+  - 上游拉起下游时带 `-PlolosiaAndroidFromRoot=true`，下游跳过回调，避免嵌套根构建在项目锁上死等。
+  - 根构建会自动探测 Android SDK / NDK / cmake / ninja；缺失时打印警告并跳过 `androidNative` / `androidApp`，
+    `buildBinaries` 仍会产出桌面二进制。也可用 `-PskipAndroid=true` 显式跳过。
+- `modules/app-android/local.properties` 写 `sdk.dir=D:\\AndroidSdk`（gitignored）；NDK 默认找 `D:\AndroidSdk\ndk\android-ndk-r27c`。
+- APK 里的 `assets/ui/probe.rml`、`sample.png` 直接引用 `modules/client/src/commonMain/resources`；`jniLibs` 引用 `thirdparty/androidJniLibs`。
+- 字体用系统 `NotoSansCJK-Regular.ttc`；图片解码走 `BitmapFactory` + `libjnigraphics`，不引入 Android 版 png/jpeg/webp 静态库。
+
 **提交前自检**（防「文件在磁盘上但被 `.gitignore` 吃掉」）：
 
 ```powershell

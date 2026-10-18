@@ -12,7 +12,7 @@
 - 目标平台有 **`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**没有 JVM 目标**。两个 linux 目标共享各模块 `src/linuxMain/` 下的平台实现。
 - 产物是**单个原生可执行文件**：前端产物、SQL、默认配置都以 `classpath.zip` 形式内嵌，无 fat jar、无外部资源目录。
 - 图像编解码（WebP / PNG / JPEG / GIF）与自定义请求通道用的 **msgpack**（msgpack-c）走**预编译的 C 静态库**，随可执行文件静态链入；库产物随仓库提交，日常构建不需要 C 工具链（`thirdparty/`，见 §7 / §10）。
-- 根包 **`moe.lolosia.web`**；Gradle 根只做聚合（`deploy` / `runDebug` / `runRelease` / `buildBinaries`）。模块按依赖方向分为 `:modules:protocol` → `:modules:core` → `:modules:codecs` → `:modules:{server,client}` → `:modules:app-desktop`，另有 `:modules:router-ksp`（KSP 插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。根目录不再保留 `src/`。
+- 根包 **`moe.lolosia.web`**；Gradle 根只做聚合（`deploy` / `runDebug` / `runRelease` / `buildBinaries`）。模块按依赖方向分为 `:modules:protocol` → `:modules:core` → `:modules:codecs` → `:modules:{server,client}` → `:modules:app-desktop`，另有 `:modules:router-ksp`（KSP 插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。根目录不再保留 `src/`。Android 壳 `modules/app-android` 是**独立 Gradle 构建**（AGP 与 buildSrc 里的 KGP 不能共享 classpath），不参与根构建。
 
 ## 1. 代码风格
 
@@ -264,6 +264,23 @@ gradlew :modules:app-desktop:compileKotlinMingwX64 :modules:app-desktop:compileK
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
 - **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（图像编解码）与 UI 实验那四层（`build-sdl3.ps1` → `build-freetype.ps1` → `build-rmlui.ps1` → `modules/client/src/nativeCpp/build.ps1`，见 §7）
   —— 都是借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
+- **Android（Stage 3 首版，x86_64 模拟器 / arm64 真机）**：
+  - 原生库：`gradlew androidNative`（默认同时构建 x86_64 与 arm64-v8a；只跑模拟器可用 `-PandroidAbis=x86_64`）。
+    底层是 `powershell -ExecutionPolicy Bypass -File thirdparty/build-android.ps1 -Abi <abi>`；
+    需要 NDK r27c（默认 `D:\AndroidSdk\ndk\android-ndk-r27c`）与 ninja，源码下载到 `build/thirdparty`，
+    产物落 `thirdparty/androidJniLibs/<abi>/`。
+  - APK：`gradlew -p modules/app-android assembleDebug`（**独立构建**，不要从根 `settings.gradle.kts` include）。
+    它会在 `preBuild` 先调根构建的 `:androidNative`；该任务只跑 NDK 脚本，不会再回到 `androidApp`。
+  - 汇总：根 `buildBinaries` 也依赖 `androidApp`（→ `:androidNative` + 下游 `assembleDebug`）。
+    构建前会自动探测 Android SDK / NDK / cmake / ninja；缺任一只打印警告并跳过这两个任务，桌面产物照常产出。
+    也可用 `-PskipAndroid=true` 显式跳过。
+  - 上游调下游时带 `-PlolosiaAndroidFromRoot=true`，下游据此跳过回调，避免根项目锁互相等待。
+  - `modules/app-android/local.properties` 写 `sdk.dir`，该文件 gitignored。
+  - 安装 / 启动：`adb install -r modules/app-android/build/outputs/apk/debug/lolosia-android-debug.apk`，
+    入口 `moe.lolosia.android/.MainActivity`。
+  - 链路：`MainActivity` 继承 SDL3 的 `SDLActivity`，依次加载 `libSDL3.so` / `liblolosia.so`；
+    `liblolosia.so` 的 `SDL_main` 在 `modules/client/src/nativeCpp/android/LolosiaUiAndroid.cpp`，
+    资源来自 APK assets（复用 `modules/client/src/commonMain/resources`），字体用系统 Noto CJK，图片解码走 `BitmapFactory`。
 - **没有自动化测试**（`commonTest` 只有依赖声明）；行为验证目前靠临时冒烟脚本（命令清单见 `doc/development-notes.md`）。
 - KSP 聚合输出**必须带源文件**：`Dependencies(aggregating = true, *sourceFiles)`。只写 `aggregating = true` 会漏扫未改动文件，症状是「**编译通过但接口全 404**」。
 - ⚠️ KSP 处理器**不要在首轮 `deferred`**（会让 KSP 重跑同一轮，而 sqlx4k 的 processor 没有去重标志，重复 `createNewFile` 直接抛 `FileAlreadyExistsException`）。
@@ -327,7 +344,11 @@ modules/server/src/commonMain/resources/       application.json（内嵌默认�
 modules/server/src/nativeMain/kotlin/…/configuration/PlatformModule.kt   platformModule(actual)：PosixFileStore 等绑定
 modules/server/src/linuxMain|mingwX64Main/kotlin/…/   平台实现：util/proc/Shell + util/system/SystemMetricsReader
 modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt   唯一入口：装 classpath → 读配置 → 起 Koin → 起 CIO 引擎
+modules/app-android/           独立 Gradle 构建（AGP）：MainActivity（继承 SDLActivity）+ SDL3 的 Java 胶水（org.libsdl.app）
+                                assets 复用 modules/client/src/commonMain/resources；jniLibs 指向 thirdparty/androidJniLibs
+modules/client/src/nativeCpp/android/LolosiaUiAndroid.cpp   Android JNI 宿主：SDL_main、assets 资源、BitmapFactory 解码、probe 数据模型
 thirdparty/                     预编译 C 静态库与头文件（入库产物，按 mingwX64 / linuxArm64 / linuxX64 三份）+ build-libs.ps1（图像编解码）
+                                + build-android.ps1（NDK 交叉编译 SDL3/FreeType/RmlUi 与 liblolosia.so → thirdparty/androidJniLibs/<ABI>/）
                                 + UI 实验那四层的一次性重建脚本（build-sdl3 / build-freetype / build-rmlui）与共用的 toolchain.ps1
                                 （liblolosia.a 由 modules/client/src/nativeCpp/build.ps1 产出到同一目录，RmlUi 的 librmlui.a + librmlui_debugger.a 由 build-rmlui.ps1 产出；四层的依赖顺序见 §7）
 modules/router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller）/ InterceptorProcessor（@Interceptor）/
