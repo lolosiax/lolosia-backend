@@ -164,6 +164,7 @@ class ChatRequestSpec internal constructor(
                     url = CHAT_COMPLETIONS_PATH,
                     body = body,
                     headers = mapOf("Authorization" to "Bearer ${settings.apiKey}"),
+                    timeout = settings.timeoutSeconds.seconds,
                     noLog = true,
                 ).toEventSourceFrames()
                     .mapNotNull { sseDataLine(it) }

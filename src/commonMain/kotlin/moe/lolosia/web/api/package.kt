@@ -169,7 +169,7 @@ internal suspend inline fun <reified T> dispatch(
         return Unit as T
     }
     if (T::class == Flow::class) {
-        return bytes(method, baseUrl, url, body, query, headers, sessionId, noLog) as T
+        return bytes(method, baseUrl, url, body, query, headers, sessionId, timeout, noLog) as T
     }
     return sendTyped(method, baseUrl, url, body, query, rawResponse, headers, sessionId, timeout, noLog, serializer<T>())
 }
@@ -231,9 +231,14 @@ internal suspend fun <T> sendTyped(
     }
 }
 
-/** 发出请求并把响应体作为字节块流返回。 */
+/**
+ * 发出请求并把响应体作为字节块流返回。
+ *
+ * 请求与读流整体受 [timeout] 约束：对端迟迟不响应或响应体永不收尾（连接被黑洞）时
+ * 必须在有限时间内失败，否则调用方的重试循环会永久挂起。
+ */
 @PublishedApi
-internal suspend fun bytes(
+internal fun bytes(
     method: HttpMethod,
     baseUrl: String,
     url: String,
@@ -241,13 +246,25 @@ internal suspend fun bytes(
     query: Map<String, List<String>>?,
     headers: Map<String, String>,
     sessionId: String?,
+    timeout: Duration,
     noLog: Boolean,
-): Flow<ByteArray> {
-    val response = send(method, baseUrl, url, body, query, headers, sessionId)
-    if (!noLog) beforeWebRequest(body, baseUrl, url)
-    if (!response.status.isSuccess()) respHandleException(response, baseUrl, url)
-    return response.bodyAsChannel().asFlow()
-        .onCompletion { if (!noLog) afterWebRequest(null, baseUrl, url) }
+): Flow<ByteArray> = flow {
+    withTimeout(timeout) {
+        val response = send(method, baseUrl, url, body, query, headers, sessionId)
+        if (!noLog) beforeWebRequest(body, baseUrl, url)
+        if (!response.status.isSuccess()) respHandleException(response, baseUrl, url)
+        val channel = response.bodyAsChannel()
+        val buffer = ByteArray(STREAM_BUFFER_SIZE)
+        try {
+            while (true) {
+                val read = channel.readAvailable(buffer, 0, buffer.size)
+                if (read <= 0) break
+                emit(buffer.copyOf(read))
+            }
+        } finally {
+            if (!noLog) afterWebRequest(null, baseUrl, url)
+        }
+    }
 }
 
 /**

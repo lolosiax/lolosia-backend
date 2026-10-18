@@ -14,6 +14,7 @@ import moe.lolosia.web.util.router.Service
 import okio.Buffer
 import okio.FileSystem
 import kotlin.concurrent.Volatile
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * DeepSeek 分词器门面：**运行时**拉取 `tokenizer.json`、缓存到 `<root>/.cache/lolosia/llm/`，
@@ -110,7 +111,7 @@ class DeepSeekTokenizer(settings: AppSettings, browser: FileBrowser) {
     private suspend fun tryFetch(url: String): ByteArray? = runCatching {
         val (base, path) = splitUrl(url)
         val buffer = Buffer()
-        get<Flow<ByteArray>>(base, path, noLog = true).collect { buffer.write(it) }
+        get<Flow<ByteArray>>(base, path, timeout = 5.minutes, noLog = true).collect { buffer.write(it) }
         buffer.readByteArray()
     }.onFailure { log.warn(it) { "下载分词器失败：$url" } }.getOrNull()
 

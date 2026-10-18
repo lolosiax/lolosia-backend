@@ -23,6 +23,7 @@ import moe.lolosia.web.util.router.Service
 import okio.Buffer
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * 番组**采集**服务：定时拉 MioBT 系发布站 RSS，解析成发布条目、匹配番剧、落库去重，
@@ -172,10 +173,22 @@ class AnimeFeedService(
     private suspend fun fetchRss(): String? = runCatching {
         val (base, path) = splitAbsoluteUrl(config.rssUrl)
         val buffer = Buffer()
-        get<Flow<ByteArray>>(base, path, headers = mapOf("User-Agent" to config.bangumiUserAgent), noLog = true)
-            .collect { buffer.write(it) }
+        get<Flow<ByteArray>>(
+            base, path,
+            headers = mapOf("User-Agent" to config.bangumiUserAgent),
+            timeout = RSS_FETCH_TIMEOUT,
+            noLog = true,
+        ).collect { buffer.write(it) }
         buffer.readByteArray().decodeToString()
     }.onFailure { log.warn(it) { "拉取 RSS 失败：${config.rssUrl}" } }.getOrNull()
 
     private fun driverOrNull(): QueryExecutor? = runCatching { db.driver }.getOrNull()
+
+    private companion object {
+        /**
+         * RSS 拉取超时：开发板到 comicat 的下载实测 13~17s（约 100KB），默认 14s 不够；
+         * 但也必须有上界——连接被黑洞时不能把轮询循环永久挂住。
+         */
+        val RSS_FETCH_TIMEOUT = 60.seconds
+    }
 }
