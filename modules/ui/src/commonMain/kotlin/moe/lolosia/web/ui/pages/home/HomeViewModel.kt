@@ -27,14 +27,14 @@ class HomeViewModel {
     /** 每次重建文档递增，宿主用它判断是否需要重新加载。 */
     val version = State(0)
 
-    fun apply(next: List<AnimeSeriesDto>) {
+    fun apply(next: List<AnimeSeriesDto>, covers: Set<Long> = emptySet()) {
         items.replaceAll(next)
         loading.value = false
         hasError.value = false
         error.value = ""
         empty.value = next.isEmpty()
         status.value = if (next.isEmpty()) "本周还没有番组数据" else "共 ${next.size} 部番"
-        publish(buildListPage(next))
+        publish(buildListPage(next, covers))
     }
 
     fun fail(message: String) {
@@ -78,7 +78,7 @@ private const val PAGE_FOOTER = """	<div class="tabbar">
 private val WEEKDAYS = arrayOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 /** 生成列表页；标题等文本来自服务端，必须转义后再拼进 RML。 */
-private fun buildListPage(items: List<AnimeSeriesDto>): String = buildString {
+private fun buildListPage(items: List<AnimeSeriesDto>, covers: Set<Long>): String = buildString {
     append(PAGE_HEADER)
     append("""	<div class="screen scroll tabbed">
 		<div class="title">番组表</div>
@@ -91,8 +91,13 @@ private fun buildListPage(items: List<AnimeSeriesDto>): String = buildString {
         append("""		<table class="list-table">
 """)
         items.forEach { item ->
+            val cover = if (item.id in covers) {
+                """<img class="list-cover-img" src="${coverPath(item.id)}"/>"""
+            } else {
+                """<span class="list-cover">${escape(initialOf(item.title))}</span>"""
+            }
             append("""			<tr class="list-row">
-				<td class="list-cover-cell"><span class="list-cover">${escape(initialOf(item.title))}</span></td>
+				<td class="list-cover-cell">$cover</td>
 				<td class="list-main">
 					<div class="list-title">${escape(item.title)}</div>
 					<div class="list-meta">${escape(metaOf(item))}</div>
@@ -107,6 +112,9 @@ private fun buildListPage(items: List<AnimeSeriesDto>): String = buildString {
 """)
     append(PAGE_FOOTER)
 }
+
+/** 封面在视图层资源表里的路径；与 `ClientApp` 登记的路径一致。 */
+fun coverPath(seriesId: Long): String = "/ui/images/anime/$seriesId.img"
 
 /** 加载中 / 失败等简单页面。 */
 private fun buildMessagePage(title: String, message: String, showRetry: Boolean): String = buildString {

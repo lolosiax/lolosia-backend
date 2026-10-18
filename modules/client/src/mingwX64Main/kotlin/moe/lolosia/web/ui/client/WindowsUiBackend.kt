@@ -26,16 +26,31 @@ class WindowsUiBackend(private val classpath: Classpath) : UiBackend {
 
     private var actionRef: StableRef<ClientActionHolder>? = null
     private var resourceRef: StableRef<ClientResourceHolder>? = null
+    private var resourceHolder: ClientResourceHolder? = null
 
     /** 注册 classpath 资源与图片解码回调；必须在 [loadFont] 之前调用。 */
     fun installResources() {
-        val ref = StableRef.create(ClientResourceHolder(classpath))
+        val holder = ClientResourceHolder(classpath)
+        val ref = StableRef.create(holder)
         resourceRef = ref
+        resourceHolder = holder
         ll_ui_set_resource_loader(
             staticCFunction(::handleReadFile),
             staticCFunction(::handleDecodeImage),
             ref.asCPointer(),
         )
+    }
+
+    /**
+     * 把内存里的图片登记成 RML 可引用的路径。
+     *
+     * 路径以 `/` 开头时 RmlUi 不会拼文档目录，会原样交给读文件回调。
+     * 供 `ImageLoader` 在 UI 线程调用，随后重新加载文档即可显示。
+     */
+    fun registerImage(path: String, bytes: ByteArray): Boolean {
+        val holder = resourceHolder ?: return false
+        holder.images[path] = bytes
+        return true
     }
 
     override fun create(title: String, width: Int, height: Int): Boolean =
@@ -119,8 +134,10 @@ class WindowsUiBackend(private val classpath: Classpath) : UiBackend {
 /** 动作回调的宿主上下文；staticCFunction 不能捕获外部变量。 */
 private class ClientActionHolder(val handler: (String) -> Unit)
 
-/** 资源回调的宿主上下文。 */
-private class ClientResourceHolder(val classpath: Classpath)
+/** 资源回调的宿主上下文；[images] 是本帧登记的动态图片（封面 / 头像）。 */
+private class ClientResourceHolder(val classpath: Classpath) {
+    val images: MutableMap<String, ByteArray> = mutableMapOf()
+}
 
 /** 文档里 `data-event-click="action('x')"` 的回调。 */
 private fun handleClientAction(userData: COpaquePointer?, name: CPointer<ByteVar>?) {
@@ -137,7 +154,8 @@ private fun handleReadFile(
 ): Int {
     val holder = userData?.asStableRef<ClientResourceHolder>()?.get() ?: return -1
     val name = path?.toKString() ?: return -1
-    val bytes = holder.classpath.read(name) ?: return -1
+    // RmlUi 传给 FileInterface 的路径会去掉开头的 `/`；内存资源按 `/` 开头登记，这里两边都查。
+    val bytes = holder.images[name] ?: holder.images["/$name"] ?: holder.classpath.read(name) ?: return -1
     if (out == null || capacity < bytes.size) return bytes.size
     bytes.usePinned { memcpy(out, it.addressOf(0), bytes.size.convert()) }
     return bytes.size

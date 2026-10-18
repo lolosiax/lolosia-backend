@@ -50,6 +50,9 @@ class ClientHost(
 
         bindText("displayName", app.profile.displayName)
         bindText("avatarInitial", app.profile.avatarInitial)
+        bindText("avatarPath", app.profile.avatarPath)
+        bindBool("hasAvatarText", app.profile.hasAvatarText)
+        bindBool("hasAvatarImage", app.profile.hasAvatarImage)
         bindText("realName", app.profile.realName)
         bindText("email", app.profile.email)
         bindText("phone", app.profile.phone)

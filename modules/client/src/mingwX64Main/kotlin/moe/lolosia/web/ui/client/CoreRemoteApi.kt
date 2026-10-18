@@ -45,6 +45,18 @@ class CoreRemoteApi(private val baseUrl: String) : RemoteApi {
             sessionId = token,
         )
 
+    override suspend fun animeCover(item: AnimeSeriesDto, size: Int): ByteArray? {
+        // 已经回源到服务端的封面走缩略图路由；仍是图床绝对地址时直接取。
+        val absolute = item.cover?.takeIf { it.startsWith("http") }
+        val target = when {
+            item.bangumiId != null -> "$baseUrl/res/anime-cover?id=${item.bangumiId}&size=$size"
+            absolute != null -> absolute
+            else -> return null
+        }
+        val (status, bytes) = requestBytes(HttpMethod.Get, "", target, noLog = true)
+        return if (status in 200..299 && bytes.isNotEmpty()) bytes else null
+    }
+
     override suspend fun logout(token: String) {
         post<Unit>(baseUrl, "/api/logout", sessionId = token)
     }

@@ -6,6 +6,7 @@ import moe.lolosia.web.ui.app.ClientApp
 import moe.lolosia.web.ui.app.ClientHost
 import moe.lolosia.web.ui.client.CoreLocalServiceApi
 import moe.lolosia.web.ui.client.CoreRemoteApi
+import moe.lolosia.web.ui.client.WindowsImageLoader
 import moe.lolosia.web.ui.client.WindowsSettingsStore
 import moe.lolosia.web.ui.client.WindowsUiBackend
 import moe.lolosia.web.util.classpath.installPlatformClasspath
@@ -47,6 +48,7 @@ actual fun runClientUi(): Int {
         settingsStore = WindowsSettingsStore(),
         remoteApiFactory = { CoreRemoteApi(it) },
         localServiceApi = CoreLocalServiceApi(),
+        imageLoader = WindowsImageLoader(backend),
         scope = scope,
         postToUi = {
             tasks.trySend(it)

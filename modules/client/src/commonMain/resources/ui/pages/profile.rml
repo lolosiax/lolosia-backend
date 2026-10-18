@@ -4,7 +4,8 @@
 </head>
 <body data-model="main">
 	<div class="screen scroll tabbed">
-		<div class="avatar">{{ avatarInitial }}</div>
+		<div class="avatar" data-if="hasAvatarText">{{ avatarInitial }}</div>
+		<img class="avatar-img" data-if="hasAvatarImage" src="{{ avatarPath }}"/>
 		<p class="profile-name">{{ displayName }}</p>
 		<p class="profile-role">{{ roleName }}</p>
 

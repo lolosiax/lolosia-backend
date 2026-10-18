@@ -26,6 +26,9 @@ interface RemoteApi {
     /** 番组表；[weekday] 为 1..7，`null` 表示不过滤。 */
     suspend fun animeTimetable(token: String, weekday: Int? = null): List<AnimeSeriesDto>
 
+    /** 番剧封面缩略图；没有封面或取件失败返回 `null`。 */
+    suspend fun animeCover(item: AnimeSeriesDto, size: Int = 128): ByteArray?
+
     /** 登出；失败不抛给页面。 */
     suspend fun logout(token: String)
 }

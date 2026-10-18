@@ -257,6 +257,15 @@ button.block
 	margin: 0 auto 12dp auto;
 }
 
+.avatar-img
+{
+	display: block;
+	width: 72dp;
+	height: 72dp;
+	border-radius: 36dp;
+	margin: 0 auto 12dp auto;
+}
+
 .profile-name
 {
 	display: block;
@@ -414,14 +423,24 @@ button.block
 {
 	display: inline-block;
 	width: 36dp;
-	height: 36dp;
+	height: 50dp;
 	margin-right: 10dp;
 	border-radius: 8dp;
 	background-color: #B3CCF2;
 	color: #1A3A6B;
 	font-size: 15dp;
-	line-height: 36dp;
+	line-height: 50dp;
 	text-align: center;
+	vertical-align: middle;
+}
+
+.list-cover-img
+{
+	display: inline-block;
+	width: 36dp;
+	height: 50dp;
+	margin-right: 10dp;
+	border-radius: 8dp;
 	vertical-align: middle;
 }
 

@@ -17,6 +17,9 @@ class ProfileViewModel {
 
     val displayName = State("")
     val avatarInitial = State("?")
+    val avatarPath = State("")
+    val hasAvatarText = State(true)
+    val hasAvatarImage = State(false)
     val realName = State("")
     val email = State("")
     val phone = State("")
@@ -29,6 +32,7 @@ class ProfileViewModel {
     fun apply(user: UserInfoRow) {
         displayName.value = user.userName
         avatarInitial.value = initialOf(user.userName)
+        resetAvatar()
         realName.value = user.realName.orEmpty().ifBlank { "未填写" }
         email.value = user.email.orEmpty().ifBlank { "未填写" }
         phone.value = user.phone.orEmpty().ifBlank { "未填写" }
@@ -38,10 +42,18 @@ class ProfileViewModel {
     fun apply(result: LoginResult) {
         displayName.value = result.userName
         avatarInitial.value = initialOf(result.userName)
+        resetAvatar()
         realName.value = result.realName.orEmpty().ifBlank { "未填写" }
         email.value = result.email.orEmpty().ifBlank { "未填写" }
         phone.value = result.phone.orEmpty().ifBlank { "未填写" }
         roleName.value = roleNameOf(0)
+    }
+
+    /** 头像字节已登记到视图层后调用；没有头像时保持首字占位。 */
+    fun applyAvatar(path: String) {
+        avatarPath.value = path
+        hasAvatarImage.value = true
+        hasAvatarText.value = false
     }
 
     fun applyLocal(health: LocalHealth?, metrics: LocalMetrics?) {
@@ -61,6 +73,7 @@ class ProfileViewModel {
     fun clear() {
         displayName.value = ""
         avatarInitial.value = "?"
+        resetAvatar()
         realName.value = ""
         email.value = ""
         phone.value = ""
@@ -69,6 +82,13 @@ class ProfileViewModel {
         localCpu.value = "--"
         localMem.value = "--"
         localDisk.value = "--"
+    }
+
+    /** 回到首字占位；新的用户数据到达时先重置，等头像登记成功再切换。 */
+    private fun resetAvatar() {
+        avatarPath.value = ""
+        hasAvatarImage.value = false
+        hasAvatarText.value = true
     }
 }
 

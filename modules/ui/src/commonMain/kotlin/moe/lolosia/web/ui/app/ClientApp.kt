@@ -1,11 +1,19 @@
 package moe.lolosia.web.ui.app
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import moe.lolosia.web.dto.ApiException
+import moe.lolosia.web.dto.AnimeSeriesDto
+import moe.lolosia.web.dto.UserInfoRow
 import moe.lolosia.web.ui.api.LocalServiceApi
 import moe.lolosia.web.ui.api.RemoteApi
+import moe.lolosia.web.ui.image.ImageLoader
 import moe.lolosia.web.ui.pages.home.HomeViewModel
+import moe.lolosia.web.ui.pages.home.coverPath
 import moe.lolosia.web.ui.pages.login.LoginViewModel
 import moe.lolosia.web.ui.pages.profile.ProfileViewModel
 import moe.lolosia.web.ui.session.AppSession
@@ -22,6 +30,7 @@ import moe.lolosia.web.ui.state.State
  * @param settingsStore 本地设置。
  * @param remoteApiFactory 按 baseUrl 创建远程 API。
  * @param localServiceApi 本地系统服务。
+ * @param imageLoader 图片资源登记。
  * @param scope 后台协程作用域。
  * @param postToUi 把一段逻辑投递到 UI 线程。
  * @param baseUrlOverride 环境变量等外部覆盖值，优先级高于设置文件。
@@ -31,6 +40,7 @@ class ClientApp(
     private val settingsStore: SettingsStore,
     private val remoteApiFactory: (String) -> RemoteApi,
     private val localServiceApi: LocalServiceApi,
+    private val imageLoader: ImageLoader,
     private val scope: CoroutineScope,
     private val postToUi: (() -> Unit) -> Unit,
     private val baseUrlOverride: String? = null,
@@ -65,12 +75,17 @@ class ClientApp(
         scope.launch {
             try {
                 val info = api.myInfo(token)
+                val avatar = loadAvatar(api, info)
                 postToUi {
                     profile.apply(info)
+                    avatar?.let { (path, bytes) ->
+                        imageLoader.register(path, bytes)?.let(profile::applyAvatar)
+                    }
                     login.loading.value = false
                     stage.value = AppStage.Main
-                    tab.value = MainTab.Profile
+                    tab.value = MainTab.Home
                 }
+                loadHome()
                 refreshLocalService()
             } catch (e: Throwable) {
                 postToUi {
@@ -132,13 +147,18 @@ class ClientApp(
                     settings.copy(baseUrl = baseUrl, token = result.authorization, userName = result.userName),
                 )
                 val info = runCatching { api.myInfo(result.authorization) }.getOrNull()
+                val avatar = info?.let { loadAvatar(api, it) }
                 postToUi {
                     if (info != null) profile.apply(info) else profile.apply(result)
+                    avatar?.let { (path, bytes) ->
+                        imageLoader.register(path, bytes)?.let(profile::applyAvatar)
+                    }
                     login.loading.value = false
                     login.clearPassword()
                     stage.value = AppStage.Main
-                    tab.value = MainTab.Profile
+                    tab.value = MainTab.Home
                 }
+                loadHome()
                 refreshLocalService()
             } catch (e: Throwable) {
                 postToUi {
@@ -201,7 +221,11 @@ class ClientApp(
         scope.launch {
             try {
                 val items = api.animeTimetable(token)
-                postToUi { home.apply(items) }
+                val covers = loadCovers(api, items)
+                postToUi {
+                    covers.forEach { (id, bytes) -> imageLoader.register(coverPath(id), bytes) }
+                    home.apply(items, covers.keys)
+                }
             } catch (e: Throwable) {
                 postToUi {
                     if (isAuthError(e)) expireSession() else home.fail(friendlyMessage(e))
@@ -216,11 +240,41 @@ class ClientApp(
         scope.launch {
             try {
                 val info = api.myInfo(token)
-                postToUi { profile.apply(info) }
+                val avatar = loadAvatar(api, info)
+                postToUi {
+                    profile.apply(info)
+                    avatar?.let { (path, bytes) ->
+                        imageLoader.register(path, bytes)?.let(profile::applyAvatar)
+                    }
+                }
             } catch (e: Throwable) {
                 postToUi { if (isAuthError(e)) expireSession() }
             }
         }
+    }
+
+    /** 首屏封面：并行取前若干张，单张超时不影响整页；失败的行继续显示首字占位。 */
+    private suspend fun loadCovers(api: RemoteApi, items: List<AnimeSeriesDto>): Map<Long, ByteArray> = coroutineScope {
+        items.asSequence()
+            .filter { it.cover != null || it.bangumiId != null }
+            .take(MAX_COVERS)
+            .map { item ->
+                async {
+                    withTimeoutOrNull(COVER_TIMEOUT_MS) { api.animeCover(item) }
+                        ?.let { item.id to it }
+                }
+            }
+            .toList()
+            .awaitAll()
+            .filterNotNull()
+            .toMap()
+    }
+
+    /** 头像：没有头像或取件失败返回 `null`，界面继续用首字占位。 */
+    private suspend fun loadAvatar(api: RemoteApi, user: UserInfoRow): Pair<String, ByteArray>? {
+        if (user.avatar.isNullOrBlank()) return null
+        val bytes = withTimeoutOrNull(AVATAR_TIMEOUT_MS) { api.avatar(user.id) } ?: return null
+        return avatarPath(user.id) to bytes
     }
 
     private fun refreshLocalService() {
@@ -246,6 +300,17 @@ class ClientApp(
 /** 认证类错误：清本地会话并回登录页。 */
 private fun isAuthError(e: Throwable): Boolean =
     e is ApiException && (e.status == 401 || e.status == 403)
+
+/** 首屏最多预取多少张封面。 */
+private const val MAX_COVERS: Int = 10
+
+/** 单张封面 / 头像的取件上限，避免拖慢整页。 */
+private const val COVER_TIMEOUT_MS: Long = 6000
+
+private const val AVATAR_TIMEOUT_MS: Long = 4000
+
+/** 头像在视图层资源表里的路径；与 `ProfileViewModel.applyAvatar` 约定一致。 */
+private fun avatarPath(userId: String): String = "/ui/images/avatar/$userId.img"
 
 /** 面向用户的错误文案；不把堆栈或 URL 暴露到页面。 */
 private fun friendlyMessage(e: Throwable): String = when (e) {
