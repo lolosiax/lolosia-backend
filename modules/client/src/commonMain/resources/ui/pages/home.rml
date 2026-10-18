@@ -1,0 +1,25 @@
+<rml>
+<head>
+	<link type="text/css" href="/ui/theme/theme.rcss"/>
+</head>
+<body data-model="main">
+	<div class="content">
+		<p class="title">番组表</p>
+		<p class="subtitle">本季放送中的番剧</p>
+
+		<p class="loading" data-if="homeLoading">正在加载…</p>
+		<p class="error" data-if="homeHasError">{{ homeError }}</p>
+		<p class="muted">{{ homeStatus }}</p>
+
+		<div class="card">
+			<p class="card-title">列表绑定待接入</p>
+			<p class="muted">登录、会话与 Tab 已接通；番组列表会在列表绑定完成后显示在这里。</p>
+		</div>
+	</div>
+
+	<div class="tabbar">
+		<div class="tab" data-class-active="tabHome" data-event-click="action('tab-home')">番组</div>
+		<div class="tab" data-class-active="tabProfile" data-event-click="action('tab-profile')">我的</div>
+	</div>
+</body>
+</rml>

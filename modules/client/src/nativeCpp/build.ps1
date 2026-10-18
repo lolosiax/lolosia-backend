@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     编译自研的 C/C++ 门面层为 thirdparty/<目标>/liblolosia.a。
@@ -48,7 +48,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '../../thirdparty/toolchain.ps1')
+. (Join-Path $PSScriptRoot '../../../../thirdparty/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
 $thirdpartyDir = Join-Path $repoRoot 'thirdparty'

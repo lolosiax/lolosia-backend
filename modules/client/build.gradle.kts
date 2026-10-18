@@ -1,5 +1,6 @@
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 group = "moe.lolosia"
@@ -35,6 +36,8 @@ kotlin {
             api(project(":modules:protocol"))
             api(project(":modules:core"))
             api(project(":modules:codecs"))
+            api(project(":modules:ui"))
+            implementation(libs.okio)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

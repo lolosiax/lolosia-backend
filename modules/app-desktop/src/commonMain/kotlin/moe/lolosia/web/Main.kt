@@ -9,6 +9,7 @@ import moe.lolosia.web.generated.repositoryModules
 import moe.lolosia.web.generated.serviceModule
 import moe.lolosia.web.settings.ENV_SETTINGS_FILE
 import moe.lolosia.web.settings.loadAppSettings
+import moe.lolosia.web.ui.runClientUi
 import moe.lolosia.web.ui.runUiExperiment
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.log.Log
@@ -30,8 +31,14 @@ import moe.lolosia.web.util.platform.envOrNull
  */
 fun main(args: Array<String>) {
     val first = args.firstOrNull()
-    // UI 实验会占住当前线程直到窗口关闭，也不参与 Koin 装配，因此先于一切启动逻辑分流
+    // UI 会占住当前线程直到窗口关闭，也不参与 Koin 装配，因此先于一切启动逻辑分流。
+    // `ui` 是最小客户端；`probe` 保留原来的 RmlUi 控件实验页。
     if (first == "ui") {
+        val code = runClientUi()
+        if (code != 0) Log.of("Main").error { "客户端退出码 $code" }
+        return
+    }
+    if (first == "probe") {
         val code = runUiExperiment()
         if (code != 0) Log.of("Main").error { "UI 实验退出码 $code" }
         return

@@ -55,6 +55,7 @@ struct UiState {
     void* action_user_data;
     bool debugger;
     bool created;
+    uint32_t wake_event_type;
     char error[512];
 };
 
@@ -168,6 +169,7 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     g_state.action = nullptr;
     g_state.action_user_data = nullptr;
     g_state.debugger = false;
+    g_state.wake_event_type = 0;
     g_state.document = nullptr;
     g_state.context = nullptr;
     g_state.created = true;
@@ -177,6 +179,12 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
         setError("Backend::Initialize 失败：窗口或 GPU 设备创建不出来");
         ll_ui_destroy();
         return -1;
+    }
+
+    // 自定义唤醒事件：后台线程要能打断 SDL_WaitEventTimeout，不能直接推 SDL_EVENT_USER。
+    g_state.wake_event_type = SDL_RegisterEvents(1);
+    if (g_state.wake_event_type == 0) {
+        ll_log_error("SDL_RegisterEvents 失败：后台更新将无法主动唤醒帧循环");
     }
 
     // 渲染/系统/文件接口都必须在 Rml::Initialise() 之前挂上。
@@ -481,6 +489,20 @@ int32_t ll_ui_frame(void) {
 }
 
 const char* ll_ui_last_error(void) { return g_state.error; }
+
+int32_t ll_ui_wake(void) {
+    if (g_state.wake_event_type == 0) return -1;
+
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = g_state.wake_event_type;
+    if (!SDL_PushEvent(&event)) {
+        setError("SDL_PushEvent 失败");
+        return -1;
+    }
+    clearError();
+    return 0;
+}
 
 void ll_ui_destroy(void) {
     // 调试器要排在 RemoveContext 之前收：它得把自己挂进上下文的那些文档摘掉、

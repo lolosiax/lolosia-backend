@@ -679,14 +679,14 @@ private fun Any?.s200(): String = when (this) {
     else -> toString().s200()
 }
 
-/** 非 2xx：优先按 [ApiResult] 信封取业务错误信息，取不到就用原文。 */
+/** 非 2xx：优先按 [ApiResult] 信封取业务错误信息，取不到就用原文；状态码原样保留。 */
 private suspend fun respHandleException(response: HttpResponse, baseUrl: String, url: String): Nothing {
     val text = runCatching { response.bodyAsText() }.getOrDefault("")
     logger.warn { "响应失败: $baseUrl$url - ${response.status.value} - ${text.s200()}" }
     val msg = runCatching {
         json.decodeFromString(ApiResult.serializer(JsonElement.serializer()), text).msg
     }.getOrNull()
-    throw ApiException(502, msg?.ifBlank { null } ?: text.s200())
+    throw ApiException(response.status.value, msg?.ifBlank { null } ?: text.s200())
 }
 
 private fun catchWebRequestException(e: Throwable, baseUrl: String, url: String) {

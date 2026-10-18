@@ -30,15 +30,6 @@ import moe.lolosia.web.util.time.toDisplayString
  * @author 洛洛希雅Lolosia
  */
 
-/** 查不到角色绑定时 `roleId` 的哨兵值（旧版沿用）。 */
-const val ROLE_ID_UNKNOWN: Long = 0L
-
-/** 用户没有任何组绑定时 `getUserInfo` 给出的默认组 id（最低权限的「访客」）。 */
-const val ROLE_ID_DEFAULT: Long = 5L
-
-/** 注册（`/api/register`）时给新用户的组 id（固定 4，即「普通用户」，见 `sql/sys_role.sql`）。 */
-const val ROLE_ID_USER: Long = 4L
-
 /** `sys_user` 的安全视图（不含 `password`）。 */
 @Serializable
 data class UserRow(
@@ -85,21 +76,6 @@ data class UserListRow(
 data class UserListResult(
     val data: List<UserListRow>,
     val total: Long,
-)
-
-/** 单个用户详情：`sys_user` 字段 + 其角色 id（旧版是扁平 Bundle）。 */
-@Serializable
-data class UserInfoRow(
-    val id: String,
-    val userName: String,
-    val realName: String? = null,
-    val phone: String? = null,
-    val email: String? = null,
-    val avatar: String? = null,
-    val isUse: Int? = null,
-    val createdAt: String? = null,
-    val updatedAt: String? = null,
-    val roleId: Long = ROLE_ID_DEFAULT,
 )
 
 /**

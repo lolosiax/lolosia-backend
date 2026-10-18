@@ -37,6 +37,7 @@ include(":modules:router-ksp")
 include(":modules:protocol")
 include(":modules:core")
 include(":modules:codecs")
+include(":modules:ui")
 include(":modules:client")
 include(":modules:server")
 // 唯一桌面入口：三个 native 可执行文件都在这里

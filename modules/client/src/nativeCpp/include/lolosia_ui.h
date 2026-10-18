@@ -139,6 +139,14 @@ int32_t ll_ui_enable_debugger(void);
  */
 int32_t ll_ui_frame(void);
 
+/*
+ * 唤醒阻塞中的 ll_ui_frame()。
+ *
+ * ll_ui_frame() 空闲时会等事件；后台线程改完数据模型后必须调用本函数推一个 SDL 用户事件，
+ * 否则界面要等到下一个输入事件或超时才重绘。可从任意线程调用。
+ */
+int32_t ll_ui_wake(void);
+
 /* 最近一次失败的原因；无失败时返回空串 */
 const char* ll_ui_last_error(void);
 
