@@ -23,8 +23,8 @@ val platformConfig: Map<String, Any?> =
 
 extra["lolosia.platforms"] = platformConfig
 
-// 产物所在模块。Stage 1 先指向单体 server；Stage 2 拆出 app-desktop 后改这里。
-val desktopProjectPath = ":modules:server"
+// 产物所在模块：Stage 2 起由 :modules:app-desktop 装配 server + client。
+val desktopProjectPath = ":modules:app-desktop"
 
 // 根任务要读子模块的 link 任务输出，必须先让该模块完成配置。
 // ⚠️ 必须在 extra 赋值之后：强制求值子模块时，它的 build.gradle.kts 会立刻读取 extra。

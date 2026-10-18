@@ -52,9 +52,9 @@ class MediaPropertyService(
                 .getOrThrow()
         }
         if (req.rating != null) tagService.projectRating(ctx.db, row.id, rating, SOURCE_MANUAL, operator)
-        if (req.caption != null) {
+        req.caption?.let { caption ->
             assets.executeUpdateCaptionById(
-                ctx.db, row.id, req.caption.trim().ifEmpty { null }, SOURCE_MANUAL, now, operator,
+                ctx.db, row.id, caption.trim().ifEmpty { null }, SOURCE_MANUAL, now, operator,
             ).getOrThrow()
         }
         return MessageResult("已保存")

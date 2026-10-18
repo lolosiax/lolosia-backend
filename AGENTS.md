@@ -9,10 +9,10 @@
 ## 0. 项目定位
 
 - **Kotlin/Native 全栈模板**：Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB。
-- 目标平台有 **`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**没有 JVM 目标**。两个 linux 目标共享 `modules/server/src/linuxMain/` 下的平台实现。
+- 目标平台有 **`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**没有 JVM 目标**。两个 linux 目标共享各模块 `src/linuxMain/` 下的平台实现。
 - 产物是**单个原生可执行文件**：前端产物、SQL、默认配置都以 `classpath.zip` 形式内嵌，无 fat jar、无外部资源目录。
 - 图像编解码（WebP / PNG / JPEG / GIF）与自定义请求通道用的 **msgpack**（msgpack-c）走**预编译的 C 静态库**，随可执行文件静态链入；库产物随仓库提交，日常构建不需要 C 工具链（`thirdparty/`，见 §7 / §10）。
-- 根包 **`moe.lolosia.web`**；Gradle 根只做聚合（`deploy` / `runDebug` / `runRelease` / `buildBinaries`），代码模块是 `:modules:server` 与 `:modules:router-ksp`（插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。根目录不再保留 `src/`。
+- 根包 **`moe.lolosia.web`**；Gradle 根只做聚合（`deploy` / `runDebug` / `runRelease` / `buildBinaries`）。模块按依赖方向分为 `:modules:protocol` → `:modules:core` → `:modules:codecs` → `:modules:{server,client}` → `:modules:app-desktop`，另有 `:modules:router-ksp`（KSP 插件域，包名 `moe.lolosia.router.ksp` 不受根包约束）。根目录不再保留 `src/`。
 
 ## 1. 代码风格
 
@@ -37,11 +37,11 @@
 
 **入口与装配（2026-10 收敛后）**
 
-- `main()` 在 **commonMain** 的 `Main.kt`，唯一入口；`entryPoint = "moe.lolosia.web.main"`。
+- `main()` 在 `:modules:app-desktop` 的 **commonMain** `Main.kt`，唯一入口；`entryPoint = "moe.lolosia.web.main"`。
 - Ktor 的 `Application` 装配在 `configuration/AppConfigure.kt` 的 `Application.configureApplication(koin)`。
 - **各目标源集不再有 `main`，也不再有 `startServer`**：不要新增「由各目标入口传入 lambda」的写法。
 
-**平台差异只有五处 `expect/actual`**：`installPlatformClasspath()`、`envOrNull()`、`platformModule()`，以及图像能力 [`Image`](modules/server/src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt) 与缩略图生成 [`ThumbnailGenerator`](modules/server/src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailGenerator.kt)（这两个要绑内嵌的 C 静态库，`actual` 只能落在 nativeMain）。
+**平台差异只有五处 `expect/actual`**：`installPlatformClasspath()`、`envOrNull()`、`platformModule()`，以及图像能力 [`Image`](modules/codecs/src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt) 与缩略图生成 [`ThumbnailGenerator`](modules/codecs/src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailGenerator.kt)（这两个要绑内嵌的 C 静态库，`actual` 只能落在 nativeMain）。
 
 **KSP 生成的注册表跨源集可见**
 
@@ -148,7 +148,7 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
 
 ## 7. 资源、配置、日志、密码、图像
 
-- **资源一律走 `classpath` 中间层**，不要用文件系统路径：`modules/server/src/<源集>/resources/**` 就是 classpath 根，运行时 `classpath.read("static/home/index.html")`。
+- **资源一律走 `classpath` 中间层**，不要用文件系统路径：各模块 `src/<源集>/resources/**` 就是 classpath 根（服务端资源在 `modules/server`，UI 资源在 `modules/client`），运行时 `classpath.read("static/home/index.html")`。`app-desktop` 的插件会自动合并依赖模块的资源，不需要手写注入。
   - `Classpath` 的来源标识：`scheme`（`file` / `classpath` / `empty`）与 `origin`（供日志展示）。
   - 内嵌 `classpath.zip` 默认 **DEFLATED**（`classpath { compressed = true }`），读取端 `ZipClasspath` 用 `platform.zlib` 做 inflate；STORED 也支持。
   - **按构建类型分两条链路**（`NativeBuildType`，与 mingw / linux 那对目标是两回事）：`release` 并入 vite 产物；
@@ -181,25 +181,25 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - `files/list` 的条目还带索引侧字段 `rating` / `indexed` / `takenAt` / `sample` / `tags`（见 [media-index-design.md](doc/media-index-design.md) §11.1）：
     `tags` **只给 `namespace` + `name`**（够网格标心 `feature:喜欢`、目录 `feature:` 分组开关与将来的标签分组 / 筛选）——
     否决位与来源仍只在 `media/detail` 给全。**别往列表里塞标签正文**，列目录要能扛住大目录。
-- **第三方 C 库**（图像编解码 + 通道用的 msgpack-c）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `modules/server/src/nativeInterop/cinterop/*.def`。
+- **第三方 C 库**（图像编解码 + 通道用的 msgpack-c）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `modules/codecs/src/nativeInterop/cinterop/*.def`。
   - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/build-libs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
-  - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` / `JsonElement` 收发，不把 C 指针泄漏给调用方（msgpack 的门面是 [`util/xhrdata/`](modules/server/src/commonMain/kotlin/moe/lolosia/web/util/xhrdata/XhrData.kt)，见 §4.4 自定义请求通道）。
+  - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` / `JsonElement` 收发，不把 C 指针泄漏给调用方（msgpack 的门面是 [`util/xhrdata/`](modules/codecs/src/commonMain/kotlin/moe/lolosia/web/util/xhrdata/XhrData.kt)，见 §4.4 自定义请求通道）。
   - 一律选**不依赖 `setjmp/longjmp` 的接口**（libpng 用 `png_image` 简化接口、libjpeg-turbo 用 `tj3*`、libwebp / giflib 本身回错误码），坏图只回 `null`，不会把进程带走。
   - ⚠️ C 库只保留调用期间有效的裸指针（libpng 的 `png_image_begin_read_from_memory` 就是典型）：`usePinned` 必须覆盖到真正的解码调用为止，中途解 pin 只会得到「不报错但像素全错」。
   - ⚠️ `size_t` 三个目标都是 64 位可安全传递；`unsigned long` 不是（mingw 32 位 / linux 64 位），跨目标代码别写出具体宽度。
   - ⚠️ libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档，`build-libs.ps1` 已把它合并回单个 `libwebp.a`：K/N 的 ELF 链接（ld.gold）按归档逐个解析，分成两个归档时 `SharpYuv*` 会解析不到（arm64 / x64 都失败）。
   - ⚠️ **msgpack-c**：`msgpack_unpacked_init` / `msgpack_unpacked_destroy` 是 `static inline`，**cinterop 不导出** —— 用 `alloc<msgpack_unpacked>()`（零初始化）替代 init，收尾手动 `msgpack_zone_free` 替代 destroy。另外 `msgpack_object_kv` 的字段名 `val` 与 Kotlin 关键字撞名，访问要写反引号 `` `val` ``；`CPointer` 的 `get` / `plus` 等运算符需显式 `import kotlinx.cinterop.*`。
 - **UI 实验的图形栈**（SDL3 → FreeType → RmlUi → 自研门面 `liblolosia`）沿用同一套「产物入库、源码不入库」：
-  - 四层各有一个一次性重建脚本，**有先后依赖**：[`build-sdl3.ps1`](thirdparty/build-sdl3.ps1) → [`build-freetype.ps1`](thirdparty/build-freetype.ps1)（RmlUi 的字体引擎）→ [`build-rmlui.ps1`](thirdparty/build-rmlui.ps1)（核心库）→ [`nativeCpp/build.ps1`](modules/server/src/nativeCpp/build.ps1)（门面 + RmlUi 的 SDL_GPU 后端胶水）。产物一律落 `thirdparty/<目标>/` 与 `thirdparty/include/`，cinterop 只需一个 libraryPath。
+  - 四层各有一个一次性重建脚本，**有先后依赖**：[`build-sdl3.ps1`](thirdparty/build-sdl3.ps1) → [`build-freetype.ps1`](thirdparty/build-freetype.ps1)（RmlUi 的字体引擎）→ [`build-rmlui.ps1`](thirdparty/build-rmlui.ps1)（核心库）→ [`nativeCpp/build.ps1`](modules/client/src/nativeCpp/build.ps1)（门面 + RmlUi 的 SDL_GPU 后端胶水）。产物一律落 `thirdparty/<目标>/` 与 `thirdparty/include/`，cinterop 只需一个 libraryPath。
   - 与 `build-libs.ps1` 的差异：这几个脚本自己找 cmake / ninja（本机没有系统级 cmake，`python -m pip install cmake ninja` 即可，脚本会在 python 的用户级 Scripts 目录里找 —— 别用 `& python` 直接探，PATH 上的商店占位 stub 会抛错）；公共的工具链定位与源码下载解压抽在 [`thirdparty/toolchain.ps1`](thirdparty/toolchain.ps1)，各脚本 dot-source 它。
   - 交叉编译的坑都用**定点补丁**解决，且补丁失配会直接报错（不会静默失效）：SDL3 的 `SDL_assert.h` / `SDL_intrin.h`（clang 与 mingw 的 `<intrin.h>` 在 C++ 下冲突，而 CMake 给目标挂了 PCH）、FreeType 的 `CMakeLists.txt`（去掉 `ftver.rc`：windres 预处理要能用的 gcc，K/N 的 sysroot 里只有缺 cc1 的驱动壳）。
-  - RmlUi 出两个静态库：`rmlui_core`（`librmlui.a`）与内置调试器 `rmlui_debugger`（`librmlui_debugger.a`，见下面那条）；不出 samples / tests / Lua / Lottie / SVG 插件。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `modules/server/src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 build-rmlui.ps1）。
+  - RmlUi 出两个静态库：`rmlui_core`（`librmlui.a`）与内置调试器 `rmlui_debugger`（`librmlui_debugger.a`，见下面那条）；不出 samples / tests / Lua / Lottie / SVG 插件。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `modules/client/src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 build-rmlui.ps1）。
   - **内置调试器**（查元素树 / 盒模型、看与改数据模型、看日志、画元素边框）：门面只暴露 `ll_ui_enable_debugger()`，**F8 开关**（按键钩子挂在 `Backend::ProcessEvents(context, &onKeyDown, true)` 的第二个参数上；返回 `true` 放行、`false` 吃掉，与上游 `Samples/shell` 一致）。要点：
     - 调试器往**宿主上下文**里加自己的文档（不是另开 context），字体是内嵌的 Courier Prime（只有拉丁字形、界面文案英文），与宿主字体互不干扰；启用时机放在 `ll_ui_load_document` 之后，让它画的菜单压在主文档之上。
     - 它会把**全局系统接口**换成自己的包装（以便截获日志进它的日志面板），所以销毁时要先 `Rml::Debugger::Shutdown()` 再 `RemoveContext` —— 它会把自己的文档从上下文摘掉并还原系统接口。
-    - `librmlui_debugger.a` 要排在 `librmlui.a` **之前**（引用者在左），见 `modules/server/src/nativeInterop/cinterop/lolosia.def`。
-  - RmlUi 的 SDL_GPU 后端加载图片纹理时会 `#include <SDL3_image/SDL_image.h>` 并调 `IMG_LoadTyped_IO`（只此一个函数）。这里没有引整套 SDL_image + stb_image（与轻量化相悖，且解码能力仓库里已有），而是自己实现它：[`include/SDL3_image/SDL_image.h`](modules/server/src/nativeCpp/include/SDL3_image/SDL_image.h) 只声明这一个函数，[`src/SdlImage.cpp`](modules/server/src/nativeCpp/src/SdlImage.cpp) 把字节交给宿主的解码回调（Kotlin 侧复用 libpng / libjpeg-turbo / libwebp / giflib 的门面），拿回 RGBA 包成 SDL_Surface。给 RGBA32 是有意的 —— 后端对其它格式会先做一次转换。**新增链接的第三方库为零**：这些库本来就已经在可执行文件里了。
-  - 资源读取走 [`src/ResourceFileInterface.cpp`](modules/server/src/nativeCpp/src/ResourceFileInterface.cpp)：先问宿主的 `read_file` 回调（classpath），**宿主不认识再退回真实文件系统**。回退不是可选项 —— 字体是磁盘文件（`C:/Windows/Fonts/…`），少了它界面文字会整片消失，而日志里只会看到「字体加载失败」，看不出跟资源加载有关。
+    - `librmlui_debugger.a` 要排在 `librmlui.a` **之前**（引用者在左），见 `modules/client/src/nativeInterop/cinterop/lolosia.def`。
+  - RmlUi 的 SDL_GPU 后端加载图片纹理时会 `#include <SDL3_image/SDL_image.h>` 并调 `IMG_LoadTyped_IO`（只此一个函数）。这里没有引整套 SDL_image + stb_image（与轻量化相悖，且解码能力仓库里已有），而是自己实现它：[`include/SDL3_image/SDL_image.h`](modules/client/src/nativeCpp/include/SDL3_image/SDL_image.h) 只声明这一个函数，[`src/SdlImage.cpp`](modules/client/src/nativeCpp/src/SdlImage.cpp) 把字节交给宿主的解码回调（Kotlin 侧复用 libpng / libjpeg-turbo / libwebp / giflib 的门面），拿回 RGBA 包成 SDL_Surface。给 RGBA32 是有意的 —— 后端对其它格式会先做一次转换。**新增链接的第三方库为零**：这些库本来就已经在可执行文件里了。
+  - 资源读取走 [`src/ResourceFileInterface.cpp`](modules/client/src/nativeCpp/src/ResourceFileInterface.cpp)：先问宿主的 `read_file` 回调（classpath），**宿主不认识再退回真实文件系统**。回退不是可选项 —— 字体是磁盘文件（`C:/Windows/Fonts/…`），少了它界面文字会整片消失，而日志里只会看到「字体加载失败」，看不出跟资源加载有关。
   - RML 里引用图片：路径以 `/` 开头即 classpath 根相对（`SystemInterface::JoinPath` 对 `/` 开头的路径会剥掉前缀直接返回，与文档位置无关）。⚠️ RCSS **没有 CSS 的 `background-image`**，图片装饰器要写成 `decorator: image( /ui/sample.png )`（会拉伸铺满元素）。
   - ⚠️ 资源回调（`ll_ui_set_resource_loader`）要在**加载字体之前**注册：字体同样走文件接口，而这个回调是文件接口判断「该路径是不是宿主资源」的依据。
   - **表单控件的双向绑定**：RML 侧写 `data-value="字段名"`（输入框 / 下拉 / 滑杆）与 `data-checked="布尔字段名"`（复选框 / 单选），用户改值由 RmlUi 直接写进数据模型。宿主要把值同步回自己的 ViewModel，就用 `ll_ui_model_get_*` 读回（`ll_ui_model_set_*` 的对称函数，字符串按「两次调用」约定取字节数）。
@@ -213,10 +213,10 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - ⚠️ **不要给链接补 `-lstdc++`**：K/N 自己的 runtime 就是 C++ 写的、已经链了 libstdc++，再加一次会 `ld.lld: duplicate symbol: std::bad_alloc::~bad_alloc()`。
   - ⚠️ **RmlUi 的尺寸口径与 CSS 直觉不同**（容易踩，症状是「内容只铺满窗口一角、其余一片黑」）：
     - `Context::SetDimensions` 收的尺寸**就是像素** —— 它同时是渲染视口与文档根盒的尺寸；`SetDensityIndependentPixelRatio` 才是 dp→px 的乘数（`ComputeLength` 里 `Unit::DP × dp_ratio`）。所以正确写法是 `SetDimensions(窗口像素尺寸)` + `SetDensityIndependentPixelRatio(显示缩放)`。
-    - RmlUi 的 **SDL 后端只在「显示缩放变化」事件里设 dp 比**，窗口刚建好时不会设，它的示例代码又把逻辑尺寸当 dp 直接交给 `CreateContext` —— 100% 缩放下两者恰好相等看不出问题，150% 缩放下视口就少了一块。`ll_ui_create` 里已按「窗口像素 + 显示缩放」补齐（改这块先看 `modules/server/src/nativeCpp/src/LolosiaUi.cpp` 的注释）。
+    - RmlUi 的 **SDL 后端只在「显示缩放变化」事件里设 dp 比**，窗口刚建好时不会设，它的示例代码又把逻辑尺寸当 dp 直接交给 `CreateContext` —— 100% 缩放下两者恰好相等看不出问题，150% 缩放下视口就少了一块。`ll_ui_create` 里已按「窗口像素 + 显示缩放」补齐（改这块先看 `modules/client/src/nativeCpp/src/LolosiaUi.cpp` 的注释）。
     - 文档元素（RmlUi 里 **body 就是文档**，`Factory.cpp` 的 `documents_base_tag`）在构造时被设成 `position: absolute`：**不给尺寸约束它就按内容收缩**，背景只铺满内容那一块。写 RML 时要把 body 显式撑满（`left/right/top/bottom: 0`，样例的 `window.rml` 就是这么写的），或 `width/height: 100%`。
   - ⚠️ **thirdparty 的 `.a` 要声明成 cinterop 任务的输入**（`build.gradle.kts`）：cinterop 会把它**复制**进 klib 的依赖目录，链接器用的是那份副本；而 cinterop 自身输入只算 `.def` 与头文件。不声明的话，重建静态库后 cinterop 不重跑，副本一直停在旧版 —— 症状是「改了 C 代码却看不到任何效果」，且 `link` 看上去正常执行了。`classpath.res` 是同一类陷阱，处理方式见 buildSrc/NativeClasspath.kt。
-  - Kotlin 侧绑定包名 `moe.lolosia.web.ui.native`（`modules/server/src/nativeInterop/cinterop/lolosia.def`）；**该 cinterop 只挂在 mingwX64 上**，linux 目标还没有交叉构建好的 SDL3。
+  - Kotlin 侧绑定包名 `moe.lolosia.web.ui.native`（`modules/client/src/nativeInterop/cinterop/lolosia.def`）；**该 cinterop 只挂在 mingwX64 上**，linux 目标还没有交叉构建好的 SDL3。
 - **前端路径不许写死**：用 `generateConstants` 产出的 `VITE_DEFAULT`（值 = viteJar 的 `contextPath`）拼路由。
 - **配置只有一个入口** [`settings/AppSettings.kt`](modules/server/src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable`）。
   优先级（低→高，**按字段深合并**）：数据类默认值 < 内嵌 `application.json` < 磁盘 `application.json` < 环境变量 < 命令行端口。
@@ -224,7 +224,7 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
 - **日志一律 `Log.of("tag")`**，不要 `println`；级别由配置 `logLevel` 控制。
 - **密码用自研 bcrypt**（`util/crypto/BCrypt.kt`，移植 jBCrypt 0.4）：保持 `$2a$` 与 cost=10 语义，能直接校验库里既有的哈希；
   改动算法后**先跑 jBCrypt 官方测试向量**。
-- **Native 上没有 `java.awt` / `javax.imageio`**：通用图像编解码走内嵌的 C 静态库（见上一条），commonMain 的统一入口是 [`util/image/Image.kt`](modules/server/src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt)（`expect class Image`：bytes ↔ 像素、探测格式/尺寸/色彩类型、基础 draw）；
+- **Native 上没有 `java.awt` / `javax.imageio`**：通用图像编解码走内嵌的 C 静态库（见上一条），commonMain 的统一入口是 [`util/image/Image.kt`](modules/codecs/src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt)（`expect class Image`：bytes ↔ 像素、探测格式/尺寸/色彩类型、基础 draw）；
   纯自研的只剩验证码那条链路 —— `util/captcha/`（5×7 点阵字，无字体依赖）直接画在 `Image` 的空白画布上再编码 PNG。不要去 Maven 找图像库。
 
 ## 8. 接口契约
@@ -237,18 +237,18 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
 - **编译自检**（改了代码至少跑这个）：
 
 ```powershell
-gradlew :modules:server:compileKotlinMingwX64 :modules:server:compileKotlinLinuxArm64 :modules:server:compileKotlinLinuxX64
+gradlew :modules:app-desktop:compileKotlinMingwX64 :modules:app-desktop:compileKotlinLinuxArm64 :modules:app-desktop:compileKotlinLinuxX64
 ```
 
 - **本机跑起来**（改完代码冒烟用）：
   - **建库导表**：本机 MariaDB 直接导 `sql/` 里的脚本即可（库 `lolosia-backend`）。客户端不在 `PATH`（本机在 `D:\Program Files\MariaDB 12.1\bin\`），且 `cmd /c` 重定向会被工具策略拦，
     改用客户端自带的 `source`：`& "<...>\bin\mysql.exe" -u root -p<弱口令> -e "source <脚本的绝对路径>.sql"`。
-  - **启动后端**：`gradlew runDebug`（根任务，已把 cwd 固定为 `backend` 根目录），或直接跑 `gradlew :modules:server:runDebugExecutableMingwX64`（**cwd 必须是 `backend` 根目录** —— 磁盘 `application.yaml` 按工作目录找，换个 cwd 就退回内嵌默认配置）。
+  - **启动后端**：`gradlew runDebug`（根任务，已把 cwd 固定为 `backend` 根目录），或直接跑 `gradlew :modules:app-desktop:runDebugExecutableMingwX64`（**cwd 必须是 `backend` 根目录** —— 磁盘 `application.yaml` 按工作目录找，换个 cwd 就退回内嵌默认配置）。
     调试版不跑 `vite build`、也不嵌前端产物，重启只等编译 + 链接；前端另开 `pnpm dev`（5005）连过来。
-    只有要连前端一起验（例如确认内嵌 `static/home` 真能打开）才用 `gradlew runRelease`（或 `:modules:server:runReleaseExecutableMingwX64`）—— 它每次重启都会先重跑一遍 `vite build`。
+    只有要连前端一起验（例如确认内嵌 `static/home` 真能打开）才用 `gradlew runRelease`（或 `:modules:app-desktop:runReleaseExecutableMingwX64`）—— 它每次重启都会先重跑一遍 `vite build`。
   - **重启**：先杀旧的 `lolosia-backend.exe`（`Get-Process lolosia-backend | Stop-Process -Force`）再跑；
     否则链接会因 exe 被旧进程占用报 `AccessDeniedException`。
-  - **UI 实验**（RmlUi 视图层 + SDL3 GPU/Vulkan 出帧）：`.\modules\server\build\bin\mingwX64\debugExecutable\lolosia-backend.exe ui` —— 首个参数是 `ui` 时不进服务器启动路径。
+  - **UI 实验**（RmlUi 视图层 + SDL3 GPU/Vulkan 出帧）：`.\modules\app-desktop\build\bin\mingwX64\debugExecutable\lolosia-backend.exe ui` —— 首个参数是 `ui` 时不进服务器启动路径。
     范围：RML/RCSS 描述界面（**flexbox 自动排版，不手算坐标**）+ data-model 数据绑定（Kotlin 的 ViewModel ↔ 文档变量，按钮走 `data-event-click="action('x')"`，表单控件走 `data-value` / `data-checked` 并读回 ViewModel），界面在 `resources/ui/probe.rml`；
     图片可用：资源从 classpath 读、解码复用已有的 C 编解码库（见 §7）；**F8 开内置调试器**（元素树 / 数据模型 / 日志 / 元素边框）；关窗即退出。图形栈的构建约定见 §7。
     排障：RmlUi 的日志走 stderr（直接跑控制台里就能看到）；要留档就重定向到文件 —— 但如果哪天日志「消失」，先怀疑 stderr 缓冲（见 §7 那条 `fflush`）。
@@ -260,9 +260,9 @@ gradlew :modules:server:compileKotlinMingwX64 :modules:server:compileKotlinLinux
     - `tools/ui-smoke/UiProbe.cs`：从截图里按填充色反查控件位置（`LocateButtons` / `ColumnStats`），用法见文件头注释。
 
 - 产物：`gradlew buildBinaries`（三目标一次性输出到 `build/bin`，命名 `<项目>-<平台>-<类型>-<版本>.<扩展名>`）；
-  单一目标用 `gradlew :modules:server:linkReleaseExecutableMingwX64`（linuxArm64 / linuxX64 同理）；
+  单一目标用 `gradlew :modules:app-desktop:linkReleaseExecutableMingwX64`（linuxArm64 / linuxX64 同理）；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
-- **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（图像编解码）与 UI 实验那四层（`build-sdl3.ps1` → `build-freetype.ps1` → `build-rmlui.ps1` → `modules/server/src/nativeCpp/build.ps1`，见 §7）
+- **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（图像编解码）与 UI 实验那四层（`build-sdl3.ps1` → `build-freetype.ps1` → `build-rmlui.ps1` → `modules/client/src/nativeCpp/build.ps1`，见 §7）
   —— 都是借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
 - **没有自动化测试**（`commonTest` 只有依赖声明）；行为验证目前靠临时冒烟脚本（命令清单见 `doc/development-notes.md`）。
 - KSP 聚合输出**必须带源文件**：`Dependencies(aggregating = true, *sourceFiles)`。只写 `aggregating = true` 会漏扫未改动文件，症状是「**编译通过但接口全 404**」。
@@ -274,53 +274,62 @@ gradlew :modules:server:compileKotlinMingwX64 :modules:server:compileKotlinLinux
 ## 10. 文件地图
 
 ```
-modules/server/src/commonMain/kotlin/moe/lolosia/web/
-  Main.kt                        唯一入口：装 classpath → 读配置 → 起 Koin → 起 CIO 引擎
-  configuration/AppConfigure.kt  Application.configureApplication(koin)：插件 / 中间件 / 路由 / DDNS
-  configuration/AppModule.kt     Koin：appModule / serviceModule（手写逃生口）/ startAppKoin / platformModule(expect)
-  generated/GeneratedRegistries.kt  6 个生成注册表的 expect 签名（actual 由 :modules:router-ksp 生成）
-  api/package.kt                 对外 HTTP 客户端（Ktor Client；引擎按目标选 curl / winhttp），含 sse / ws / streamingRequest
-  controller/                    LoginController / SseController / OssController / FileController / FootprintController（足迹地图）/ Classpath（运维探针）/ system/{User,Role,UserRole,Menu,Permission}
-  database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
-  dto/                           ApiResult（信封）/ RawJson / SystemDtos / LoginDtos / OssDtos / FileDtos / MediaDtos / FootprintDtos / PermissionDtos
-  interceptor/                   Traffic → Ctx → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
-  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / ddns/ / oss/ / dav/（WebDAV 存储层）/ permission/（RBAC：PermissionRegistry · PermissionResolver · PermissionService）/ files/（在线文件管理器：FileBrowser · FileSigner · FileTypes · ThumbnailCache·Generator·Service）/ media/（媒体索引 + 足迹聚类：MediaIndex·Query·Analyze·Footprint 服务 · FootprintClusterer · MediaRule 等）
-  service/system/                UserService / RoleService / UserRoleService / QuerySupport
-  settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
-  util/captcha/                 自研图形验证码（点阵字 + 算式）
-  util/classpath/               Classpath 接口 / ClasspathExt / ClasspathHolder / StaticClasspathConfig / FileStoreClasspath / package.kt
-  util/crypto/BCrypt.kt         自研 bcrypt
-  util/fs/FileStore.kt          文件存储抽象（native 实现 PosixFileStore）
-  util/image/                   Image.kt（expect：bytes ↔ 像素、格式/尺寸/色彩类型探测、draw）+ ImageFormat / ImageColorType / ImageSize / ImageCodecException
-  util/json/ koin/ ktor/        外部库类型扩展（JsonObject / Koin / Route·ApplicationCall；WebDAV 路由 `webDav` 在 ktor/）
+modules/protocol/src/commonMain/kotlin/moe/lolosia/web/
+  dto/                           跨端契约：ApiResult 信封 / FileDtos / MediaDtos / FootprintDtos / LoginDtos / PermissionDtos / SettingDtos / AnimeDtos
+  util/sse/EventSource.kt        SSE 帧模型与 toEventSourceFrames（服务端与客户端共用）
+modules/core/src/commonMain/kotlin/moe/lolosia/web/
+  api/package.kt                 对外 HTTP 客户端（Ktor Client；引擎按目标选 curl / winhttp），含 post / get / sse / ws / streamingRequest
+  util/classpath/                Classpath 接口 / ClasspathExt / ClasspathHolder / FileStoreClasspath / package.kt
+  util/fs/FileStore.kt           文件存储抽象
+  util/json/ koin/ ktor/         外部库类型扩展（JsonObject / Koin / Route·ApplicationCall）
   util/log/                     Log / LogLevel / Logger（自研）
-  util/platform/Env.kt          envOrNull（expect）
-  util/proc/Shell.kt            子进程
-  util/router/                  注解 + 参数绑定（含 List<String> / List<UploadedFile>）+ multipart 解析 + RouterInjection
-  util/session/                 Context / UserInfo / ApplicationCallContext / package.kt
-  util/sse/                     EventSource / KtorEventSource / SseContent
+  util/platform/                Env.kt（envOrNull，expect）/ Termination（expect）
   util/time/Time.kt             nowLocal（仅日志）/ nowEpochMs
-modules/server/src/commonMain/resources/       application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ static/home/ / hello.txt
-modules/server/src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspath(Image) / EmptyClasspath、
-                                installPlatformClasspath(actual) / Env.kt(actual) / platformModule(actual) / fs/Mkdir·PosixFile*、
-                                util/image/Image.kt(actual)、util/xhrdata/（msgpack+gzip 自定义通道编解码）、service/files/ThumbnailGenerator.kt(actual)、thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）
-modules/server/src/commonMain/kotlin/…/ui/     UI 实验里与平台无关的部分：mvvm/（Property·Command）· experiment/（ModelField·UiProbeViewModel）
+modules/core/src/nativeMain/kotlin/…/        ZipClasspath / DiskClasspath / EmbeddedClasspath(Image) / EmptyClasspath / 平台 actual（Env·Termination）
+modules/core/src/linuxMain|mingwX64Main/kotlin/…/  api/ApiClient（curl / winhttp）+ classpath/EmbeddedClasspath + fs/Mkdir
+modules/codecs/src/commonMain/kotlin/moe/lolosia/web/
+  util/image/                   Image.kt（expect：bytes ↔ 像素、格式/尺寸/色彩类型探测、draw）+ ImageFormat / ImageColorType / ImageSize / ImageCodecException
+  util/exif/                    EXIF 元数据解析（ExifReader / ExifTags / Gps 等）
+  util/xhrdata/                 msgpack+gzip 自定义通道编解码（decodeXhrData / XHR_DATA_CONTENT_TYPE）
+  service/files/                AutoCrop / ThumbnailGenerator（expect）
+modules/codecs/src/nativeMain/kotlin/…/      thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）+ Image(actual) / ThumbnailGenerator(actual) / xhrdata(actual)
+modules/codecs/src/nativeInterop/cinterop/   第三方 C 库绑定（zlib / png / webp / jpeg / gif / msgpack 各一个 .def）
+modules/client/src/commonMain/kotlin/…/ui/   UI 实验里与平台无关的部分：mvvm/（Property·Command）· experiment/（ModelField·UiProbeViewModel）
                                 + UiExperiment.kt（expect fun runUiExperiment）
-modules/server/src/mingwX64Main/kotlin/…/ui/   UiExperiment.mingw.kt：唯一接触 ll_ui_* 的地方 —— 声明数据模型字段、订阅 ViewModel、转发 action、跑帧循环
-modules/server/src/linuxMain/kotlin/…/ui/      UiExperiment.linux.kt：占位 actual（linux 目标还没有 SDL3）
-modules/server/src/commonMain/resources/ui/    probe.rml（实验界面：RML + 内联 RCSS，flexbox 排版 + data-model 绑定 + 表单控件）与 sample.png（图片链路的测试图案）
-modules/server/src/nativeCpp/                  自研 C/C++ 门面：include/lolosia_ui.h（ll_ui_* 的 C ABI：模型字段的 bind/set/get + 资源回调 + 调试器开关）+
+modules/client/src/mingwX64Main/kotlin/…/ui/ UiExperiment.mingw.kt：唯一接触 ll_ui_* 的地方 —— 声明数据模型字段、订阅 ViewModel、转发 action、跑帧循环
+modules/client/src/linuxMain/kotlin/…/ui/    UiExperiment.linux.kt：占位 actual（linux 目标还没有 SDL3）
+modules/client/src/commonMain/resources/ui/  probe.rml（实验界面：RML + 内联 RCSS，flexbox 排版 + data-model 绑定 + 表单控件）与 sample.png（图片链路的测试图案）
+modules/client/src/nativeCpp/                自研 C/C++ 门面：include/lolosia_ui.h（ll_ui_* 的 C ABI：模型字段的 bind/set/get + 资源回调 + 调试器开关）+
                                 src/LolosiaUi.cpp（数据模型、帧循环、F8 键钩子、日志出口）+
                                 src/ResourceFileInterface.cpp（资源读取：先问宿主 classpath，再退回磁盘）+
                                 src/SdlImage.cpp（IMG_LoadTyped_IO 走宿主解码）+ include/SDL3_image/（只要那一个函数的声明）+
                                 build.ps1（连 RmlUi 后端胶水一起编）
-modules/server/src/nativeInterop/cinterop/     第三方与自研 C 库的绑定定义（zlib / png / webp / jpeg / gif / msgpack 各一个 .def，外加 lolosia.def）
-modules/server/src/linuxMain/kotlin/…/          两个 linux 目标共享的平台实现（.linux.kt）：
-                                api/ApiClient / classpath/EmbeddedClasspath / fs/Mkdir / proc/Shell
-modules/server/src/mingwX64Main/kotlin/…/      Windows 平台实现（.mingw.kt）：ApiClient / EmbeddedClasspath / Mkdir / Shell（无入口）
+modules/client/src/nativeInterop/cinterop/   自研 UI 库的绑定定义 lolosia.def
+modules/server/src/commonMain/kotlin/moe/lolosia/web/
+  configuration/AppConfigure.kt  Application.configureApplication(koin)：插件 / 中间件 / 路由 / DDNS
+  configuration/AppModule.kt     Koin：appModule / serviceModule（手写逃生口）/ startAppKoin
+  generated/GeneratedRegistries.kt  6 个生成注册表的 expect 签名（actual 由 :modules:router-ksp 生成）
+  api/XhrRequest.kt              xhrRequest：core 的 requestBytes + codecs 的 decodeXhrData
+  controller/                    Login / Sse / Oss / File / Media / Anime / Footprint / Dashboard / Classpath（运维探针）/ system/{User,Role,UserRole,Menu,Permission}
+  database/                      Database（懒建连接池 + 后台重连 + MySqlAuthProbe 预检）+ repository/（@Repository 接口）+ model/（@Table 实体）
+  dto/                           RawJson / SystemDtos / OssDtos（跨端契约在 :modules:protocol）
+  interceptor/                   Traffic → Ctx → AccessStat → SSE → Auth → Envelope（顺序由 @Interceptor 生成）+ package.kt
+  service/                       SessionManager / SessionMap / CacheManager / LoginService / SseService / WebpCache / AppSettingService / ddns/ / oss/ / dav/（WebDAV 存储层）/ permission/（RBAC：PermissionRegistry · PermissionResolver · PermissionService）/ files/（在线文件管理器：FileBrowser · FileSigner · FileTypes · ThumbnailCache·Service）/ media/（媒体索引 + 足迹聚类）/ anime/ / dashboard/
+  service/system/                UserService / RoleService / UserRoleService / QuerySupport
+  settings/                      AppSettings（@Serializable）+ SettingsLoader（多级覆盖）
+  util/captcha/                 自研图形验证码（点阵字 + 算式）
+  util/classpath/StaticClasspathConfig.kt  静态 classpath 配置
+  util/crypto/BCrypt.kt         自研 bcrypt
+  util/koin/ ktor/ llm/ media/ proc/ router/ session/ sse/ system/ tokenizer/   服务端专用工具：
+                                Koin 扩展 / Ktor 路由·WebDAV / LLM 协议 / 媒体工具 / Shell 子进程 / 注解路由 + 参数绑定 + multipart /
+                                会话 Context·UserInfo / KtorEventSource·SseContent / 系统指标 / 分词
+modules/server/src/commonMain/resources/       application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ media-rules.yaml / static/home/ / hello.txt
+modules/server/src/nativeMain/kotlin/…/configuration/PlatformModule.kt   platformModule(actual)：PosixFileStore 等绑定
+modules/server/src/linuxMain|mingwX64Main/kotlin/…/   平台实现：util/proc/Shell + util/system/SystemMetricsReader
+modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt   唯一入口：装 classpath → 读配置 → 起 Koin → 起 CIO 引擎
 thirdparty/                     预编译 C 静态库与头文件（入库产物，按 mingwX64 / linuxArm64 / linuxX64 三份）+ build-libs.ps1（图像编解码）
                                 + UI 实验那四层的一次性重建脚本（build-sdl3 / build-freetype / build-rmlui）与共用的 toolchain.ps1
-                                （liblolosia.a 由 modules/server/src/nativeCpp/build.ps1 产出到同一目录，RmlUi 的 librmlui.a + librmlui_debugger.a 由 build-rmlui.ps1 产出；四层的依赖顺序见 §7）
+                                （liblolosia.a 由 modules/client/src/nativeCpp/build.ps1 产出到同一目录，RmlUi 的 librmlui.a + librmlui_debugger.a 由 build-rmlui.ps1 产出；四层的依赖顺序见 §7）
 modules/router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller）/ InterceptorProcessor（@Interceptor）/
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、

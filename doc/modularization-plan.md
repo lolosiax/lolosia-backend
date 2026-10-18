@@ -1,6 +1,6 @@
 # 多模块化与 Gradle 根整理方案（Phase 2）
 
-> 状态：**方案，未实施**。本文只描述目标结构、Gradle 契约与迁移步骤，不代表代码已改动。
+> 状态：**Stage 0–2 已实施**（分支 `dev/modularization`），Stage 3（Android）未开始。实际偏差见 §3.2 与 §8。
 > 范围：只动 `backend/`。工作区根目录（`web/`、`ftp/`、`doc/`、根 `AGENTS.md` 等）**不动**。
 > 结论：采用 Phase 2 —— **Gradle 根只做聚合与发布，代码全部进 `backend/modules/`，根下不再保留 `src/`**。
 > 现行工程约定仍以 [AGENTS.md](../AGENTS.md) 为准；本方案落地后需要同步修订该文件的文件地图与命令清单。
@@ -84,37 +84,38 @@ backend/                              # Gradle 根：聚合、发布、共享资
                          │ :router-ksp  │  (KSP 处理器，build-only)
                          └──────┬───────┘
                                 │ ksp<target>
-┌──────────────┐          ┌─────▼──────┐
-│ :protocol    │◄─────────│ :server    │
-└──────┬───────┘          └─────┬──────┘
+┌──────────────┐        ┌───────▼──────┐
+│ :protocol    │◄───────│ :core        │
+└──────┬───────┘        └───────┬──────┘
        │                        │
-       │          ┌─────────────┼─────────────┐
-       │          │             │             │
-       │    ┌─────▼──────┐ ┌────▼──────┐      │
-       └───►│ :core      │ │ :codecs   │◄─────┘
-            └─────┬──────┘ └────┬──────┘
-                  │             │
-                  └──────┬──────┘
-                         │
-                  ┌──────▼───────┐
-                  │ :client      │
-                  └──────┬───────┘
-                         │
-             ┌───────────┴───────────┐
-             │                       │
-      ┌──────▼───────┐       ┌───────▼───────┐
-      │ :app-desktop │       │ :app-android  │
-      │ (:server +   │       │ (:client)     │
-      │  :client)    │       │               │
-      └──────────────┘       └───────────────┘
+       │                ┌───────▼──────┐
+       │                │ :codecs      │
+       │                └──┬────────┬──┘
+       │                   │        │
+┌──────▼───────────────────▼──┐  ┌──▼─────────────────────┐
+│ :server                     │  │ :client                │
+└──────────────┬──────────────┘  └───────┬────────────────┘
+               │                         │
+        ┌──────▼─────────────────────────▼──────┐
+        │ :app-desktop                          │
+        └───────────────────────────────────────┘
+
+              ┌─────────────────┐
+              │ :app-android    │  (:client)
+              └─────────────────┘
 ```
 
 约束：
 
-- **箭头无环**。`:protocol` 不依赖任何业务模块；`:core` 不依赖 `:server` / `:client`；`:server` 与 `:client` 互不依赖。
-- `:core` 依赖 `:protocol` 与 `:codecs`，因为共用出站传输要用 `ApiResult` 与 `decodeXhrData`；`:codecs` **不反向依赖** `:core`（其 C 门面不碰日志 / classpath）。
+- **箭头无环**，实际方向是 `:protocol` ← `:core` ← `:codecs` ← `:server` / `:client` ← `:app-desktop`。
+- `:protocol` 不依赖任何业务模块，只带 `kotlinx-serialization-json`。
+- `:core` 只依赖 `:protocol`：`ZipClasspath` 用 Kotlin/Native 内置的 `platform.zlib`，不需要 `:codecs`；出站传输的 `xhrRequest`（需要 `decodeXhrData`）已下沉到 `:server`，因此 `:core` 不反向依赖 `:codecs`。
+- `:codecs` 依赖 `:core`（`ExifReader` 使用 `:core` 的 `Log`；`Image` / `ThumbnailGenerator` 的 expect/actual 仍全在本模块）。
+- `:server` 与 `:client` 互不依赖；两者都 `api(project(":modules:protocol"))` + `api(project(":modules:core"))` + `api(project(":modules:codecs"))`。
 - `:app-desktop` 是唯一同时依赖 `:server` 与 `:client` 的模块；它只做装配，不承载业务。
 - `:app-android` 只依赖 `:client`（及传递依赖），**不能**依赖 `:server`。
+
+> 与最初方案图的偏差：原先设想 `:core` 依赖 `:codecs`。实际 `ZipClasspath` 走内置 `platform.zlib`，无需 codecs；而 `ExifReader` 需要 `:core` 的 `Log`，所以依赖方向反过来。`xhrRequest` 从 `:core` 移到 `:server`，把「通用传输」与「通道编解码」解耦。
 
 ### 3.3 一次改动的落点
 
@@ -159,14 +160,14 @@ backend/                              # Gradle 根：聚合、发布、共享资
 
 - `thirdparty/` 继续留在 `backend/` 根，作为三个 native 目标的共享产物仓库；`:codecs` 与 `:client` 的 cinterop 都通过 `rootProject.layout.projectDirectory.dir("thirdparty")` 定位，**不要再写 `layout.projectDirectory.dir("thirdparty")`**。
 - `thirdparty/build-*.ps1` 留在根，继续从 `$PSScriptRoot` 定位自身。
-- `src/nativeCpp/`（`liblolosia` 门面 + RmlUi 后端胶水）迁到 `modules/client/nativeCpp/`。`build.ps1` 需要把 `backend` 根显式算出来：
+- `src/nativeCpp/`（`liblolosia` 门面 + RmlUi 后端胶水）迁到 `modules/client/src/nativeCpp/`。`build.ps1` 需要把 `backend` 根显式算出来：
   ```powershell
-  $backendRoot = Resolve-Path "$PSScriptRoot/../../.."   # modules/client/nativeCpp -> backend
+  $backendRoot = Resolve-Path "$PSScriptRoot/../../../.."   # modules/client/src/nativeCpp -> backend
   $thirdparty  = Join-Path $backendRoot "thirdparty"
   ```
   输出仍落 `thirdparty/<目标>/liblolosia.a`，RmlUi 源码树仍从 `backend/build/thirdparty/tree/...` 取。
 - `lolosia.def` 迁到 `modules/client/src/nativeInterop/cinterop/lolosia.def`；`:client` 负责 cinterop 与静态库，`:app-desktop` 的 mingw 可执行文件继续补 `uiStackLinkerOpts`（SDL3 的 Windows 系统库清单）—— cinterop 只带 `staticLibraries`，系统库不会自动传递到最终链接命令。
-- `:app-desktop` 的 `entryPoint` 改为新入口，例如 `moe.lolosia.app.desktop.main`；`main()` 仍只有一份，模式分发（`ui` / `--service` / `--daemon-console` 等）全部在这里决定。
+- `:app-desktop` 的 `entryPoint` 保持 `moe.lolosia.web.main`（Stage 2 不改包名）；`main()` 仍只有一份，模式分发（`ui` / `--service` / `--daemon-console` 等）全部在这里决定。
 - 图像编解码的 6 个 `.def` 迁到 `modules/codecs/src/nativeInterop/cinterop/`；cinterop 任务必须把 `thirdparty/<目标>/*.a` 声明为输入（现有 `build.gradle.kts` 的 `thirdpartyArchives` 逻辑原样搬过去），否则重建静态库后 cinterop 不会重跑。
 - `ktor-client-curl` 的 `libcrypto.a` 补链逻辑（现有 `unpackCurlStaticLibs<Target>` + `linkerOpts(curlCryptoLib(target))`）必须跟**最终可执行文件**的 link 任务在同一个项目（`:app-desktop`）；klib 配置从实际声明 `ktor-client-curl` 的模块（`:core` 或 `:client`）读取。不要把它留在 `:server` 的旧脚本里，否则 linux 链接会缺 OpenSSL 符号。
 
@@ -189,8 +190,8 @@ backend/                              # Gradle 根：聚合、发布、共享资
 
 | 现状 | 问题 | 处理 |
 | --- | --- | --- |
-| `util/fs/FileStore.kt` 标了 `@Injectable`（来自 `util/router/Annotations.kt`） | `FileStore` 进 `:core` 后，`:core` 会反向依赖 `:server` 才能看到注解 | 把 `Injectable`（或整个 `Annotations.kt`）下沉到 `:protocol`；或者去掉 `FileStore` 的注解，在 `:server` 的 `AppModule` 手写绑定 |
-| `api/package.kt` 的形参 `ctx: Context` | `Context` 是服务端请求上下文，`:core` / `:client` 不能依赖 `:server` | `:core` 的通用传输改为 `sessionId: String?` 或 `SessionIdProvider` 接口；`:server` 调用处把 `ctx.session.id` 传进去 |
+| `util/fs/FileStore.kt` 标了 `@Injectable`（来自 `util/router/Annotations.kt`） | `FileStore` 进 `:core` 后，`:core` 会反向依赖 `:server` 才能看到注解 | **实际落点**：去掉 `FileStore` 的 `@Injectable`，在 `:server` 的 `PlatformModule`（nativeMain）里手写绑定 `PosixFileStore` |
+| `api/package.kt` 的形参 `ctx: Context` | `Context` 是服务端请求上下文，`:core` / `:client` 不能依赖 `:server` | `:core` 的通用传输改为 `SessionIdProvider`（`val sessionId: String?`）；`:server` 的 `Context` 实现它。**实际落点**：`xhrRequest`（需要 `decodeXhrData`）整体移到 `:server` 的 `api/XhrRequest.kt`，`:core` 只保留 `requestBytes` / `post` / `get` / `sse` / `ws` |
 | `util/sse/` 同时有 `EventSource`（业务接口）与 `SseContent` / `KtorEventSource`（Ktor Server 实现） | 客户端也需要事件接口，但不能依赖 Ktor Server | `EventSource` 进 `:protocol`；`SseContent` / `KtorEventSource` / `SseService` 留 `:server`；`:client` 用自己的 SSE 消费实现 |
 | `settings/AppSettings.kt` 是服务端运行配置 | 客户端需要的是服务器地址、token、同步根目录，语义不同 | `AppSettings` 留 `:server`；`:client` 新建自己的 `ClientSettings`，不要复用服务端配置类 |
 | `util/koin/KoinExt.kt` 依赖 `RouterInjection` | `RouterInjection` 是服务端路由注入实现，`:core` 不能依赖它 | `util/koin/` 留 `:server`，不进 `:core` |
@@ -591,24 +592,27 @@ lolosia {
 
 Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是单体可执行模块。如果只想整理根目录，可以停在这里。
 
-### Stage 2：拆出 `:protocol` / `:core` / `:codecs` / `:client` / `:app-desktop`
+### Stage 2：拆出 `:protocol` / `:core` / `:codecs` / `:client` / `:app-desktop`（已完成）
 
 1. 新建 `:protocol`，迁 `dto/` 与纯契约。
 2. 新建 `:core`，迁 classpath / fs / log / time / platform / 通用出站传输，保留现有包名。
 3. 新建 `:codecs`，迁 `Image` / `ThumbnailGenerator` / `AutoCrop` / `thirdparty` 门面 / `XhrData` / 图像 `.def`，配置 6 个 cinterop。
 4. `:server` 改为库模块：去掉 `main()`、可执行文件声明、`nativeCpp`、UI；保留 Ktor / DB / controller / service / resources / KSP。
-5. 新建 `:client`，迁 `ui/`、`resources/ui/`、`nativeCpp/`、`lolosia.def`、`ApiClient` / `UiExperiment` actual；新增同步 / 推送 / 本地 API 客户端代码。
+5. 新建 `:client`，迁 `ui/`、`resources/ui/`、`src/nativeCpp/`、`lolosia.def`、`ApiClient` / `UiExperiment` actual；新增同步 / 推送 / 本地 API 客户端代码。
 6. 新建 `:app-desktop`：唯一 `main()`、三个 native 可执行文件、classpath / vite 配置、模式分发。
 7. 根 `deploy` 的 `artifactProject` 改为 `:modules:app-desktop`；根 `run*` / `buildBinaries` 也改为指向它。
-8. 验证：
+8. 验证（实际执行）：
    ```powershell
-   gradlew :modules:server:compileKotlinMingwX64
-   gradlew :modules:codecs:compileKotlinMingwX64
-   gradlew :modules:client:compileKotlinMingwX64
+   gradlew :modules:protocol:compileKotlinMingwX64
+   gradlew :modules:core:compileKotlinMingwX64
+   gradlew :modules:codecs:compileKotlinMingwX64      # 6 个 cinterop
+   gradlew :modules:client:compileKotlinMingwX64      # lolosia cinterop
+   gradlew :modules:server:compileKotlinMingwX64      # KSP
    gradlew :modules:app-desktop:linkDebugExecutableMingwX64
+   gradlew :modules:app-desktop:linkReleaseExecutableLinuxArm64
    gradlew buildBinaries
    gradlew runDebug
-   gradlew deploy
+   gradlew deploy --dry-run
    ```
 
 ### Stage 3：Android（可选，独立开关）
@@ -632,7 +636,7 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
 
 | 检查项 | 命令 | 期望 |
 | --- | --- | --- |
-| 三目标编译 | `gradlew :modules:server:compileKotlinMingwX64 :modules:server:compileKotlinLinuxArm64 :modules:server:compileKotlinLinuxX64` | 全部通过 |
+| 三目标编译 | `gradlew :modules:app-desktop:compileKotlinMingwX64 :modules:app-desktop:compileKotlinLinuxArm64 :modules:app-desktop:compileKotlinLinuxX64` | 全部通过（传递编译全部依赖模块） |
 | 桌面 debug 链接 | `gradlew :modules:app-desktop:linkDebugExecutableMingwX64` | 产出 debug exe |
 | 桌面 release 链接 | `gradlew :modules:app-desktop:linkReleaseExecutableMingwX64` | 产出 release exe，含 vite 产物 |
 | 本机调试运行 | `gradlew runDebug` | 工作目录为 `backend/`，能读到磁盘 `application.yaml` |

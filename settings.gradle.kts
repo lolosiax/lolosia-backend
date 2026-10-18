@@ -33,5 +33,11 @@ rootProject.name = "lolosia-backend"
 
 // 自研路由插件的 KSP 处理器（必须跑在 JVM 上，独立模块）
 include(":modules:router-ksp")
-// Stage 1：单体应用整体下沉到 modules/server，Gradle 根不再保留 src/
+// Stage 2：按依赖方向从小到大 include，便于脚本里按路径引用
+include(":modules:protocol")
+include(":modules:core")
+include(":modules:codecs")
+include(":modules:client")
 include(":modules:server")
+// 唯一桌面入口：三个 native 可执行文件都在这里
+include(":modules:app-desktop")

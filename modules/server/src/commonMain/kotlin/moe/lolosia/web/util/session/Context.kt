@@ -4,6 +4,7 @@ import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.Transaction
 import io.ktor.server.application.*
 import io.ktor.util.*
+import moe.lolosia.web.api.SessionIdProvider
 import moe.lolosia.web.dto.ApiException
 import moe.lolosia.web.service.SessionMap
 import moe.lolosia.web.service.permission.Permissions
@@ -30,7 +31,7 @@ import moe.lolosia.web.util.router.Injectable
  * @author 洛洛希雅Lolosia
  */
 @Injectable(requestScoped = true)
-interface Context {
+interface Context : SessionIdProvider {
     /** 请求面：HTTP 原始上下文（仅控制器可用，服务层禁止使用）。 */
     val call: ApplicationCall
 
@@ -41,7 +42,7 @@ interface Context {
     val session: SessionMap? get() = call.attributes.getOrNull(SessionKey)
 
     /** 用户面：会话 id（前端拿它当 token）。 */
-    val sessionId: String? get() = session?.id
+    override val sessionId: String? get() = session?.id
 
     /** 用户面：当前登录用户 id；会话里没写用户时（如匿名会话）为 `null`。 */
     val userId: String? get() = session?.userId
