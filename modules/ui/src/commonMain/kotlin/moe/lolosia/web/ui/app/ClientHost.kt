@@ -20,7 +20,7 @@ class ClientHost(
 ) {
 
     private val subscriptions = mutableListOf<State.Subscription>()
-    private var currentDocument: String? = null
+    private var currentDocumentKey: String? = null
 
     fun start() {
         bindModel()
@@ -103,11 +103,21 @@ class ClientHost(
 
     private fun syncDocument() {
         val path = app.documentPath()
-        if (path == currentDocument) return
-        if (!backend.loadDocument(path)) {
-            onError("加载文档失败：$path")
+        val isHome = app.stage.value == AppStage.Main &&
+            app.tab.value == MainTab.Home &&
+            app.home.document.value.isNotEmpty()
+        val key = if (isHome) "home:${app.home.version.value}" else path
+        if (key == currentDocumentKey) return
+
+        val loaded = if (isHome) {
+            backend.loadDocumentText(app.home.document.value)
+        } else {
+            backend.loadDocument(path)
+        }
+        if (!loaded) {
+            onError("加载文档失败：$key")
             return
         }
-        currentDocument = path
+        currentDocumentKey = key
     }
 }

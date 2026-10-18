@@ -18,6 +18,9 @@ interface UiBackend {
     /** 从 classpath 资源加载 RML 文档。 */
     fun loadDocument(resourcePath: String): Boolean
 
+    /** 直接加载 RML 文本（动态列表等生成页面）。 */
+    fun loadDocumentText(rml: String): Boolean
+
     fun bindString(name: String, value: String): Boolean
 
     fun bindInt(name: String, value: Int): Boolean

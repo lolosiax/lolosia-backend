@@ -49,6 +49,9 @@ class WindowsUiBackend(private val classpath: Classpath) : UiBackend {
         return rml.cString { ll_ui_load_document(it) == 0 }
     }
 
+    override fun loadDocumentText(rml: String): Boolean =
+        rml.cString { ll_ui_load_document(it) == 0 }
+
     override fun bindString(name: String, value: String): Boolean =
         name.cString { n -> value.cString { v -> ll_ui_model_bind_string(n, v) == 0 } }
 

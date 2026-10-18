@@ -3,7 +3,7 @@
 	<link type="text/css" href="/ui/theme/theme.rcss"/>
 </head>
 <body data-model="main">
-	<div class="content">
+	<div class="screen scroll tabbed">
 		<div class="avatar">{{ avatarInitial }}</div>
 		<p class="profile-name">{{ displayName }}</p>
 		<p class="profile-role">{{ roleName }}</p>
