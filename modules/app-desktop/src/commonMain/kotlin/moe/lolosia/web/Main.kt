@@ -12,6 +12,7 @@ import moe.lolosia.web.localservice.startLocalService
 import moe.lolosia.web.settings.ENV_SETTINGS_FILE
 import moe.lolosia.web.settings.loadAppSettings
 import moe.lolosia.web.ui.runClientUi
+import moe.lolosia.web.ui.runEventBusService
 import moe.lolosia.web.ui.runUiExperiment
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.log.Log
@@ -40,6 +41,16 @@ fun main(args: Array<String>) {
         log.info { "本地服务监听 127.0.0.1:${service.endpoint.port}" }
         awaitSignalTermination()
         service.stop()
+        return
+    }
+    if (first == "--event-service") {
+        val code = runEventBusService(console = false)
+        if (code != 0) Log.of("Main").error { "事件服务退出码 $code" }
+        return
+    }
+    // 仅供本地调试：不经过 SCM，直接在控制台跑订阅循环（Ctrl+C 结束）。
+    if (first == "--event-service-console") {
+        runEventBusService(console = true)
         return
     }
     // UI 会占住当前线程直到窗口关闭，也不参与 Koin 装配，因此先于一切启动逻辑分流。

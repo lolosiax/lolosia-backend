@@ -39,6 +39,11 @@ kotlin {
             api(project(":modules:ui"))
             implementation(libs.okio)
         }
+        // EventBus 的 SSE 需要增量读取响应体；WinHTTP 引擎会先读完整个响应，
+        // 长连接因此拿不到任何一帧。libcurl 的写回调是流式的，TLS 走 Schannel。
+        mingwX64Main.dependencies {
+            implementation(ktorLibs.client.curl)
+        }
         commonTest.dependencies {
             implementation(kotlin("test"))
         }

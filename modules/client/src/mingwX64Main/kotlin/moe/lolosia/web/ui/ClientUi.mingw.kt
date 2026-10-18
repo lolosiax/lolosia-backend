@@ -7,6 +7,8 @@ import moe.lolosia.web.ui.app.ClientHost
 import moe.lolosia.web.ui.client.CoreLocalServiceApi
 import moe.lolosia.web.ui.client.CoreRemoteApi
 import moe.lolosia.web.ui.client.WindowsImageLoader
+import moe.lolosia.web.ui.client.WindowsEventSpoolWatcher
+import moe.lolosia.web.ui.client.WindowsNotifier
 import moe.lolosia.web.ui.client.WindowsSettingsStore
 import moe.lolosia.web.ui.client.WindowsUiBackend
 import moe.lolosia.web.util.classpath.installPlatformClasspath
@@ -44,6 +46,12 @@ actual fun runClientUi(): Int {
 
     val tasks = Channel<() -> Unit>(Channel.UNLIMITED)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // 后台服务把事件写进 ProgramData 的 spool，本进程负责弹系统通知。
+    val notifier = WindowsNotifier()
+    if (!notifier.init()) log.warn { "初始化系统通知失败，推送只在服务日志中可见" }
+    scope.launch {
+        WindowsEventSpoolWatcher { message -> notifier.show(message.title, message.text) }.run()
+    }
     val app = ClientApp(
         settingsStore = WindowsSettingsStore(),
         remoteApiFactory = { CoreRemoteApi(it) },
@@ -77,6 +85,7 @@ actual fun runClientUi(): Int {
         }
     } finally {
         scope.cancel()
+        notifier.dispose()
         host.dispose()
         backend.destroy()
     }
