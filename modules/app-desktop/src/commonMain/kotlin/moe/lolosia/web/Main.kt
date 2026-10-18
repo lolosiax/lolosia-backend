@@ -2,11 +2,13 @@ package moe.lolosia.web
 
 import io.ktor.server.cio.*
 import io.ktor.server.engine.*
+import kotlinx.coroutines.runBlocking
 import moe.lolosia.web.configuration.configureApplication
 import moe.lolosia.web.configuration.platformModule
 import moe.lolosia.web.configuration.startAppKoin
 import moe.lolosia.web.generated.repositoryModules
 import moe.lolosia.web.generated.serviceModule
+import moe.lolosia.web.localservice.startLocalService
 import moe.lolosia.web.settings.ENV_SETTINGS_FILE
 import moe.lolosia.web.settings.loadAppSettings
 import moe.lolosia.web.ui.runClientUi
@@ -31,6 +33,15 @@ import moe.lolosia.web.util.platform.envOrNull
  */
 fun main(args: Array<String>) {
     val first = args.firstOrNull()
+    // 本地系统服务：无界面，只监听 loopback，等待进程被 SCM / systemd 结束。
+    if (first == "--service" || first == "service") {
+        val log = Log.of("Main")
+        val service = runBlocking { startLocalService() }
+        log.info { "本地服务监听 127.0.0.1:${service.endpoint.port}" }
+        awaitSignalTermination()
+        service.stop()
+        return
+    }
     // UI 会占住当前线程直到窗口关闭，也不参与 Koin 装配，因此先于一切启动逻辑分流。
     // `ui` 是最小客户端；`probe` 保留原来的 RmlUi 控件实验页。
     if (first == "ui") {

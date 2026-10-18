@@ -2,9 +2,9 @@ package moe.lolosia.web.ui
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import moe.lolosia.web.ui.api.UnavailableLocalServiceApi
 import moe.lolosia.web.ui.app.ClientApp
 import moe.lolosia.web.ui.app.ClientHost
+import moe.lolosia.web.ui.client.CoreLocalServiceApi
 import moe.lolosia.web.ui.client.CoreRemoteApi
 import moe.lolosia.web.ui.client.WindowsSettingsStore
 import moe.lolosia.web.ui.client.WindowsUiBackend
@@ -46,7 +46,7 @@ actual fun runClientUi(): Int {
     val app = ClientApp(
         settingsStore = WindowsSettingsStore(),
         remoteApiFactory = { CoreRemoteApi(it) },
-        localServiceApi = UnavailableLocalServiceApi(),
+        localServiceApi = CoreLocalServiceApi(),
         scope = scope,
         postToUi = {
             tasks.trySend(it)
