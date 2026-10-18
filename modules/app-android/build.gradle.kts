@@ -1,5 +1,7 @@
 plugins {
+    // AGP 9 自带 Kotlin 支持，不再需要 org.jetbrains.kotlin.android
     id("com.android.application") version "9.0.1"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.20"
 }
 
 android {
@@ -19,8 +21,13 @@ android {
     }
 
     sourceSets["main"].apply {
-        // UI 资源直接复用 :modules:client 的 commonMain resources（probe.rml / sample.png）
+        // UI 资源直接复用 :modules:client 的 commonMain resources（RML / RCSS）
         assets.directories.add("../client/src/commonMain/resources")
+        // 共享源码目录：页面状态、路由、DTO 与 Windows 完全同一份
+        kotlin.srcDirs(
+            "../ui/src/commonMain/kotlin",
+            "../protocol/src/commonMain/kotlin",
+        )
         // thirdparty/build-android.ps1 产出 <ABI>/libSDL3.so 与 <ABI>/liblolosia.so
         jniLibs.directories.add("../../thirdparty/androidJniLibs")
     }
@@ -43,6 +50,11 @@ android {
 
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
+}
+
+dependencies {
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 }
 
 // 下游单独构建时先拉起上游的原生库任务；上游 buildBinaries 调过来时会带这个 property，

@@ -223,7 +223,7 @@ interface RemoteApi {
 ```
 
 - Windows 实现：`:modules:core` 的 `post/get`。
-- Android 实现：Ktor JVM 客户端（或后续把 `:core` 加 JVM actual）。
+- Android 实现：`HttpURLConnection` + kotlinx.serialization（不引 Ktor：其 native 目标没有 `androidNative` 产物；JVM 侧直接用标准库即可）。
 - DTO：优先放 `:protocol`；Android 通过共享源码目录使用同一份 DTO。
 
 ---
