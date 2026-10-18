@@ -40,6 +40,15 @@ class UiProbeViewModel {
 
     val opacity = Property(0.6f)
 
+    /** 多行文本：textarea 同样走 data-value，换行原样写回。 */
+    val bio = Property("第一行\n第二行：textarea 的换行会原样写回 ViewModel。")
+
+    /** 密码框：界面显示掩码，宿主读回的是明文；回执里只显示长度，避免把密码打到界面上。 */
+    val password = Property("hunter2")
+
+    /** 进度条：progress 读的是 value 属性（0..1 的浮点），由按钮推进，验证「数据 → 视图」。 */
+    val load = Property(0.35f)
+
     /**
      * 视图侧刚改过数据，等平台侧在帧末把值读回。
      *
@@ -55,7 +64,8 @@ class UiProbeViewModel {
     /** 平台侧把表单控件的值读回 [Property] 之后调用；把结果记成一行文字供界面显示。 */
     fun onFormSynced() {
         formEcho.value =
-            "已读回 ViewModel：昵称=${nickname.value}｜主题=${theme.value}｜不透明度=${opacity.value}｜同意=${agree.value}"
+            "已读回 ViewModel：昵称=${nickname.value}｜主题=${theme.value}｜不透明度=${opacity.value}｜同意=${agree.value}" +
+            "｜简介=${bio.value.length} 字｜密码=${password.value.length} 位"
     }
 
     val increment: Command = Command { count.value += 1 }
@@ -65,6 +75,13 @@ class UiProbeViewModel {
     val reset: Command = Command { count.value = 0 }
 
     val toggleHighlight: Command = Command { highlighted.value = !highlighted.value }
+
+    /** 进度条由命令推进：这条链路是「命令 → Property → 数据模型 → 视图重绘」。 */
+    val loadUp: Command = Command { load.value = (load.value + 0.1f).coerceIn(0f, 1f) }
+
+    val loadDown: Command = Command { load.value = (load.value - 0.1f).coerceIn(0f, 1f) }
+
+    val loadReset: Command = Command { load.value = 0f }
 
     /** 对文档公开的字段表；平台侧据此建立与视图层数据模型的绑定。 */
     val fields: List<ModelField> = listOf(
@@ -77,6 +94,9 @@ class UiProbeViewModel {
         ModelField.Flag("agree", agree),
         ModelField.Text("theme", theme),
         ModelField.Decimal("opacity", opacity),
+        ModelField.Text("bio", bio),
+        ModelField.Text("password", password),
+        ModelField.Decimal("load", load),
         ModelField.Text("formEcho", formEcho),
     )
 
@@ -92,6 +112,9 @@ class UiProbeViewModel {
             "increment-ten" -> incrementTen
             "reset" -> reset
             "toggle-highlight" -> toggleHighlight
+            "load-up" -> loadUp
+            "load-down" -> loadDown
+            "load-reset" -> loadReset
             else -> null
         }
         if (command == null) {

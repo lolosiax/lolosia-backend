@@ -206,6 +206,9 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
     - **别在 change 动作回调里当场读**：同一次 change 事件里，视图层写回数据模型与宿主的 action 监听器谁先被调用没有保证。`UiExperiment.mingw.kt` 的做法是只置一个标记，等本帧跑完（`ll_ui_frame` 返回后）再统一读回 —— 与监听器顺序无关。
     - ⚠️ RmlUi **不带默认样式表**（上游样例用的 `rml.rcss` 是样例资源，没进我们的 classpath）：`<p>` 默认行内（不写 `display: block` 会挤成一行），输入框 / 滑杆 / 复选框的**子元素**（`slidertrack` / `sliderbar` / `sliderprogress` / `scrollbarvertical` 下的那几个）都是控件自己造的，不给尺寸与颜色就完全不可见。`input` 的 type 会变成同名 class（`input.text` / `input.checkbox` / `input.range`），选择器按这个写。
     - 动态样式用 `data-style-<属性>`（如 `data-style-opacity="opacity"`），动态 class 用 `data-class-<类名>`；属性名规则是 `data-[类型]-[修饰符]`（见 `ElementUtilities::ApplyDataViewsControllers`）。
+    - ⚠️ **单选组只能写 `data-checked`，不能再加 `data-value`**：`<input type="radio" name="组名" value="x" data-checked="字段名">`。`data-value` 是 `DataViewValue`，它把元素自己的 `value` 属性覆盖成模型当前值 —— 三个 radio 的 value 会全变成一个，选中态随之错乱。`data-checked` 已经双向：按模型值勾选，点击时把自身 value 写回模型。`<label>` 包住 input 即可让点文字也生效（RmlUi 的 `ElementLabel` 会把点击转发给内部第一个表单控件，不必写 `for`）。
+    - **进度条**用 `data-attr-value="字段名"`（单向：模型 → 元素的 `value` 属性）。填充段是控件内部造的 `<fill>` 子元素、**不在 DOM 里**，只能写 `progress fill { background-color: … }` 上色；只给 `<progress>` 设背景会看到空槽。
+    - **标签页**结构是 `tabset > tabs > tab` + `panels > panel`，选中态是 `tab:selected` 伪类（不是 class）；切换是视图层内部状态，不需要数据绑定。
   - ⚠️ **RmlUi 的日志默认落 stderr、但是块缓冲的**：管道 / 重定向到文件时，不 `fflush(stderr)` 就一条也看不到（字体加载、RML/RCSS 报错全在里面）。`ll_log_info` / `ll_log_error` 已统一走「系统接口 + fflush」（系统接口那份是给调试器日志面板用的），自己加日志请用这两个，别直接 `Rml::Log::Message`。
   - ⚠️ **不要给链接补 `-lstdc++`**：K/N 自己的 runtime 就是 C++ 写的、已经链了 libstdc++，再加一次会 `ld.lld: duplicate symbol: std::bad_alloc::~bad_alloc()`。
   - ⚠️ **RmlUi 的尺寸口径与 CSS 直觉不同**（容易踩，症状是「内容只铺满窗口一角、其余一片黑」）：
