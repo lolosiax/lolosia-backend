@@ -1,0 +1,21 @@
+[Unit]
+Description=Anime Bangumi async relay (overseas node)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lolosia
+Group=lolosia
+WorkingDirectory=/srv/anime-relay
+EnvironmentFile=/srv/anime-relay/relay.env
+ExecStart=/usr/bin/python3 /srv/anime-relay/relay.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

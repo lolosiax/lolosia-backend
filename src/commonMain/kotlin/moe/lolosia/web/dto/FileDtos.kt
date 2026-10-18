@@ -111,6 +111,15 @@ data class FileDetail(
 @Serializable
 data class FileScanReq(val path: String? = null)
 
+/**
+ * 请求**强制重算**一批文件的缩略图（右键「重新生成缩略图」）。
+ *
+ * 先把这些文件的缩略图缓存清掉，再插到队首重算 —— 用于「缩略图与当前配置对不上」之后
+ * （比如某张图刚被标上 `feature:不裁剪`，或改过裁剪参数）。
+ */
+@Serializable
+data class FileRegenerateThumbReq(val paths: List<String> = emptyList())
+
 /** 重命名请求：把 [path] 指向的项在同级改名为 [name]（只改名，不移动；目录与文件都可以）。 */
 @Serializable
 data class FileRenameReq(val path: String? = null, val name: String = "")

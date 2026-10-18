@@ -12,6 +12,7 @@ import moe.lolosia.web.dto.FileEntry
 import moe.lolosia.web.dto.FileListResult
 import moe.lolosia.web.dto.FileMkdirReq
 import moe.lolosia.web.dto.FileOpResult
+import moe.lolosia.web.dto.FileRegenerateThumbReq
 import moe.lolosia.web.dto.FileRenameReq
 import moe.lolosia.web.dto.FileScanReq
 import moe.lolosia.web.dto.FileTransferReq
@@ -78,6 +79,20 @@ object FileController {
         if (!thumbs.enabled) return MessageResult("缩略图生成未启用")
         normalizeRelative(req.path)?.let { thumbs.prioritize(it) }
         return MessageResult("已排队")
+    }
+
+    /**
+     * 强制重算一批文件的缩略图（右键「重新生成缩略图」）：清缓存后插队重建。
+     *
+     * 用在「缩略图与当前配置对不上」之后 —— 例如某张图刚被标上 `feature:不裁剪`、或改过裁剪参数。
+     * 后台重建时会现查该文件的标记，所以先标后重建即可让旧图跟上最新规则。
+     */
+    @POST("/files/thumb/regenerate")
+    @Permission("lolosia.files.read")
+    suspend fun regenerateThumbs(thumbs: ThumbnailService, @Body req: FileRegenerateThumbReq): MessageResult {
+        if (!thumbs.enabled) return MessageResult("缩略图生成未启用")
+        thumbs.regenerate(req.paths)
+        return MessageResult("已重新排队 ${req.paths.size} 个文件")
     }
 
     /**

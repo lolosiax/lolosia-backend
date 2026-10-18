@@ -28,11 +28,11 @@ import moe.lolosia.web.util.image.ImageFormat
  */
 actual object ThumbnailGenerator {
 
-    actual fun generate(bytes: ByteArray, sizes: List<Int>, quality: Int): ThumbnailSet? {
+    actual fun generate(bytes: ByteArray, sizes: List<Int>, quality: Int, crop: AutoCrop?): ThumbnailSet? {
         if (bytes.isEmpty()) return null
         val targets = sizes.filter { it > 0 }.distinct().sorted()
         if (targets.isEmpty()) return null
-        val source = decode(bytes) ?: return null
+        val source = decode(bytes)?.autoCropped(crop) ?: return null
 
         val items = ArrayList<Thumbnail>(targets.size)
         var sample: String? = null
@@ -48,9 +48,9 @@ actual object ThumbnailGenerator {
         return ThumbnailSet(source.width, source.height, items, sample)
     }
 
-    actual fun encodeFull(bytes: ByteArray, quality: Int): ThumbnailSet? {
+    actual fun encodeFull(bytes: ByteArray, quality: Int, crop: AutoCrop?): ThumbnailSet? {
         if (bytes.isEmpty()) return null
-        val source = decode(bytes) ?: return null
+        val source = decode(bytes)?.autoCropped(crop) ?: return null
         val encoded = Webp.encode(source, quality.coerceIn(1, 100).toFloat()) ?: return null
         val item = Thumbnail(FULL_SIZE_SENTINEL, encoded, source.width, source.height)
         return ThumbnailSet(source.width, source.height, listOf(item))
@@ -109,6 +109,108 @@ actual object ThumbnailGenerator {
             }
         }
         return RgbaImage(outWidth, outHeight, out)
+    }
+
+    /**
+     * 自动裁边：按 [spec] 判出四边的近纯白装饰带并裁掉；不裁就原样返回。
+     *
+     * 四边**各自独立**判定，都只从最外沿向内推进；判不出来（比如亮底照片）就不裁。
+     */
+    private fun RgbaImage.autoCropped(spec: AutoCrop?): RgbaImage {
+        if (spec == null) return this
+        val border = detectBorder(spec)
+        return if (border.empty) this else cropped(border)
+    }
+
+    /** 四边各裁掉多少像素。 */
+    private class Border(val top: Int, val bottom: Int, val left: Int, val right: Int) {
+        val empty: Boolean get() = top == 0 && bottom == 0 && left == 0 && right == 0
+    }
+
+    /**
+     * 逐边从外沿向内推进：只要当前行（列）满足「近白占比够高、非白不成片」就计入裁剪，
+     * 直到判不动或触到单边上限 [AutoCrop.maxTrimRatio]。
+     */
+    private fun RgbaImage.detectBorder(spec: AutoCrop): Border {
+        val maxRows = (height * spec.maxTrimRatio).toInt()
+        val maxCols = (width * spec.maxTrimRatio).toInt()
+
+        var top = 0
+        while (top < maxRows && rowIsWhiteBand(top, spec)) top++
+        var bottom = 0
+        while (bottom < maxRows && rowIsWhiteBand(height - 1 - bottom, spec)) bottom++
+        var left = 0
+        while (left < maxCols && colIsWhiteBand(left, spec)) left++
+        var right = 0
+        while (right < maxCols && colIsWhiteBand(width - 1 - right, spec)) right++
+
+        return Border(top, bottom, left, right)
+    }
+
+    private fun RgbaImage.rowIsWhiteBand(y: Int, spec: AutoCrop): Boolean {
+        var whiteCount = 0
+        var run = 0
+        var maxRun = 0
+        var i = y * width * 4
+        for (x in 0 until width) {
+            if (isNearWhite(i, spec.white)) {
+                whiteCount++
+                run = 0
+            } else {
+                run++
+                if (run > maxRun) maxRun = run
+            }
+            i += 4
+        }
+        return isWhiteBand(whiteCount, maxRun, width, spec)
+    }
+
+    private fun RgbaImage.colIsWhiteBand(x: Int, spec: AutoCrop): Boolean {
+        var whiteCount = 0
+        var run = 0
+        var maxRun = 0
+        var i = x * 4
+        val stride = width * 4
+        for (y in 0 until height) {
+            if (isNearWhite(i, spec.white)) {
+                whiteCount++
+                run = 0
+            } else {
+                run++
+                if (run > maxRun) maxRun = run
+            }
+            i += stride
+        }
+        return isWhiteBand(whiteCount, maxRun, height, spec)
+    }
+
+    /** 一行（列）内：近白占比 ≥ [AutoCrop.minRatio]，且非白最长连续段占比 ≤ [AutoCrop.maxRunRatio]。 */
+    private fun isWhiteBand(whiteCount: Int, maxRun: Int, length: Int, spec: AutoCrop): Boolean {
+        if (length <= 0) return false
+        if (whiteCount.toDouble() / length < spec.minRatio) return false
+        if (maxRun.toDouble() / length > spec.maxRunRatio) return false
+        return true
+    }
+
+    /** 像素是否近白：R/G/B 三通道都 ≥ [threshold]（不看 alpha，与判据口径一致）。 */
+    private fun RgbaImage.isNearWhite(index: Int, threshold: Int): Boolean {
+        val p = pixels
+        return (p[index].toInt() and 0xFF) >= threshold &&
+            (p[index + 1].toInt() and 0xFF) >= threshold &&
+            (p[index + 2].toInt() and 0xFF) >= threshold
+    }
+
+    /** 按 [border] 裁掉四边；结果尺寸非法时原样返回。 */
+    private fun RgbaImage.cropped(border: Border): RgbaImage {
+        val newWidth = width - border.left - border.right
+        val newHeight = height - border.top - border.bottom
+        if (newWidth <= 0 || newHeight <= 0) return this
+        val out = ByteArray(newWidth * newHeight * 4)
+        for (y in 0 until newHeight) {
+            val srcStart = ((y + border.top) * width + border.left) * 4
+            pixels.copyInto(out, y * newWidth * 4, srcStart, srcStart + newWidth * 4)
+        }
+        return RgbaImage(newWidth, newHeight, out)
     }
 
     /** 等比缩到最长边不超过 [maxEdge]；本来就够小则原样返回（不放大）。 */

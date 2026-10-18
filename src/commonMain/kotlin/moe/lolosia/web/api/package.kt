@@ -21,6 +21,7 @@ import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.Logger
 import moe.lolosia.web.util.session.Context
 import moe.lolosia.web.util.sse.EventSource
+import moe.lolosia.web.util.xhrdata.decodeXhrData
 import kotlin.concurrent.Volatile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -168,7 +169,7 @@ internal suspend inline fun <reified T> dispatch(
         return Unit as T
     }
     if (T::class == Flow::class) {
-        return bytes(method, baseUrl, url, body, query, headers, sessionId, noLog) as T
+        return bytes(method, baseUrl, url, body, query, headers, sessionId, timeout, noLog) as T
     }
     return sendTyped(method, baseUrl, url, body, query, rawResponse, headers, sessionId, timeout, noLog, serializer<T>())
 }
@@ -230,9 +231,14 @@ internal suspend fun <T> sendTyped(
     }
 }
 
-/** 发出请求并把响应体作为字节块流返回。 */
+/**
+ * 发出请求并把响应体作为字节块流返回。
+ *
+ * 请求与读流整体受 [timeout] 约束：对端迟迟不响应或响应体永不收尾（连接被黑洞）时
+ * 必须在有限时间内失败，否则调用方的重试循环会永久挂起。
+ */
 @PublishedApi
-internal suspend fun bytes(
+internal fun bytes(
     method: HttpMethod,
     baseUrl: String,
     url: String,
@@ -240,13 +246,71 @@ internal suspend fun bytes(
     query: Map<String, List<String>>?,
     headers: Map<String, String>,
     sessionId: String?,
+    timeout: Duration,
     noLog: Boolean,
-): Flow<ByteArray> {
-    val response = send(method, baseUrl, url, body, query, headers, sessionId)
+): Flow<ByteArray> = flow {
+    withTimeout(timeout) {
+        val response = send(method, baseUrl, url, body, query, headers, sessionId)
+        if (!noLog) beforeWebRequest(body, baseUrl, url)
+        if (!response.status.isSuccess()) respHandleException(response, baseUrl, url)
+        val channel = response.bodyAsChannel()
+        val buffer = ByteArray(STREAM_BUFFER_SIZE)
+        try {
+            while (true) {
+                val read = channel.readAvailable(buffer, 0, buffer.size)
+                if (read <= 0) break
+                emit(buffer.copyOf(read))
+            }
+        } finally {
+            if (!noLog) afterWebRequest(null, baseUrl, url)
+        }
+    }
+}
+
+/**
+ * 走**自定义请求通道**（`application/vnd.lolosia.xhr.data`：msgpack + gzip）请求外部服务，
+ * 解出信封后返回 `data`。用于境外中继这类「不愿暴露明文 JSON 特征」的链路（见
+ * `doc/anime-timetable-design.md` §4.4）。
+ *
+ * 非 2xx 或信封 `code` 非 0/200 时抛 [ApiException]（优先取通道响应里的 `msg`）。
+ */
+suspend fun xhrRequest(
+    method: HttpMethod,
+    baseUrl: String,
+    url: String,
+    body: JsonElement? = null,
+    headers: Map<String, String> = emptyMap(),
+    timeout: Duration = DEFAULT_TIMEOUT,
+    noLog: Boolean = false,
+): JsonElement {
+    val response = send(method, baseUrl, url, body, null, headers, null)
     if (!noLog) beforeWebRequest(body, baseUrl, url)
-    if (!response.status.isSuccess()) respHandleException(response, baseUrl, url)
-    return response.bodyAsChannel().asFlow()
-        .onCompletion { if (!noLog) afterWebRequest(null, baseUrl, url) }
+    return withTimeout(timeout) {
+        val raw = response.readAllBytes()
+        val element = runCatching { decodeXhrData(raw) }.getOrElse {
+            throw ApiException(502, "中继响应不是通道格式：${raw.decodeToString().s200()}")
+        }
+        val env = element as? JsonObject ?: throw ApiException(502, "中继通道响应不是 JSON 对象")
+        val code = (env["code"] as? JsonPrimitive)?.intOrNull ?: 0
+        val msg = (env["msg"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        if (!noLog) afterWebRequest(env.toString(), baseUrl, url)
+        if (!response.status.isSuccess() || (code != 0 && code != 200)) {
+            throw ApiException(response.status.value, msg.ifBlank { "中继请求失败" })
+        }
+        env["data"] ?: JsonNull
+    }
+}
+
+/** 把响应体读成完整字节数组（复用 [asFlow] 的分块读取）。 */
+private suspend fun HttpResponse.readAllBytes(): ByteArray {
+    val chunks = bodyAsChannel().asFlow().toList()
+    val out = ByteArray(chunks.sumOf { it.size })
+    var pos = 0
+    for (c in chunks) {
+        c.copyInto(out, pos)
+        pos += c.size
+    }
+    return out
 }
 
 /** 组装并执行一次请求；`expectSuccess` 保持关闭，状态码由调用方判定。 */
@@ -573,8 +637,8 @@ class WSConnection(
     }
 }
 
-/** 把字节流切成 SSE 帧（以空行为界）。 */
-private fun Flow<ByteArray>.toEventSourceFrames(): Flow<ByteArray> = flow {
+/** 把字节流切成 SSE 帧（以空行为界）。llm 包解析 chat.completion.chunk 时复用。 */
+internal fun Flow<ByteArray>.toEventSourceFrames(): Flow<ByteArray> = flow {
     var pending = ByteArray(0)
     collect { chunk ->
         pending += chunk

@@ -83,6 +83,24 @@ class MediaTagService(
         return ruleSet.ratingFor(path, name)
     }
 
+    /**
+     * 某个资产当前**生效**的标签（`namespace:name`）。
+     *
+     * 供外发分析把「已有的打标」当上下文喂给模型（见 `doc/vision-autotag-design.md`）：不分来源
+     * （人工 / 规则 / 模型都算），但**跳过否决行** —— 已否决的标签不该再提示模型去沿用。
+     */
+    suspend fun labelsOf(exec: QueryExecutor, assetId: Long): List<String> {
+        val links = bindings.findAllByAssetId(exec, assetId).getOrNull().orEmpty()
+        if (links.isEmpty()) return emptyList()
+        val out = LinkedHashSet<String>()
+        for (link in links) {
+            if (link.negative) continue
+            val tag = tags.findOneById(exec, link.tagId).getOrNull() ?: continue
+            out.add("${tag.namespace}:${tag.name}")
+        }
+        return out.toList()
+    }
+
     /** 找一个标签；不存在则按需创建（根级自由标签 `parentId = null` 是合法状态，§7.5）。 */
     suspend fun ensureTag(
         exec: QueryExecutor,
@@ -103,6 +121,9 @@ class MediaTagService(
      * 关联一个标签；同一来源已关联过就跳过（幂等，允许同标签有多来源行）。
      *
      * 同来源的行已存在但被**否决**过时顺手把否决位翻正 —— 否则「先否决、再打上」从界面看像是没生效。
+     *
+     * [provider] 记「是哪个模型打的」（`media_asset_tag.provider`，供换模型重跑区分），
+     * 只对模型来源有意义；人工 / 规则传 `null`。
      */
     suspend fun attach(
         exec: QueryExecutor,
@@ -111,6 +132,7 @@ class MediaTagService(
         name: String,
         source: String,
         operator: String?,
+        provider: String? = null,
     ): Long? {
         val tagId = ensureTag(exec, namespace, name, operator) ?: return null
         val existing = bindings.findAllByAssetIdAndTagId(exec, assetId, tagId).getOrNull().orEmpty()
@@ -124,7 +146,7 @@ class MediaTagService(
             }
             return tagId
         }
-        bindings.executeInsert(exec, assetId, tagId, source, null, null, false, now, operator, now, operator)
+        bindings.executeInsert(exec, assetId, tagId, source, provider, null, false, now, operator, now, operator)
             .getOrThrow()
         return tagId
     }

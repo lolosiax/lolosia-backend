@@ -3,6 +3,7 @@ package moe.lolosia.web.generated
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
 import moe.lolosia.web.dto.PermissionCatalogEntry
+import moe.lolosia.web.util.llm.ChatTool
 import org.koin.core.Koin
 import org.koin.core.module.Module
 
@@ -36,3 +37,6 @@ expect fun generatedPermissions(): List<PermissionCatalogEntry>
 
 /** 按 `@Interceptor(order)` 升序注册全部中间件。 */
 expect fun Application.configureInterceptors(koin: Koin)
+
+/** 全部 `@Tool` 方法生成的对话工具表（见 `util/llm`）。 */
+expect fun generatedTools(): List<ChatTool>

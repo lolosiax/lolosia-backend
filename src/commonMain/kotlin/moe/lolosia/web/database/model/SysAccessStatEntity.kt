@@ -5,10 +5,10 @@ import io.github.smyrgeorge.sqlx4k.annotation.Table
 import kotlin.time.Instant
 
 /**
- * `sys_access_stat`：仪表板的访问统计，一行 = 某个「小时桶 + IP + Host」上的累计请求数。
+ * `sys_access_stat`：按「小时桶 + ip + host」聚合的访问命中次数。
  *
- * 由 `AccessStatService` 在内存里按小时聚合、周期落库（请求链路本身不写库）。
- * 纯派生数据，可清空。
+ * 纯派生数据，随时可清空。[hourBucket] 是本地时区的 `yyyy-MM-ddTHH`，字典序等价于时间序。
+ * 唯一键 (`hour_bucket`, `ip`, `host`) 支撑 upsert 累加，见 `SysAccessStatRepository.executeUpsert`。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -16,15 +16,13 @@ import kotlin.time.Instant
 data class SysAccessStatEntity(
     @Id
     val id: Long = 0L,
-    /** 小时对齐的统计桶（UTC）。 */
-    val bucketAt: Instant,
-    /** 客户端 IP（优先取 `X-Forwarded-For` 首个）。 */
+    /** 本地时区小时桶，形如 `2026-10-10T14`。 */
+    val hourBucket: String,
+    /** 来源 IP。 */
     val ip: String,
-    /** Host 头（Origin 维度的近似）。 */
-    val host: String = "",
-    /** 该桶内累计请求数。 */
+    /** Host 头（含端口）。 */
+    val host: String,
+    /** 该桶内的命中次数。 */
     val hits: Long = 0L,
-    val createdAt: Instant? = null,
     val updatedAt: Instant? = null,
-    val deleted: Boolean = false,
 )

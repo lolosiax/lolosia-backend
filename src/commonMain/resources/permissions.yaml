@@ -32,6 +32,9 @@ groups:
     permissions:
       - "+lolosia.user.read"
       - "+lolosia.oss.file.write"
+      # 番组表：浏览 + 管理自己的关注（目录维护 / 手动映射是 admin 节点，不给普通用户）
+      - "+lolosia.anime.read"
+      - "+lolosia.anime.write"
 
   # 访客：只读，不引入继承。
   guest:

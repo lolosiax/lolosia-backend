@@ -11,7 +11,8 @@ import kotlin.time.Instant
 /**
  * `sys_metric_sample` 的仓库。
  *
- * 写入与清理都是**单语句**（`@Query` 不支持多语句脚本）；读取按时间区间一次取回后在服务层降采样。
+ * 全部是**单语句**（`CrudRepository` 自带的 `insert` / `update` 会被拼成多语句脚本，MariaDB 预处理报 1064）。
+ * 写入只走 [executeInsert]，清理只走 [executeDeleteBySampledAtBefore]；读取按时间窗口取。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -19,32 +20,33 @@ import kotlin.time.Instant
 @Injectable
 interface SysMetricSampleRepository : CrudRepository<SysMetricSampleEntity> {
 
-    /** 取某时刻之后的全部采样，按时间升序（服务层据此降采样成曲线）。 */
-    @Query("select * from sys_metric_sample where deleted = 0 and sampled_at >= :since order by sampled_at asc")
-    suspend fun findAllBySampledAtAfterOrderBySampledAtAsc(
-        context: QueryExecutor,
-        since: Instant,
-    ): Result<List<SysMetricSampleEntity>>
-
     @Query(
-        "insert into sys_metric_sample(cpu, mem, disk, net_in, net_out, disk_read, disk_write, " +
-            "sampled_at, created_at, deleted) " +
-            "values (:cpu, :mem, :disk, :netIn, :netOut, :diskRead, :diskWrite, :sampledAt, :createdAt, 0)"
+        "insert into sys_metric_sample(sampled_at, cpu, mem, mem_used, mem_total, disk, disk_used, disk_total, " +
+            "net_in, net_out, disk_read, disk_write) " +
+            "values (:sampledAt, :cpu, :mem, :memUsed, :memTotal, :disk, :diskUsed, :diskTotal, " +
+            ":netIn, :netOut, :diskRead, :diskWrite)"
     )
     suspend fun executeInsert(
         context: QueryExecutor,
+        sampledAt: Instant,
         cpu: Double,
         mem: Double,
+        memUsed: Long,
+        memTotal: Long,
         disk: Double,
+        diskUsed: Long,
+        diskTotal: Long,
         netIn: Double,
         netOut: Double,
         diskRead: Double,
         diskWrite: Double,
-        sampledAt: Instant,
-        createdAt: Instant,
     ): Result<Long>
 
-    /** 清理早于 [before] 的采样（保留窗口外的直接物理删除）。 */
+    /** 取窗口内的样本（升序），用于曲线历史回填。 */
+    @Query("select * from sys_metric_sample where sampled_at >= :since order by sampled_at asc")
+    suspend fun findAllBySampledAtAfter(context: QueryExecutor, since: Instant): Result<List<SysMetricSampleEntity>>
+
+    /** 清理早于 [before] 的旧行（按时间窗滚动保留）。 */
     @Query("delete from sys_metric_sample where sampled_at < :before")
-    suspend fun deleteBySampledAtBefore(context: QueryExecutor, before: Instant): Result<Long>
+    suspend fun executeDeleteBySampledAtBefore(context: QueryExecutor, before: Instant): Result<Long>
 }

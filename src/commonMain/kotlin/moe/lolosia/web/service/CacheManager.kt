@@ -1,6 +1,8 @@
 package moe.lolosia.web.service
 
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
+import kotlin.concurrent.atomics.AtomicLong
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import moe.lolosia.web.database.Database
 import moe.lolosia.web.database.model.SysCacheEntity
 import moe.lolosia.web.database.repository.SysCacheRepository
@@ -21,7 +23,23 @@ import kotlin.time.Duration.Companion.days
  */
 @Injectable
 @Service
+@OptIn(ExperimentalAtomicApi::class)
 class CacheManager(private val db: Database, private val repo: SysCacheRepository) {
+
+    /** 自进程启动以来的命中 / 未命中计数（供仪表盘展示命中率）。 */
+    private val hits = AtomicLong(0L)
+    private val misses = AtomicLong(0L)
+
+    /** 缓存访问统计。 */
+    data class CacheStats(val hits: Long, val misses: Long, val hitRate: Double)
+
+    /** 取累计命中统计；命中率在无访问时记为 0。 */
+    fun stats(): CacheStats {
+        val hit = hits.load()
+        val miss = misses.load()
+        val total = hit + miss
+        return CacheStats(hit, miss, if (total > 0L) hit.toDouble() / total * 100.0 else 0.0)
+    }
 
     fun accessor(path: String): Accessor = Accessor(path)
 
@@ -34,9 +52,11 @@ class CacheManager(private val db: Database, private val repo: SysCacheRepositor
         /** 该 path 下全部未过期缓存（新的在前）。 */
         suspend fun getAll(): List<SysCacheEntity> = repo.findAllByPath(ctx, path).getOrThrow()
 
-        /** 取该 tag 的未过期缓存行（`null` = 不存在或已过期）。 */
+        /** 取该 tag 的未过期缓存行（`null` = 不存在或已过期）；顺带记一次命中 / 未命中。 */
         suspend fun find(tag: String): SysCacheEntity? =
-            repo.findOneByPathAndTag(ctx, path, tag).getOrThrow()
+            repo.findOneByPathAndTag(ctx, path, tag).getOrThrow().also {
+                if (it != null) hits.addAndFetch(1L) else misses.addAndFetch(1L)
+            }
 
         suspend fun get(tag: String): String? = find(tag)?.value
 

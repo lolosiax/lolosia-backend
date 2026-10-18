@@ -26,7 +26,7 @@ fun curlCryptoLib(target: String): String =
 
 // 第三方 C 库：产物（thirdparty/<目标>/*.a）与公共头文件随仓库提交，见 thirdparty/build-libs.ps1
 val thirdpartyDir = layout.projectDirectory.dir("thirdparty")
-val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif")
+val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif", "msgpack")
 
 // UI 实验那套图形栈（SDL3 → FreeType → RmlUi → liblolosia）静态链接所需的额外参数。
 // 内容是 SDL3 的 INTERFACE_LINK_LIBRARIES 清单 —— 它自己不带 Windows 系统库；

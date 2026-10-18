@@ -5,10 +5,10 @@ import io.github.smyrgeorge.sqlx4k.annotation.Table
 import kotlin.time.Instant
 
 /**
- * `sys_metric_sample`：仪表板的系统指标采样，一行 = 一次采样（宽表）。
+ * `sys_metric_sample`：系统指标时序，一次采样一行。
  *
- * [cpu] / [mem] / [disk] 是百分比（0~100）；[netIn] / [netOut] / [diskRead] / [diskWrite]
- * 是速率（字节/秒）。数据由后台采样服务写入，纯派生、可清空。
+ * 纯派生数据，随时可清空。服务层从系统计数器算出占用率与速率后按分钟降采样写入
+ * （高频样本只留在内存环形缓冲里），旧行按 `dashboard.retainHours` 周期清理。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -16,22 +16,28 @@ import kotlin.time.Instant
 data class SysMetricSampleEntity(
     @Id
     val id: Long = 0L,
-    /** CPU 使用率（%）。 */
-    val cpu: Double = 0.0,
-    /** 内存使用率（%）。 */
-    val mem: Double = 0.0,
-    /** 根分区使用率（%）。 */
-    val disk: Double = 0.0,
-    /** 入站速率（字节/秒）。 */
-    val netIn: Double = 0.0,
-    /** 出站速率（字节/秒）。 */
-    val netOut: Double = 0.0,
-    /** 磁盘读速率（字节/秒）。 */
-    val diskRead: Double = 0.0,
-    /** 磁盘写速率（字节/秒）。 */
-    val diskWrite: Double = 0.0,
-    /** 采样时刻（UTC）。 */
+    /** 采样时刻。 */
     val sampledAt: Instant,
-    val createdAt: Instant? = null,
-    val deleted: Boolean = false,
+    /** CPU 占用率（0~100）。 */
+    val cpu: Double = 0.0,
+    /** 内存占用率（0~100）。 */
+    val mem: Double = 0.0,
+    /** 已用内存（字节）。 */
+    val memUsed: Long = 0L,
+    /** 总内存（字节）。 */
+    val memTotal: Long = 0L,
+    /** 磁盘占用率（0~100）。 */
+    val disk: Double = 0.0,
+    /** 已用磁盘（字节）。 */
+    val diskUsed: Long = 0L,
+    /** 总磁盘（字节）。 */
+    val diskTotal: Long = 0L,
+    /** 入站速率（MB/s）。 */
+    val netIn: Double = 0.0,
+    /** 出站速率（MB/s）。 */
+    val netOut: Double = 0.0,
+    /** 读速率（MB/s）。 */
+    val diskRead: Double = 0.0,
+    /** 写速率（MB/s）。 */
+    val diskWrite: Double = 0.0,
 )
