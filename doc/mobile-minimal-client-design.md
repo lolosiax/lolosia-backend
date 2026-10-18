@@ -479,6 +479,16 @@ adb shell am start -n moe.lolosia.android/.MainActivity
 - token 文件放在 `%ProgramData%\<app>\local-service.json`，ACL 允许 `Users` 读取、仅服务账户写入。
 - UI 启动时读取；服务重启后 token 变化，UI 重新发现（端口/token 文件 mtime 变化）。
 
+### 7.7 远程事件订阅（EventBus）
+
+- Android 用前台 Service（`EventBusService`，`dataSync` 类型）保持一条 `/api/sse` 长连接；
+  三步握手与服务端 `SseController` 一致：`POST /api/sse`（`x-upgrade: event-source`）→
+  `POST /api/sse/registry`（Bearer token）→ `GET /api/sse?eventSourceId=…`。
+- 事件转系统通知：`anime.release` 显示「番名 + 第 N 话 + 发布标题」；未知事件显示事件名与原始数据。
+- 断线按 1s → 30s 指数退避重连；未登录时每 10 秒重读一次设置，登录后自动接上。
+- 本地联调：`tools/mock-sse-server.mjs`（Node，无依赖）复刻握手、心跳、`anime.release` 定时推送与
+  `POST /api/mock/publish` 手动推送；模拟器访问宿主机用 `http://10.0.2.2:18080`。
+
 ---
 
 ## 8. WebView（后续，不在本期）
