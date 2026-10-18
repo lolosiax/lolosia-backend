@@ -19,11 +19,6 @@ body
 
 .screen
 {
-	position: absolute;
-	left: 0;
-	top: 0;
-	right: 0;
-	bottom: 0;
 	width: 100%;
 	height: 100%;
 	padding: 24dp;
@@ -34,6 +29,44 @@ body
 .screen.scroll
 {
 	overflow-y: auto;
+}
+
+/* RmlUi 的滚动条是真实元素；没有默认样式表时 width:auto 会吃掉几乎整个宽度，
+   所以必须把宽度写死。箭头不显示，只保留细轨道与滑块。 */
+scrollbarvertical
+{
+	width: 6dp;
+	margin-left: 2dp;
+	background-color: #F2F2F5;
+}
+
+scrollbarhorizontal
+{
+	height: 6dp;
+	margin-top: 2dp;
+	background-color: #F2F2F5;
+}
+
+scrollbarvertical slidertrack,
+scrollbarhorizontal slidertrack
+{
+	background-color: #E8E8EC;
+	border-radius: 3dp;
+}
+
+scrollbarvertical sliderbar,
+scrollbarhorizontal sliderbar
+{
+	min-width: 24dp;
+	min-height: 24dp;
+	background-color: #C7C7CC;
+	border-radius: 3dp;
+}
+
+sliderarrowdec,
+sliderarrowinc
+{
+	display: none;
 }
 
 .screen.center
@@ -95,6 +128,8 @@ body
 .card
 {
 	display: block;
+	width: 100%;
+	box-sizing: border-box;
 	background-color: #F8F8FA;
 	border: 1dp #D1D1D6;
 	border-radius: 16dp;

@@ -1,0 +1,385 @@
+/* 控件库：与业务无关的可复用外观。
+   页面只组合这些 class，不复制颜色 / 圆角 / 间距。 */
+
+/* ---------- 按钮扩展 ---------- */
+
+button.small
+{
+	height: 34dp;
+	padding: 0 14dp;
+	font-size: 13dp;
+	border-radius: 8dp;
+}
+
+button.danger
+{
+	background-color: #E05D5D;
+	color: #FFFFFF;
+}
+
+button.danger:hover
+{
+	background-color: #C94A4A;
+}
+
+button.disabled,
+button[disabled]
+{
+	background-color: #E8E8EC;
+	color: #A0A0A6;
+	border: 0;
+}
+
+/* ---------- 徽标 / 标签 ---------- */
+
+.badge.success
+{
+	background-color: #E3F4E4;
+	color: #2E7D32;
+}
+
+.badge.warning
+{
+	background-color: #FFF1D6;
+	color: #9A6A00;
+}
+
+.badge.danger
+{
+	background-color: #FBE4E4;
+	color: #B03A3A;
+}
+
+.chip
+{
+	display: inline-block;
+	padding: 5dp 12dp;
+	margin: 0 8dp 8dp 0;
+	border-radius: 999dp;
+	border: 1dp #D1D1D6;
+	background-color: #FFFFFF;
+	color: #3A3A3C;
+	font-size: 13dp;
+}
+
+.chip.active
+{
+	background-color: #E8F0FC;
+	border-color: #4A8FE7;
+	color: #2D5F9E;
+}
+
+/* ---------- 开关 ---------- */
+
+.switch
+{
+	position: relative;
+	display: inline-block;
+	width: 44dp;
+	height: 26dp;
+	border-radius: 13dp;
+	background-color: #D1D1D6;
+}
+
+.switch .knob
+{
+	position: absolute;
+	left: 2dp;
+	top: 2dp;
+	width: 22dp;
+	height: 22dp;
+	border-radius: 11dp;
+	background-color: #FFFFFF;
+}
+
+.switch.on
+{
+	background-color: #4A8FE7;
+}
+
+.switch.on .knob
+{
+	left: 20dp;
+}
+
+/* ---------- 复选框（自绘） ---------- */
+
+.checkbox
+{
+	display: inline-block;
+	width: 20dp;
+	height: 20dp;
+	border-radius: 6dp;
+	border: 1dp #B3CCF2;
+	background-color: #FFFFFF;
+	text-align: center;
+	line-height: 20dp;
+	font-size: 13dp;
+	color: #FFFFFF;
+	vertical-align: middle;
+}
+
+.checkbox.checked
+{
+	background-color: #4A8FE7;
+	border-color: #4A8FE7;
+}
+
+/* ---------- 表单补充 ---------- */
+
+textarea.text
+{
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	height: 88dp;
+	padding: 12dp 14dp;
+	border-radius: 8dp;
+	background-color: #FFFFFF;
+	border: 1dp #D1D1D6;
+	color: #1C1C1E;
+	font-size: 15dp;
+}
+
+select
+{
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	height: 46dp;
+	padding: 0 12dp;
+	border-radius: 8dp;
+	background-color: #FFFFFF;
+	border: 1dp #D1D1D6;
+	color: #1C1C1E;
+	font-size: 15dp;
+}
+
+input.range
+{
+	display: block;
+	width: 100%;
+	height: 28dp;
+}
+
+.search-bar
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	box-sizing: border-box;
+	width: 100%;
+	height: 44dp;
+	padding: 0 14dp;
+	border-radius: 999dp;
+	background-color: #FFFFFF;
+	border: 1dp #D1D1D6;
+	color: #6E6E73;
+	font-size: 14dp;
+}
+
+/* ---------- 分段控件 / 标签页 ---------- */
+
+.segmented
+{
+	display: flex;
+	flex-direction: row;
+	width: 100%;
+	height: 38dp;
+	padding: 3dp;
+	box-sizing: border-box;
+	border-radius: 10dp;
+	background-color: #E8E8EC;
+}
+
+.segment
+{
+	display: block;
+	flex: 1;
+	height: 32dp;
+	line-height: 32dp;
+	text-align: center;
+	border-radius: 8dp;
+	font-size: 13dp;
+	color: #6E6E73;
+}
+
+.segment.active
+{
+	background-color: #FFFFFF;
+	color: #1C1C1E;
+}
+
+.tabs
+{
+	display: block;
+	width: 100%;
+	border-bottom: 1dp #D1D1D6;
+	margin-bottom: 12dp;
+}
+
+.tabs .tab-item
+{
+	display: inline-block;
+	padding: 8dp 14dp;
+	font-size: 14dp;
+	color: #6E6E73;
+	border-bottom: 2dp transparent;
+}
+
+.tabs .tab-item.active
+{
+	color: #4A8FE7;
+	border-bottom: 2dp #4A8FE7;
+}
+
+/* ---------- 进度 / 加载 ---------- */
+
+.progress
+{
+	display: block;
+	width: 100%;
+	height: 8dp;
+	border-radius: 4dp;
+	background-color: #E8E8EC;
+}
+
+.progress .bar
+{
+	display: block;
+	height: 8dp;
+	border-radius: 4dp;
+	background-color: #4A8FE7;
+}
+
+.spinner
+{
+	display: inline-block;
+	width: 18dp;
+	height: 18dp;
+	border-radius: 9dp;
+	border: 2dp #D6E3F8;
+	border-top: 2dp #4A8FE7;
+	animation: spin 900ms linear infinite;
+	vertical-align: middle;
+}
+
+@keyframes spin
+{
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
+}
+
+.skeleton
+{
+	display: block;
+	height: 14dp;
+	border-radius: 7dp;
+	background-color: #E8E8EC;
+	margin-bottom: 10dp;
+}
+
+.skeleton.short
+{
+	width: 45%;
+}
+
+/* ---------- 弹层类（静态展示，页面按需叠加） ---------- */
+
+.dialog
+{
+	display: block;
+	width: 100%;
+	padding: 20dp;
+	box-sizing: border-box;
+	border-radius: 16dp;
+	border: 1dp #D1D1D6;
+	background-color: #FFFFFF;
+}
+
+.dialog-title
+{
+	display: block;
+	font-size: 17dp;
+	color: #1C1C1E;
+	margin-bottom: 8dp;
+}
+
+.dialog-actions
+{
+	display: flex;
+	flex-direction: row;
+	justify-content: flex-end;
+	margin-top: 16dp;
+}
+
+.toast
+{
+	display: block;
+	width: 100%;
+	padding: 12dp 16dp;
+	box-sizing: border-box;
+	border-radius: 12dp;
+	background-color: #3A3A3C;
+	color: #F8F8FA;
+	font-size: 13dp;
+}
+
+.bottom-sheet
+{
+	display: block;
+	width: 100%;
+	padding: 20dp;
+	box-sizing: border-box;
+	border-radius: 20dp 20dp 0 0;
+	border: 1dp #D1D1D6;
+	background-color: #FFFFFF;
+}
+
+.sheet-handle
+{
+	display: block;
+	width: 36dp;
+	height: 4dp;
+	margin: 0 auto 14dp auto;
+	border-radius: 2dp;
+	background-color: #D1D1D6;
+}
+
+/* ---------- 导航栏 ---------- */
+
+.navbar
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	width: 100%;
+	height: 48dp;
+	margin-bottom: 16dp;
+}
+
+.navbar .back
+{
+	display: inline-block;
+	width: 40dp;
+	font-size: 18dp;
+	color: #4A8FE7;
+}
+
+.navbar .nav-title
+{
+	display: inline-block;
+	flex: 1;
+	font-size: 17dp;
+	color: #1C1C1E;
+}
+
+/* ---------- 图标位（Bootstrap Icons 接入前先用文字占位） ---------- */
+
+.icon
+{
+	display: inline-block;
+	width: 20dp;
+	text-align: center;
+	color: #6E6E73;
+}

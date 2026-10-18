@@ -12,6 +12,9 @@ import moe.lolosia.web.ui.platform.UiBackend
 import moe.lolosia.web.util.classpath.Classpath
 import moe.lolosia.web.util.image.Image
 import moe.lolosia.web.util.image.ImageFormat
+import moe.lolosia.web.util.platform.envOrNull
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import platform.posix.memcpy
 
 /**
@@ -30,7 +33,7 @@ class WindowsUiBackend(private val classpath: Classpath) : UiBackend {
 
     /** 注册 classpath 资源与图片解码回调；必须在 [loadFont] 之前调用。 */
     fun installResources() {
-        val holder = ClientResourceHolder(classpath)
+        val holder = ClientResourceHolder(classpath, envOrNull(ENV_UI_DEV_DIR))
         val ref = StableRef.create(holder)
         resourceRef = ref
         resourceHolder = holder
@@ -60,10 +63,11 @@ class WindowsUiBackend(private val classpath: Classpath) : UiBackend {
         filePath.cString { path -> family.cString { name -> ll_ui_load_font(path, name) == 0 } }
 
     override fun loadDocument(resourcePath: String): Boolean {
-        val rml = classpath.read(resourcePath)?.decodeToString() ?: return false
+        val rml = resourceHolder?.readDev(resourcePath)
+            ?: classpath.read(resourcePath)?.decodeToString()
+            ?: return false
         return rml.cString { ll_ui_load_document(it) == 0 }
     }
-
     override fun loadDocumentText(rml: String): Boolean =
         rml.cString { ll_ui_load_document(it) == 0 }
 
@@ -135,9 +139,24 @@ class WindowsUiBackend(private val classpath: Classpath) : UiBackend {
 private class ClientActionHolder(val handler: (String) -> Unit)
 
 /** 资源回调的宿主上下文；[images] 是本帧登记的动态图片（封面 / 头像）。 */
-private class ClientResourceHolder(val classpath: Classpath) {
+private class ClientResourceHolder(val classpath: Classpath, private val devDir: String?) {
+
     val images: MutableMap<String, ByteArray> = mutableMapOf()
+
+    /** 开发期从磁盘覆盖资源（`LOLOSIA_UI_DEV_DIR` 指向 resources 根目录）；生产不设该变量。 */
+    fun readDev(path: String): String? = readDevBytes(path)?.decodeToString()
+
+    fun readDevBytes(path: String): ByteArray? {
+        val dir = devDir ?: return null
+        return runCatching {
+            val file = "${dir.trimEnd('/', '\\')}/${path.trimStart('/')}".toPath()
+            if (FileSystem.SYSTEM.exists(file)) FileSystem.SYSTEM.read(file) { readByteArray() } else null
+        }.getOrNull()
+    }
 }
+
+/** 开发期资源覆盖目录；不设置时完全走 classpath。 */
+private const val ENV_UI_DEV_DIR = "LOLOSIA_UI_DEV_DIR"
 
 /** 文档里 `data-event-click="action('x')"` 的回调。 */
 private fun handleClientAction(userData: COpaquePointer?, name: CPointer<ByteVar>?) {
@@ -155,7 +174,10 @@ private fun handleReadFile(
     val holder = userData?.asStableRef<ClientResourceHolder>()?.get() ?: return -1
     val name = path?.toKString() ?: return -1
     // RmlUi 传给 FileInterface 的路径会去掉开头的 `/`；内存资源按 `/` 开头登记，这里两边都查。
-    val bytes = holder.images[name] ?: holder.images["/$name"] ?: holder.classpath.read(name) ?: return -1
+    val bytes = holder.images[name] ?: holder.images["/$name"]
+        ?: holder.readDevBytes(name)
+        ?: holder.classpath.read(name)
+        ?: return -1
     if (out == null || capacity < bytes.size) return bytes.size
     bytes.usePinned { memcpy(out, it.addressOf(0), bytes.size.convert()) }
     return bytes.size

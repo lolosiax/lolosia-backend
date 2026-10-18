@@ -35,6 +35,8 @@
 		</div>
 
 		<button class="secondary block" data-event-click="action('refresh')">刷新资料</button>
+		<div class="spacer-8"></div>
+		<button class="secondary block" data-event-click="action('open-components')">控件库</button>
 		<div class="spacer-16"></div>
 		<button class="ghost block" data-event-click="action('logout')">退出登录</button>
 	</div>

@@ -110,6 +110,8 @@ class ClientApp(
             "refresh" -> refresh()
             "tab-home", "open-home" -> openHome()
             "tab-profile", "open-profile" -> openProfile()
+            "open-components" -> openComponents()
+            "back" -> if (tab.value == MainTab.Components) openProfile()
             "save-server" -> saveServer()
             "retry" -> if (stage.value == AppStage.Login) login() else refresh()
         }
@@ -122,6 +124,7 @@ class ClientApp(
         AppStage.Main -> when (tab.value) {
             MainTab.Home -> "ui/pages/home.rml"
             MainTab.Profile -> "ui/pages/profile.rml"
+            MainTab.Components -> "ui/pages/components.rml"
         }
     }
 
@@ -205,6 +208,12 @@ class ClientApp(
         if (stage.value != AppStage.Main) return
         tab.value = MainTab.Profile
         refreshProfile()
+    }
+
+    /** 控件库是全屏页，不占底部 Tab；返回时回到「我的」。 */
+    private fun openComponents() {
+        if (stage.value != AppStage.Main) return
+        tab.value = MainTab.Components
     }
 
     private fun saveServer() {
