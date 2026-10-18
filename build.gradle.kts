@@ -1,222 +1,46 @@
 import com.fasterxml.jackson.databind.json.JsonMapper
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.tasks.Sync
+import org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink
 
 plugins {
-    // KGP 由 buildSrc 提供（classpath 上已存在），故不写版本，避免重复加载
-    id("org.jetbrains.kotlin.multiplatform")
-    alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.ksp)
+    // 根只做聚合与发布：deploy / runDebug / runRelease / buildBinaries
     id("moe.lolosia")
 }
 
 group = "moe.lolosia"
 version = "1.0.0-SNAPSHOT"
 
-// Curl 引擎（Linux 目标的 HTTP 客户端底层）以静态库形式链入 libcurl / libssl / libcrypto，
-// 而链接器扫描归档的顺序里 libcrypto 排在依赖它的 libssl 之前，OpenSSL 符号因此解析不到。
-// 这里把 klib 内的 libcrypto.a 解到构建目录，在链接参数末尾再追加一次。
-//
-// 每个 linux 目标解自己那一份（`build/curl-static-libs/<目标>/`）：libcrypto.a 是分架构的，
-// 共用一个文件会让后构建的目标覆盖掉先构建的那份。
-val curlStaticLibDir = layout.buildDirectory.dir("curl-static-libs")
-
-/** linux 目标的 libcrypto.a 路径；由下文的 `unpackCurlStaticLibs<Target>` 产出。 */
-fun curlCryptoLib(target: String): String =
-    curlStaticLibDir.get().dir(target).file("libcrypto.a").asFile.absolutePath
-
-// 第三方 C 库：产物（thirdparty/<目标>/*.a）与公共头文件随仓库提交，见 thirdparty/build-libs.ps1
-val thirdpartyDir = layout.projectDirectory.dir("thirdparty")
-val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif", "msgpack")
-
-// UI 实验那套图形栈（SDL3 → FreeType → RmlUi → liblolosia）静态链接所需的额外参数。
-// 内容是 SDL3 的 INTERFACE_LINK_LIBRARIES 清单 —— 它自己不带 Windows 系统库；
-// thirdparty/build-sdl3.ps1 结束时会打印最新的一份，升级 SDL3 后照抄过来。
-//
-// ⚠️ 不要在这里补 -lstdc++：Kotlin/Native 自己的 runtime 就是 C++ 写的、也已经链了 libstdc++，
-// 再加一次会让 std::bad_alloc 这类符号重复定义（ld.lld: duplicate symbol）。
-val uiStackLinkerOpts = listOf(
-    "-lm", "-lkernel32", "-luser32", "-lgdi32", "-lwinmm", "-limm32",
-    "-lole32", "-loleaut32", "-lversion", "-luuid", "-ladvapi32",
-    "-lsetupapi", "-lshell32", "-ldinput8",
-)
-
-kotlin {
-    // Windows：本地开发调试用
-    mingwX64 {
-        binaries {
-            executable {
-                entryPoint = "moe.lolosia.web.main"
-                linkerOpts(uiStackLinkerOpts)
-            }
-        }
-        // UI 实验（moe.lolosia.web.ui）：C ABI 门面 liblolosia.a 与 SDL3 都在 thirdparty/mingwX64 下。
-        // 只给 mingwX64 建 cinterop —— linux 目标还没有交叉构建好的 SDL3（见 build-sdl3.ps1 的说明）。
-        compilations.getByName("main").cinterops {
-            create("lolosia") {
-                definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/lolosia.def"))
-                includeDirs.allHeaders(
-                    thirdpartyDir.dir("include").asFile,
-                    layout.projectDirectory.dir("src/nativeCpp/include").asFile,
-                )
-                extraOpts("-libraryPath", thirdpartyDir.dir("mingwX64").asFile.absolutePath)
-            }
-        }
+// platforms.json 只在根解析一次；子模块通过 extra 读取，避免多处解析漂移
+val platformsFile = rootProject.file("platforms.json")
+@Suppress("UNCHECKED_CAST")
+val platformConfig: Map<String, Any?> =
+    if (platformsFile.exists()) {
+        JsonMapper().readValue(platformsFile, Map::class.java) as Map<String, Any?>
+    } else {
+        emptyMap()
     }
 
-    // Linux ARM64：部署到开发板（lckfb / RK3566 级）
-    linuxArm64 {
-        binaries {
-            executable {
-                entryPoint = "moe.lolosia.web.main"
-                linkerOpts(curlCryptoLib("linuxArm64"))
-            }
-        }
-    }
+extra["lolosia.platforms"] = platformConfig
 
-    // Linux X64：部署到 x64 云主机；与 linuxArm64 共享 src/linuxMain 下的平台实现
-    linuxX64 {
-        binaries {
-            executable {
-                entryPoint = "moe.lolosia.web.main"
-                linkerOpts(curlCryptoLib("linuxX64"))
-            }
-        }
-    }
+// 产物所在模块。Stage 1 先指向单体 server；Stage 2 拆出 app-desktop 后改这里。
+val desktopProjectPath = ":modules:server"
 
-    // ===== 第三方 C 库的 cinterop 绑定 =====
-    // thirdparty/<目标>/*.a 是预编译好的静态库（升级用 thirdparty/build-libs.ps1），
-    // 这里只让 cinterop 解析 .def + 头文件，构建期不需要任何 C 工具链；
-    // .def 里声明的 staticLibraries 会被打进 klib，链接期随可执行文件静态链入。
-    targets.withType<KotlinNativeTarget>().configureEach {
-        val targetName = name
-        // expect/actual class 尚处 Beta，不关会每次编译都刷一条警告；util/image/Image.kt 正是 expect class
-        compilerOptions.freeCompilerArgs.add("-Xexpect-actual-classes")
-        compilations.getByName("main").cinterops {
-            thirdpartyLibs.forEach { lib ->
-                create(lib) {
-                    definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/$lib.def"))
-                    includeDirs.allHeaders(thirdpartyDir.dir("include").asFile)
-                    extraOpts("-libraryPath", thirdpartyDir.dir(targetName).asFile.absolutePath)
-                }
-            }
-        }
-        // thirdparty/<目标>/*.a 会被 cinterop **复制**进 klib 的依赖目录
-        // （build/classes/…/cinterop/<klib>/default/targets/<abi>/included/），链接器用的是那份副本。
-        // 而 cinterop 任务自身只把 .def 与头文件当输入 —— 不把归档也声明进来，
-        // 重建静态库后 cinterop 不会重跑，副本一直停在旧版：症状是「改了 C 代码却看不到任何效果」。
-        val thirdpartyArchives = layout.projectDirectory.dir("thirdparty/$targetName")
-            .asFileTree.matching { include("*.a") }
-        val targetSuffix = targetName.replaceFirstChar { it.uppercaseChar() }
-        tasks.matching { it.name.startsWith("cinterop") && it.name.endsWith(targetSuffix) }
-            .configureEach { inputs.files(thirdpartyArchives) }
-    }
+// 根任务要读子模块的 link 任务输出，必须先让该模块完成配置。
+// ⚠️ 必须在 extra 赋值之后：强制求值子模块时，它的 build.gradle.kts 会立刻读取 extra。
+evaluationDependsOn(desktopProjectPath)
+val desktopProject = project(desktopProjectPath)
 
-    sourceSets {
-        // cinterop/指针相关 API 全项目放开（与 installer 等 native 项目一致）
-        all { languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi") }
+// ===== 部署：只在根注册 =====
+@Suppress("UNCHECKED_CAST")
+val deployConfig = platformConfig["deploy"] as? Map<String, Any?>
 
-        commonMain.dependencies {
-            // DI：Koin（native 产物已核实齐全）；日志与配置为自研，无额外依赖
-            implementation(libs.koin.core)
-            implementation(libs.kotlinx.datetime)
-            implementation(libs.kaml)
-            implementation(libs.okio)
-            implementation(libs.sqlx4k.mysql)
-
-            implementation(ktorLibs.server.core)
-            implementation(ktorLibs.server.cio)
-            implementation(ktorLibs.server.contentNegotiation)
-            implementation(ktorLibs.server.cors)
-            implementation(ktorLibs.server.statusPages)
-            implementation(ktorLibs.server.conditionalHeaders)
-            implementation(ktorLibs.serialization.kotlinx.json)
-            implementation(libs.kotlinx.serialization.json)
-
-            // 对外请求（api 包）：引擎按目标平台选择，见各平台源集
-            implementation(ktorLibs.client.core)
-            implementation(ktorLibs.client.websockets)
-            // 裸 TCP：数据库连通性/鉴权预检（见 Database 的 MySqlAuthProbe）
-            implementation(ktorLibs.network)
-        }
-        // 两个 linux 目标共享 src/linuxMain 下的平台实现
-        linuxMain.dependencies {
-            implementation(ktorLibs.client.curl)
-        }
-        mingwX64Main.dependencies {
-            implementation(ktorLibs.client.winhttp)
-        }
-        commonTest.dependencies {
-            implementation(kotlin("test"))
-            implementation(ktorLibs.server.testHost)
-        }
-    }
-}
-
-// ===== Curl 引擎的 libcrypto 静态库补齐（见文件顶部说明）=====
-val curlTargets = listOf("linuxArm64", "linuxX64")
-
-val unpackCurlStaticLibs = curlTargets.associateWith { target ->
-    val suffix = target.replaceFirstChar { it.uppercase() }
-    tasks.register("unpackCurlStaticLibs$suffix") {
-        val klibs = configurations.named("${target}CompileKlibraries")
-        val outDir = curlStaticLibDir.map { it.dir(target) }
-        inputs.files(klibs)
-        outputs.dir(outDir)
-        doLast {
-            val out = outDir.get().asFile
-            out.mkdirs()
-            klibs.get()
-                .filter { it.name.startsWith("ktor-client-curl") && it.name.endsWith(".klib") }
-                .forEach { klib ->
-                    project.zipTree(klib)
-                        .matching { include("**/libcrypto.a") }
-                        .forEach { it.copyTo(out.resolve("libcrypto.a"), overwrite = true) }
-                }
-        }
-    }
-}
-
-curlTargets.forEach { target ->
-    val suffix = target.replaceFirstChar { it.uppercase() }
-    tasks.matching { it.name.startsWith("link") && it.name.endsWith(suffix) }
-        .configureEach { dependsOn(unpackCurlStaticLibs.getValue(target)) }
-}
-
-// ===== 自研路由插件：KSP 需按目标声明处理器 =====
-// 注意：KSP2 没有 common/metadata 编译单元，生成代码落在各目标源集；
-// 而 Kotlin 编译模型下 common 代码看不到 platform 声明，故入口 main() 必须放各目标源集。
-// sqlx4k 的 @Repository/@Query 代码生成也走 KSP（处理器是 JVM 件，产出 klib 侧的 native 代码）。
-dependencies {
-    // ksp<目标名> 是 KSP 为每个编译单元建的配置，处理器按目标各挂一份
-    listOf("MingwX64", "LinuxArm64", "LinuxX64").forEach { target ->
-        add("ksp$target", project(":router-ksp"))
-        add("ksp$target", libs.sqlx4k.codegen)
-    }
-}
-
-ksp {
-    // sqlx4k codegen：生成物包名与方言
-    arg("output-package", "moe.lolosia.web.database.generated")
-    arg("dialect", "mysql")
-}
-
-// ===== Lolosia 构建配置 =====
-// classpath.zip 的合并与嵌入（windres / objcopy / 链接参数）由 buildSrc 的 LolosiaPlugin 实现。
 lolosia {
-    packageName = "moe.lolosia.web"
-    projectName = "洛洛希雅的小网站"
-
-    // 从根目录 platforms.json 读取前端工程路径（webPath）与部署服务器列表（deploy）
-    val platformsFile = rootDir.resolve("platforms.json")
-    @Suppress("UNCHECKED_CAST")
-    val platformConfig = if (!platformsFile.exists()) emptyMap<String, Any?>()
-    else JsonMapper().readValue(platformsFile, Map::class.java) as Map<String, Any?>
-
-    @Suppress("UNCHECKED_CAST")
     deploy {
-        val deployConfig = platformConfig["deploy"] as? Map<String, Any?>
+        artifactProject = desktopProjectPath
 
         activate = deployConfig?.get("active") as? String
+        @Suppress("UNCHECKED_CAST")
         val servers = deployConfig?.get("servers") as? List<Map<String, Any?>>
 
         servers?.forEach { server ->
@@ -225,20 +49,15 @@ lolosia {
                 port = (server["port"] as? Number)?.toInt() ?: 22
                 user = server["user"] as String
                 password = server["password"] as String
-                // docker（默认）：JVM 需要根目录有 Dockerfile/docker_shell.sh，原生可执行文件则直接挂载进基础镜像
-                mode = server["mode"] as? String ?: "docker"
-                // 目标机架构：配了 arm64 / x64 就部署原生可执行文件，不配则部署 JVM 的 bootJar
-                abi = server["abi"] as? String
-                // 可执行文件的启动参数（main() 取 argv[0] 作端口）
-                args = (server["args"] as? List<*>)?.map { it.toString() }?.toMutableList() ?: mutableListOf()
+                mode = server["mode"] as String ?: "docker"
+                abi = server["abi"] as String
+                args = (server["args"] as? List<*>)?.map { it.toString() }?.toMutableList()
+                    ?: mutableListOf()
             }
         }
 
-        // 原生部署的共享设置（可选，不写即为默认值）。
-        // 具体哪台机器部署原生、部署哪个架构，由各 server 的 abi 决定。
         binary {
             buildType = "release"
-            // docker 形态的容器入口：可执行文件与配置以挂载方式注入，这个镜像只当运行环境
             dockerImage = "ubuntu:24.04"
         }
     }
@@ -250,23 +69,65 @@ lolosia {
             mirror = "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/ubuntu:24.04"
         }
     }
+}
 
-    viteJar {
-        val webPath = platformConfig["webPath"] as? String
-        if (!webPath.isNullOrBlank()) {
-            platform("default") {
-                contextPath = "home"
-                dir = webPath
-            }
+// ===== runDebug / runRelease =====
+val hostTarget = when {
+    Os.isFamily(Os.FAMILY_WINDOWS) -> "MingwX64"
+    System.getProperty("os.arch").lowercase() in setOf("aarch64", "arm64") -> "LinuxArm64"
+    else -> "LinuxX64"
+}
+
+val appArgs = (findProperty("appArgs") as String?)
+    ?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+
+fun registerRun(name: String, buildType: String) {
+    val link = desktopProject.tasks.named(
+        "link${buildType}Executable$hostTarget",
+        KotlinNativeLink::class.java,
+    )
+    tasks.register<Exec>(name) {
+        group = "application"
+        dependsOn(link)
+        workingDir = rootDir
+        doFirst {
+            executable = link.get().outputFile.get().absolutePath
+            args.clear()
+            args.addAll(appArgs)
         }
     }
+}
 
-    classpath {
-        // 留空 targets = 自动覆盖工程内全部 native 目标；
-        // includeViteJar 默认 true：vite 产物以 static/<contextPath>/ 前缀并入
-        // 额外资源可继续用 resources("build/xxx") 注入
-        // Windows 宿主构建 linux 目标时，objcopy 会自动借道 WSL（可用 wslDistro / wslUser 指定发行版与用户）
-        // compressed = true：zip 条目用 DEFLATED（读取端 ZipClasspath 已用 platform.zlib 支持 inflate）
-        compressed = true
+registerRun("runDebug", "Debug")
+registerRun("runRelease", "Release")
+
+// ===== buildBinaries =====
+val binDir = layout.buildDirectory.dir("bin")
+val buildType = (findProperty("buildType") as String? ?: "release").lowercase()
+val cap = buildType.replaceFirstChar { it.uppercaseChar() }
+
+val desktopTargets = buildList {
+    // mingwX64 只在 Windows 宿主上构建；Linux 宿主跳过，避免整个任务失败
+    if (Os.isFamily(Os.FAMILY_WINDOWS)) add(Triple("MingwX64", "windows-x64", "exe"))
+    add(Triple("LinuxArm64", "linux-arm64", "kexe"))
+    add(Triple("LinuxX64", "linux-x64", "kexe"))
+}
+
+tasks.register<Sync>("buildBinaries") {
+    group = "build"
+    description = "构建全部桌面二进制并汇总到 build/bin"
+
+    into(binDir)
+    desktopTargets.forEach { (target, platform, ext) ->
+        val link = desktopProject.tasks.named(
+            "link${cap}Executable$target",
+            KotlinNativeLink::class.java,
+        )
+        dependsOn(link)
+        from(link.flatMap { it.outputFile }) {
+            rename {
+                "${rootProject.name}-$platform-$buildType-${rootProject.version}.$ext"
+            }
+        }
     }
 }

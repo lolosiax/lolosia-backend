@@ -34,7 +34,10 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink
 class LolosiaPlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
-        project.plugins.apply("org.hidetake.ssh")
+        // 只有根工程承担部署；子模块不需要 SSH 插件，也不应注册 deploy 任务
+        if (project == project.rootProject) {
+            project.plugins.apply("org.hidetake.ssh")
+        }
 
         val lolosiaExtension = project.extensions.create("lolosia", LolosiaExtension::class.java)
 
@@ -51,6 +54,8 @@ class LolosiaPlugin : Plugin<Project> {
     }
 
     private fun configureGitArchive(project: Project, lolosiaExt: LolosiaExtension) {
+        if (lolosiaExt.viteJar.platforms.isEmpty()) return
+
         project.tasks.register("gitArchive", GitArchiveTask::class.java) {
             platforms = lolosiaExt.viteJar.platforms
         }
@@ -69,23 +74,44 @@ class LolosiaPlugin : Plugin<Project> {
         serverName: String,
         server: ServerConfig,
     ): DeployArtifact? {
+        val artifactProject = resolveArtifactProject(project, lolosiaExt)
         val abi = server.abi
         if (!abi.isNullOrBlank()) {
-            return resolveNativeArtifact(project, lolosiaExt.deploy.binaryConfig, serverName, abi, server)
+            return resolveNativeArtifact(
+                project,
+                artifactProject,
+                lolosiaExt.deploy.binaryConfig,
+                serverName,
+                abi,
+                server,
+            )
         }
 
-        val bootJar = project.tasks.findByName("bootJar")
+        val bootJar = artifactProject.tasks.findByName("bootJar")
         if (bootJar == null) {
             project.logger.info(
                 "lolosia deploy：server '$serverName' 未配置 abi，工程里也没有 bootJar，本次跳过"
             )
             return null
         }
-        return DeployArtifact(kind = ARTIFACT_JAR, task = bootJar, files = project.files(bootJar))
+        return DeployArtifact(
+            kind = ARTIFACT_JAR,
+            task = bootJar,
+            files = artifactProject.files(bootJar),
+        )
     }
+
+    private fun resolveArtifactProject(project: Project, lolosiaExt: LolosiaExtension): Project =
+        lolosiaExt.deploy.artifactProject
+            ?.let { path ->
+                project.findProject(path)
+                    ?: throw GradleException("lolosia deploy：artifactProject '$path' 不存在")
+            }
+            ?: project
 
     private fun resolveNativeArtifact(
         project: Project,
+        artifactProject: Project,
         binary: BinaryConfig?,
         serverName: String,
         abi: String,
@@ -101,10 +127,10 @@ class LolosiaPlugin : Plugin<Project> {
 
         val buildType = (binary?.buildType ?: "release").lowercase().replaceFirstChar { it.uppercaseChar() }
         val taskName = "link${buildType}Executable${target.replaceFirstChar { it.uppercaseChar() }}"
-        val linkTask = project.tasks.findByName(taskName)
+        val linkTask = artifactProject.tasks.findByName(taskName)
         if (linkTask == null) {
             project.logger.warn(
-                "lolosia deploy：server '$serverName' 需要 $taskName，但工程里没有这个任务" +
+                "lolosia deploy：server '$serverName' 需要 $taskName，但工程 ${artifactProject.path} 里没有这个任务" +
                     "（请在 kotlin { } 中声明目标 $target），本次跳过"
             )
             return null
@@ -119,7 +145,7 @@ class LolosiaPlugin : Plugin<Project> {
             task = linkTask,
             // 必须用 outputFile：link 任务的 outputs 声明的是「输出目录」，
             // 直接传目录会让 hidetake 的 SFTP put 走递归分支并 mkdir 到远端，报 Failed SFTP MKDIR
-            files = project.files(linkTask.outputFile),
+            files = artifactProject.files(linkTask.outputFile),
             remoteName = binary?.name ?: project.rootProject.name,
             unitName = binary?.unitName,
             dockerImage = binary?.dockerImage ?: DEFAULT_DOCKER_IMAGE,
@@ -198,7 +224,7 @@ class LolosiaPlugin : Plugin<Project> {
 
             viteJarExt.platforms.forEach { (_, config) ->
                 config.dir?.let { dirPath ->
-                    val baseDir = project.file(dirPath)
+                    val baseDir = project.rootProject.file(dirPath)
                     val cache = config.cache
                     // 用 fileTree 而不是 inputs.dir/inputs.file：
                     // 这些路径可能不存在（typings/public 未必存在，交叉编译环境下整个前端目录都可能不在），
@@ -235,15 +261,20 @@ class LolosiaPlugin : Plugin<Project> {
     }
 
     private fun configureGenerateConstants(project: Project, lolosiaExt: LolosiaExtension) {
-        val vitePlatforms = lolosiaExt.viteJar.platforms
-        if (vitePlatforms.isEmpty()) return
+        val constants = lolosiaExt.constants
+        // 纯装配模块显式关掉；不能在这里回退到 viteJar，否则会和依赖模块生成同名常量
+        if (!constants.enabled) return
+
+        // constants { } 优先；未配置时沿用 viteJar 的 contextPath，保持旧工程兼容
+        val contextPaths: Map<String, String?> = constants.platforms.ifEmpty {
+            lolosiaExt.viteJar.platforms.mapValues { it.value.contextPath }
+        }
+        if (contextPaths.isEmpty()) return
 
         // 每个前端平台生成一个 VITE_<平台名> 常量（值即 contextPath），供服务端挂载静态资源时引用，
         // 避免把 "/home" 之类的路径写死在代码里。
         // JVM 工程挂到 java 的 main sourceSet（配合 kapt）；KMP 工程挂到 commonMain。
         val kaptKotlin = project.tasks.findByName("kaptKotlin")
-
-        val contextPaths = vitePlatforms.mapValues { it.value.contextPath }
 
         val generateTask = project.tasks.register("generateConstants", GenerateConstantsTask::class.java) {
             packageName = lolosiaExt.packageName ?: "moe.lolosia"
@@ -283,6 +314,8 @@ class LolosiaPlugin : Plugin<Project> {
     private fun configureGenerateDiModule(project: Project) {
         val sourceRoot = project.layout.projectDirectory.dir("src/main/kotlin").asFile
         if (!sourceRoot.isDirectory) return
+        // Android / 非 Java 工程没有 SourceSetContainer；不要因为应用了插件就抛异常
+        val sourceSets = project.extensions.findByType(SourceSetContainer::class.java) ?: return
 
         val generateTask = project.tasks.register("generateDiModule", GenerateDiModuleTask::class.java) {
             this.sourceRoot = sourceRoot
@@ -292,7 +325,7 @@ class LolosiaPlugin : Plugin<Project> {
             dependsOn(generateTask)
         }
 
-        project.extensions.getByType<SourceSetContainer>().named("main") {
+        sourceSets.named("main") {
             java.srcDir(generateTask.map { it.outputDir })
         }
 
@@ -310,6 +343,8 @@ class LolosiaPlugin : Plugin<Project> {
     private fun configureGenerateRouteModule(project: Project) {
         val sourceRoot = project.layout.projectDirectory.dir("src/main/kotlin").asFile
         if (!sourceRoot.isDirectory) return
+        // Android / 非 Java 工程没有 SourceSetContainer；不要因为应用了插件就抛异常
+        val sourceSets = project.extensions.findByType(SourceSetContainer::class.java) ?: return
 
         val generateTask = project.tasks.register("generateRouteModule", GenerateRouteModuleTask::class.java) {
             this.sourceRoot = sourceRoot
@@ -319,7 +354,7 @@ class LolosiaPlugin : Plugin<Project> {
             dependsOn(generateTask)
         }
 
-        project.extensions.getByType<SourceSetContainer>().named("main") {
+        sourceSets.named("main") {
             java.srcDir(generateTask.map { it.outputDir })
         }
 

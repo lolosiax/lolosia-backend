@@ -16,6 +16,15 @@ open class DeployExtension {
     var activate: String? = null
 
     /**
+     * 产物所在模块的路径（如 `:modules:app-desktop`）。
+     *
+     * deploy 任务可以注册在根工程，但 link 任务在可执行模块里；留空表示在当前工程解析。
+     */
+    @Input
+    @Optional
+    var artifactProject: String? = null
+
+    /**
      * 原生部署产物配置。写了 `binary { }` 就部署 Kotlin/Native 可执行文件，
      * 否则部署 JVM 的 `bootJar`。
      */

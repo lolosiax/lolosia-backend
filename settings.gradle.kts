@@ -32,4 +32,6 @@ dependencyResolutionManagement {
 rootProject.name = "lolosia-backend"
 
 // 自研路由插件的 KSP 处理器（必须跑在 JVM 上，独立模块）
-include(":router-ksp")
+include(":modules:router-ksp")
+// Stage 1：单体应用整体下沉到 modules/server，Gradle 根不再保留 src/
+include(":modules:server")

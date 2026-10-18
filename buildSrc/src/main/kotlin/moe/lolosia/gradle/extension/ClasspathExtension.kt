@@ -15,6 +15,16 @@ import org.gradle.api.tasks.Optional
 open class ClasspathExtension {
 
     /**
+     * 是否启用 classpath.zip 嵌入。
+     *
+     * 纯库模块（如只提供 Ktor 服务端代码、自身没有可执行文件）可以关掉；
+     * 资源仍会由依赖它的可执行模块自动收集，不受此开关影响。
+     */
+    @Input
+    @Optional
+    var enabled: Boolean = true
+
+    /**
      * 参与嵌入的目标名（Kotlin/Native target，如 `mingwX64`）。
      * 留空则自动取工程内全部 native 目标。
      */
@@ -41,6 +51,9 @@ open class ClasspathExtension {
     /** 额外资源目录；可为 task 输出，Gradle 会自动建立任务依赖。 */
     internal val additionalResources: MutableList<Any> = mutableListOf()
 
+    /** 按目标注入的额外资源目录（如 `mingwX64` 专用字体）。 */
+    internal val perTargetResources: MutableMap<String, MutableList<Any>> = linkedMapOf()
+
     /**
      * Windows 宿主上执行 linux 目标的 objcopy 时借道 WSL。
      * 留空 = 用 WSL 的默认发行版 / 默认用户。
@@ -60,6 +73,11 @@ open class ClasspathExtension {
     /** 追加额外资源目录（可为目录、文件树或 task 输出）。 */
     fun resources(vararg paths: Any) {
         additionalResources.addAll(paths)
+    }
+
+    /** 只给指定 native 目标追加资源目录。 */
+    fun resourcesFor(target: String, vararg paths: Any) {
+        perTargetResources.getOrPut(target) { mutableListOf() }.addAll(paths)
     }
 
     fun target(name: String) {

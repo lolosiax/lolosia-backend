@@ -21,6 +21,7 @@ open class LolosiaExtension {
 
     val deploy: DeployExtension = DeployExtension()
     val viteJar: ViteJarExtension = ViteJarExtension()
+    val constants: ConstantsExtension = ConstantsExtension()
     val docker: DockerExtension = DockerExtension()
     val classpath: ClasspathExtension = ClasspathExtension()
 
@@ -30,6 +31,10 @@ open class LolosiaExtension {
 
     fun viteJar(action: Action<ViteJarExtension>) {
         action.execute(viteJar)
+    }
+
+    fun constants(action: Action<ConstantsExtension>) {
+        action.execute(constants)
     }
 
     fun docker(action: Action<DockerExtension>) {

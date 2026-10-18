@@ -43,7 +43,8 @@ abstract class ViteJarTask : Jar() {
                 logger.error("vite前端${platformName}没有配置工程文件夹")
                 return@forEach
             }
-            val path = project.file(config.dir!!)
+            // 相对路径统一按 Gradle 根（backend/）解析，而不是模块目录
+            val path = project.rootProject.file(config.dir!!)
 
             val vite = if (Os.isFamily(Os.FAMILY_WINDOWS)) {
                 path.resolve("node_modules/.bin/vite.CMD")

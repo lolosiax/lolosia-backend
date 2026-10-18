@@ -31,9 +31,10 @@ DI 注册表（仓库 / 服务 / 注入 / 中间件 / 路由）改由 KSP 生成
 ### 构建
 
 ```powershell
-gradlew linkReleaseExecutableMingwX64     # Windows 本地产物
-gradlew linkReleaseExecutableLinuxArm64   # 开发板产物（aarch64）
-gradlew linkReleaseExecutableLinuxX64     # x64 云主机产物
+gradlew buildBinaries                     # 一次性构建全部目标 → build/bin（<项目>-<平台>-<类型>-<版本>.<扩展名>）
+gradlew :modules:server:linkReleaseExecutableMingwX64     # 单目标：Windows 本地产物
+gradlew :modules:server:linkReleaseExecutableLinuxArm64   # 单目标：开发板产物（aarch64）
+gradlew :modules:server:linkReleaseExecutableLinuxX64     # 单目标：x64 云主机产物
 gradlew deploy<服务器名>                   # 构建 + 部署到开发板 / 云主机（见 §3）
 ```
 
@@ -77,7 +78,7 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
   zlib 的真 `zconf.h` 在**构建目录**里（源码树那份被 CMake 改名成 `zconf.h.included`）。
 - libjpeg-turbo 只构建静态库目标（`jpeg-static` / `turbojpeg-static`）：`all` 会连带构建 CLI 可执行文件，Linux 目标链接不过。
 - ⚠️ **libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档 `libsharpyuv.a`，脚本会把它合并回单个 `libwebp.a`**（`.def` 里只声明 `libwebp.a`）。分成两个归档时，K/N 的 ELF 链接（ld.gold）按归档逐个解析，顺序被重排后 `libwebp.a` 里对 `SharpYuv*` 的引用会解析不到 —— arm64 与 x64 都会 `linkReleaseExecutable<目标>` 失败（mingw 的 PE 链接器宽容，才没暴露）。
-- 绑定：`.def` 在 `src/nativeInterop/cinterop/`，门面在 `src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
+- 绑定：`.def` 在 `modules/server/src/nativeInterop/cinterop/`，门面在 `modules/server/src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
   包名一律 `moe.lolosia.thirdparty.<库名>`。`gradle.properties` 开了 `kotlin.mpp.enableCInteropCommonization=true`，
   让 cinterop 声明对 `nativeMain` 可见（`kotlinx.cinterop` 的指针 API 本身仍只在 native 源集可用）。
 - 目标相关的类型宽度要当心：`size_t` 三个目标都是 64 位可以安全传递，`unsigned long` 不是（mingw 32 位 / linux 64 位），
@@ -197,7 +198,7 @@ $files += @(Get-ChildItem $sqlDir -Filter 'view_user_role.sql')   # 视图必须
 foreach ($f in $files) { & $exe --host=127.0.0.1 --port=3306 --user=root --password=123456 --default-character-set=utf8mb4 -D ktor-template -e "source $($f.FullName -replace '\\','/')" }
 ```
 > 建完是 **8** 个表/视图（7 表 + `view_user_role`），`sys_user` 里有 `lolosia`（bcrypt `$2a$10$…`）。
-> 默认配置（`src/commonMain/resources/application.json`）指向本机 `127.0.0.1:3306/ktor-template`。
+> 默认配置（`modules/server/src/commonMain/resources/application.json`）指向本机 `127.0.0.1:3306/ktor-template`。
 > `/api/svc/selftest` 探针已随 P0 收尾删除；现在 §2 冒烟会注册 `smoke-*` 用户（学生），跑多了要清理：
 >
 > ```sql
@@ -235,18 +236,18 @@ kill -9 <pid>; rm -f /tmp/ktor-test.kexe; rm -rf /tmp/ktortest
 
 ```powershell
 # 1) 后端：编译并运行本机产物（默认端口 7129）
-gradlew runReleaseExecutableMingwX64                       # 一条命令编译 + 运行
-# 或先 linkReleaseExecutableMingwX64，再直接跑：
-.\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129   # 首参覆盖端口，不传用配置里的
+gradlew runRelease                       # 根任务：一条命令编译 + 运行（cwd 已固定为 backend 根）
+# 或先跑 :modules:server:linkReleaseExecutableMingwX64，再直接跑：
+.\modules\server\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129   # 首参覆盖端口，不传用配置里的
 
 # 2) 前端：vite dev server（端口 5005）
 cd <工作区>/web
 pnpm dev
 ```
 
-- **配置来源**：启动目录下的 `application.yaml → yml → json` 里**第一个存在的**；`KTOR_CONFIG` 显式指定文件、`KTOR_PORT` / 首个命令行参数覆盖端口（优先级 命令行 > 环境变量 > 配置文件 > 内置默认）。内置默认见 `src/commonMain/resources/application.json`。
+- **配置来源**：启动目录下的 `application.yaml → yml → json` 里**第一个存在的**；`KTOR_CONFIG` 显式指定文件、`KTOR_PORT` / 首个命令行参数覆盖端口（优先级 命令行 > 环境变量 > 配置文件 > 内置默认）。内置默认见 `modules/server/src/commonMain/resources/application.json`。
 - **前端请求指向哪**：`web/.env.serve-dev` 里 `VITE_APP_BASE_MODE=port` + `VITE_APP_BASE_PORT=7129`，`utils/request.ts` 据此把 API 拼成 `http://<host>:7129/api/`。所以**本地后端跑在 7129 即可与 dev server（5005）互通**，不必额外配代理。
-- **前端要被后端内嵌时**才需要构建：`viteJar` 是 `link*` 的依赖，`gradlew link...` / `deploy` 会顺带跑（见下条「vite 前端的增量行为」）；纯调前端用 dev server 就够。
+- **前端要被后端内嵌时**才需要构建：`viteJar` 是 `link*` 的依赖，`gradlew buildBinaries` / `:modules:server:link...` / `deploy` 会顺带跑（见下条「vite 前端的增量行为」）；纯调前端用 dev server 就够。
 - **用浏览器 SKILL 做多步验收**：登录 → 打开番组表 → 关注番剧 / 发布组 → 点「立即拉取」，即可当场看到列表刷新与 `anime.release` 的站内 / 桌面通知。板子上同理，只是换成板子地址。
 
 ### vite 前端的增量行为
