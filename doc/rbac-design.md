@@ -14,7 +14,7 @@
 5. 新增两张表（`sys_role_permission` / `sys_user_permission`），**不引入任何视图**；规则一次取回后在 Kotlin 里按组合并。
 6. `@Permission` 的**全量节点目录**由 KSP 从注解扫描生成（顺带带出 KDoc 首行当标题），供管理界面做「权限选择器」，避免手抄。
 7. **组可以继承组**（`sys_role.parent_id`，内置链 `admin → user → guest`），判定时沿父指针递归合并祖先组的规则。
-8. **内置组（owner / admin / user / guest）的默认权限登记在内嵌资源 [`permissions.yaml`](../src/commonMain/resources/permissions.yaml)**：某组在库里一条规则都没有时用它兜底，库里一旦有规则就以库为准（§3.6）。
+8. **内置组（owner / admin / user / guest）的默认权限登记在内嵌资源 [`permissions.yaml`](../modules/server/src/commonMain/resources/permissions.yaml)**：某组在库里一条规则都没有时用它兜底，库里一旦有规则就以库为准（§3.6）。
 
 ---
 
@@ -39,9 +39,9 @@
 
 ### 1.2 代码
 
-- 取当前用户与组：[`UserInfo`](../src/commonMain/kotlin/moe/lolosia/web/util/session/UserInfo.kt) —— `role()` 取**第一条**绑定，`roleType()` / `isAdmin()` 都是**字符串比对**；`isOwner()` 走解析器判是否拥有者组。（`isTeacher()` / `isStudent()` 随 `teacher` / `student` 组消亡在 P6 删掉。）
-- 鉴权：[`AuthInterceptor`](../src/commonMain/kotlin/moe/lolosia/web/interceptor/AuthInterceptor.kt)（`@Interceptor(-3)`）**只判断「有没有登录」**：`/api/**` 默认要会话，白名单前缀直接放行。
-- 路由：`@Controller` + `@GET/@POST/...` 由 [`RouterProcessor`](../router-ksp/src/main/kotlin/moe/lolosia/router/ksp/RouterProcessor.kt) 编译期生成 `generatedRoutes()`。
+- 取当前用户与组：[`UserInfo`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/util/session/UserInfo.kt) —— `role()` 取**第一条**绑定，`roleType()` / `isAdmin()` 都是**字符串比对**；`isOwner()` 走解析器判是否拥有者组。（`isTeacher()` / `isStudent()` 随 `teacher` / `student` 组消亡在 P6 删掉。）
+- 鉴权：[`AuthInterceptor`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/interceptor/AuthInterceptor.kt)（`@Interceptor(-3)`）**只判断「有没有登录」**：`/api/**` 默认要会话，白名单前缀直接放行。
+- 路由：`@Controller` + `@GET/@POST/...` 由 [`RouterProcessor`](../modules/router-ksp/src/main/kotlin/moe/lolosia/router/ksp/RouterProcessor.kt) 编译期生成 `generatedRoutes()`。
 
 ### 1.3 前端
 
@@ -150,13 +150,13 @@ fun granted(rules: List<PermissionRule>, node: String): Boolean {
 
 所属组链里含 `type == "owner"` 的用户，**直接视为拥有 `*`**，且**不可被 `-` 规则剥夺**。
 
-- 理由：避免「管理员误删 `+*` 规则把自己锁死」这类事故；与 [`RoleService`](../src/commonMain/kotlin/moe/lolosia/web/service/system/RoleService.kt) 里「拥有者组不可删除」的既有约定一致。
+- 理由：避免「管理员误删 `+*` 规则把自己锁死」这类事故；与 [`RoleService`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/system/RoleService.kt) 里「拥有者组不可删除」的既有约定一致。
 - 这条兜底**写死在判定的最前面**，不依赖数据（常量 `service.permission.OWNER`）。
 - 该组旧称 `super_admin`（P6 改名），`sys_role.type` 一并改过，代码里不再有 `super_admin` 字样。
 
 ### 3.6 默认权限注册表与组继承
 
-**注册表**是一份内嵌资源 [`src/commonMain/resources/permissions.yaml`](../src/commonMain/resources/permissions.yaml)，按 `sys_role.type` 登记内置组的展示名、父组与默认规则：
+**注册表**是一份内嵌资源 [`permissions.yaml`](../modules/server/src/commonMain/resources/permissions.yaml)，按 `sys_role.type` 登记内置组的展示名、父组与默认规则：
 
 ```yaml
 groups:
@@ -184,7 +184,7 @@ groups:
 
 **组继承**：
 
-- `extends` 在**启动时**由 [`syncRegistryGroups`](../src/commonMain/kotlin/moe/lolosia/web/service/permission/package.kt) 同步进 `sys_role.parent_id`（幂等，只改继承、不建组、不写规则）。
+- `extends` 在**启动时**由 [`syncRegistryGroups`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/permission/package.kt) 同步进 `sys_role.parent_id`（幂等，只改继承、不建组、不写规则）。
 - 运行时沿 `parent_id` 递归展开组链（用已访问组 id 收敛，成环不会死循环），链上每个组各自套用上面那张优先级表。
 - 内置链：`admin → user → guest`；`owner` / `guest` 是根基组。
 - 建组本身仍在 `sql/sys_role.sql`（id 被代码引用），注册表只按 `type` 认领已有组。

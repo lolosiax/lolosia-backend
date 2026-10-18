@@ -19,7 +19,7 @@
 | `media_asset.taken_at` | 时间聚类的点集（无拍摄时间的图不会进时间轴，正是「相机 Bug / 程序导出丢时间」的场景） |
 | `media_location_region` | **人工**圈画并命名的区域（见 §3） |
 
-读点走**精简投影实体** [`MediaGeoAssetEntity`](../src/commonMain/kotlin/moe/lolosia/web/database/model/MediaGeoAssetEntity.kt)：
+读点走**精简投影实体** [`MediaGeoAssetEntity`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/database/model/MediaGeoAssetEntity.kt)：
 只取 `id / path / name / kind / gps_lat / gps_lon / taken_at / rating / deleted` 九列，避免把 `metadata_json`（MEDIUMTEXT）整表拉回。
 两份快照（带 GPS / 带时间）在服务进程内做 **30s TTL 缓存**，前端缩放、切页不反复整表读。
 
@@ -35,8 +35,8 @@
 
 ## 4. 接口契约
 
-控制器 [`FootprintController`](../src/commonMain/kotlin/moe/lolosia/web/controller/FootprintController.kt)，前缀 `/api`。
-DTO 在 [`dto/FootprintDtos.kt`](../src/commonMain/kotlin/moe/lolosia/web/dto/FootprintDtos.kt)（控制器与服务共用，故独立成文件）。
+控制器 [`FootprintController`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/controller/FootprintController.kt)，前缀 `/api`。
+DTO 在 [`dto/FootprintDtos.kt`](../modules/protocol/src/commonMain/kotlin/moe/lolosia/web/dto/FootprintDtos.kt)（控制器与服务共用，故独立成文件）。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -52,7 +52,7 @@ DTO 在 [`dto/FootprintDtos.kt`](../src/commonMain/kotlin/moe/lolosia/web/dto/Fo
 
 ## 5. 聚类算法
 
-纯函数模块 [`FootprintClusterer`](../src/commonMain/kotlin/moe/lolosia/web/service/media/FootprintClusterer.kt)，无 IO。
+纯函数模块 [`FootprintClusterer`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/media/FootprintClusterer.kt)，无 IO。
 
 ### 5.1 空间（DBSCAN）
 

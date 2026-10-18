@@ -259,7 +259,8 @@ gradlew :modules:app-desktop:compileKotlinMingwX64 :modules:app-desktop:compileK
       默认输出 `build/ui-shot.png`；抓完可以直接用「看图」的方式读那张 PNG 核对布局。
     - `tools/ui-smoke/UiProbe.cs`：从截图里按填充色反查控件位置（`LocateButtons` / `ColumnStats`），用法见文件头注释。
 
-- 产物：`gradlew buildBinaries`（三目标一次性输出到 `build/bin`，命名 `<项目>-<平台>-<类型>-<版本>.<扩展名>`）；
+- 产物：`gradlew buildBinaries`（桌面三目标一次性输出到 `build/bin`，命名 `<项目>-<平台>-<类型>-<版本>.<扩展名>`；
+  环境具备时还会顺带构建 Android APK，APK 留在 `modules/app-android/build/outputs/apk/debug/`）；
   单一目标用 `gradlew :modules:app-desktop:linkReleaseExecutableMingwX64`（linuxArm64 / linuxX64 同理）；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
 - **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（图像编解码）与 UI 实验那四层（`build-sdl3.ps1` → `build-freetype.ps1` → `build-rmlui.ps1` → `modules/client/src/nativeCpp/build.ps1`，见 §7）
@@ -298,7 +299,7 @@ modules/core/src/commonMain/kotlin/moe/lolosia/web/
   api/package.kt                 对外 HTTP 客户端（Ktor Client；引擎按目标选 curl / winhttp），含 post / get / sse / ws / streamingRequest
   util/classpath/                Classpath 接口 / ClasspathExt / ClasspathHolder / FileStoreClasspath / package.kt
   util/fs/FileStore.kt           文件存储抽象
-  util/json/ koin/ ktor/         外部库类型扩展（JsonObject / Koin / Route·ApplicationCall）
+  util/json/JsonObjectExt.kt    JsonObject 扩展（overlay 等）
   util/log/                     Log / LogLevel / Logger（自研）
   util/platform/                Env.kt（envOrNull，expect）/ Termination（expect）
   util/time/Time.kt             nowLocal（仅日志）/ nowEpochMs

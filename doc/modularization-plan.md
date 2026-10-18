@@ -1,6 +1,6 @@
 # 多模块化与 Gradle 根整理方案（Phase 2）
 
-> 状态：**Stage 0–2 已实施**（分支 `dev/modularization`），**Stage 3 首版已跑通**（x86_64 模拟器上 Activity 打开现有 `probe.rml` 面板；KMP 模块的 `androidTarget()` 与实际业务接入仍待补）。实际偏差见 §3.2 与 §8。
+> 状态：**Stage 0–2 已实施**（分支 `dev/modularization`），**Stage 3 首版已跑通**（x86_64 模拟器与 arm64-v8a 真机上均由 Activity 打开现有 `probe.rml` 面板；KMP 模块的 `androidTarget()` 与实际业务接入仍待补）。实际偏差见 §3.2 与 §8。
 > 范围：只动 `backend/`。工作区根目录（`web/`、`ftp/`、`doc/`、根 `AGENTS.md` 等）**不动**。
 > 结论：采用 Phase 2 —— **Gradle 根只做聚合与发布，代码全部进 `backend/modules/`，根下不再保留 `src/`**。
 > 现行工程约定仍以 [AGENTS.md](../AGENTS.md) 为准；本方案落地后需要同步修订该文件的文件地图与命令清单。
@@ -621,8 +621,9 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
    加 Android 目标会连带补 `Image` / `XhrData` / `Classpath` 等一批 JVM actual，收益低于成本。
    当前的做法是 JNI 级宿主：`modules/client/src/nativeCpp/android/LolosiaUiAndroid.cpp` 直接驱动 `ll_ui_*`，
    数据模型初值与动作与桌面版 `UiProbeViewModel` 对齐。
-2. 原生库：`thirdparty/build-android.ps1 -Abi x86_64` 用 NDK r27c 交叉编译 SDL3（共享库）、FreeType / RmlUi（静态库）与
-   `liblolosia.so`，产物落 `thirdparty/androidJniLibs/x86_64/`。
+2. 原生库：`gradlew androidNative` 默认同时构建 x86_64 与 arm64-v8a（`-PandroidAbis=x86_64` 可只建一份），
+   底层用 NDK r27c 交叉编译 SDL3（共享库）、FreeType / RmlUi（静态库）与 `liblolosia.so`，
+   产物落 `thirdparty/androidJniLibs/<abi>/`。
 3. `modules/app-android` 是**独立 Gradle 构建**（自己的 `settings.gradle.kts`），因为 AGP 9 与 buildSrc 里的 KGP 2.4.20
    共享 classpath 时会创建不兼容的 `KotlinAndroidTarget`。构建命令：`gradlew -p modules/app-android assembleDebug`。
    两个方向的编排（单向、无回环）：
@@ -632,19 +633,21 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
 4. `MainActivity` 继承 SDL3 的 `SDLActivity`，加载 `libSDL3.so` + `liblolosia.so`；
    assets 直接引用 `modules/client/src/commonMain/resources`（`probe.rml` / `sample.png`），字体用系统 Noto CJK，
    图片解码走 `BitmapFactory` + `libjnigraphics`。
-5. 后续（真正 Stage 3 的业务目标）：
+5. 已完成：APK 同时支持 x86_64 与 arm64-v8a（`Medium_Phone_API_35` 模拟器与 `2509FPN0BC` / API 36 真机均验证）；
+   `buildBinaries` 已依赖 `androidApp`，但 APK 仍留在 `modules/app-android/build/outputs/apk/debug/`，尚未按命名表复制进 `build/bin`。
+6. 后续（真正 Stage 3 的业务目标）：
    - 给 `:protocol` / `:core` / `:codecs` / `:client` 增加 `androidTarget()`，补齐 `androidMain` actual；
    - 把 JNI 宿主里的 probe 数据模型换回复用 `:client` 的 `UiProbeViewModel`（JNI 回调 / 共享状态）；
    - `:app-android` 增加前台 Service + 本地 loopback API；
-   - `buildBinaries` 汇总 APK，并支持 arm64-v8a（x86_64 模拟器与 API 36 真机均已验证）。
-6. 首版验证：
+   - `buildBinaries` 把 APK 也收进 `build/bin`。
+7. 首版验证：
    ```powershell
-   powershell -ExecutionPolicy Bypass -File thirdparty/build-android.ps1 -Abi x86_64
+   gradlew androidNative
    gradlew -p modules/app-android assembleDebug
    adb install -r modules/app-android/build/outputs/apk/debug/lolosia-android-debug.apk
    adb shell am start -n moe.lolosia.android/.MainActivity
    ```
-   在 `Medium_Phone_API_35`（x86_64）上确认面板渲染、中文与图片正常、`+1` 后计数与「最近动作」更新。
+   已在 `Medium_Phone_API_35`（x86_64）与 `2509FPN0BC`（arm64-v8a / API 36）上确认面板渲染、中文与图片正常、`+1` 后计数与「最近动作」更新。
 
 ---
 
@@ -657,7 +660,9 @@ Stage 1 结束时，根目录已经满足「无 `src/`」，但 `:server` 仍是
 | 桌面 release 链接 | `gradlew :modules:app-desktop:linkReleaseExecutableMingwX64` | 产出 release exe，含 vite 产物 |
 | 本机调试运行 | `gradlew runDebug` | 工作目录为 `backend/`，能读到磁盘 `application.yaml` |
 | 本机 release 运行 | `gradlew runRelease` | 先跑 `vite build`，再启动 |
-| 全部二进制 | `gradlew buildBinaries` | `build/bin/` 下按命名表产出 exe / kexe；APK 由独立的 `modules/app-android` 构建产出 |
+| 全部二进制 | `gradlew buildBinaries` | `build/bin/` 下按命名表产出 exe / kexe；APK 由同一次构建里的 `androidApp` 产出，但留在 `modules/app-android/build/outputs/apk/debug/`，尚未收进 `build/bin` |
+| Android 原生库 | `gradlew androidNative` | 两个 ABI 的 `libSDL3.so` / `liblolosia.so`；缺工具链时告警跳过 |
+| Android APK | `gradlew androidApp` | 产出 debug APK，可安装到 x86_64 模拟器或 arm64 真机 |
 | 部署 | `gradlew deploy` | 根任务读取根 `platforms.json`，上传 `:app-desktop` 的 release 二进制 |
 | 子模块无 deploy | `gradlew :modules:server:tasks --all`、`:modules:app-desktop:tasks --all` | 不应出现 `deploy` / `deploy<Server>` |
 | classpath 资源 | 启动后访问 `static/home`、`/ui` 资源 | `:server` 与 `:client` 的资源都在内嵌 zip 中 |

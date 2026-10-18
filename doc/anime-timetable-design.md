@@ -39,7 +39,7 @@ GET http://www.comicat.org/rss.xml      →  <generator>MioBT RSS Generator</gen
 
 - **非官方、无 API 文档、可能变**：解析必须逐字段容错（缺字段不崩、整条跳过），并留 `source` 列以便**换源**（蜜柑 Mikan 有带字幕组过滤的订阅 RSS，是天然备选）。
 - **是 http 不是 https**：后端出站要允许明文 HTTP。
-- **Native 上没有 XML 库**：RSS 解析**手写**（参照 [`service/dav/DavXml.kt`](../src/commonMain/kotlin/moe/lolosia/web/service/dav/DavXml.kt) 的既有做法），只认本项目用到的这几个标签，不做通用 XML。
+- **Native 上没有 XML 库**：RSS 解析**手写**（参照 [`service/dav/DavXml.kt`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/dav/DavXml.kt) 的既有做法），只认本项目用到的这几个标签，不做通用 XML。
 - **它不给播出时间表**：周几/几点/封面靠 §2.2。
 
 ### 2.2 Bangumi API（番剧目录）
@@ -161,7 +161,7 @@ CREATE TABLE `anime_subscription` (
 ### 4.1 轮询 worker 时序
 
 `AnimeFeedService`（`@Service`，构造注入 `AppSettings` / `Database` / `SseService` 与各仓库，
-照 [`DdnsService`](../src/commonMain/kotlin/moe/lolosia/web/service/ddns/DdnsService.kt) 的
+照 [`DdnsService`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/ddns/DdnsService.kt) 的
 `while (isActive) { runCatching { … }; delay(interval) }` 写），一轮：
 
 1. `get<String>(rssUrl, rawResponse = true)` 拉 RSS 文本（带 UA、超时）。
@@ -242,7 +242,7 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
   延迟 + 随机抖动之后；后端过几分钟才另起一次请求取结果。三者时间上**相互错开**，特征上只是「一台普通
   服务器在定时拉一个公开 API」。
 
-**两段式时序**（[`AnimeMetaService.syncViaRelay`](../src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeMetaService.kt)）：
+**两段式时序**（[`AnimeMetaService.syncViaRelay`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeMetaService.kt)）：
 
 ```
 墙内后端 ──POST notify──▶ 中继：登记任务，立即 200（jobId/etaSeconds）         ← 此刻不出站
@@ -262,9 +262,9 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 **前 4 字节改回 gzip 魔数 `1f 8b 08 00`** 即可 `gunzip` → `msgpack` 还原。它只用于**抹掉「明文 JSON + Bangumi
 特征」**，**不是加密**（无密钥，别当安全机制）。`/healthz` 与 404 例外，保持明文便于探活。
 
-- 后端侧：`xhrRequest`（[`api/package.kt`](../src/commonMain/kotlin/moe/lolosia/web/api/package.kt)）拿原始字节后交给
-  `decodeXhrData`（[`util/xhrdata/`](../src/commonMain/kotlin/moe/lolosia/web/util/xhrdata/XhrData.kt)）；native 实现里 gzip 用
-  `platform.zlib`，msgpack 用 thirdparty 的 **msgpack-c** 静态库（`thirdparty/` + `src/nativeInterop/cinterop/msgpack.def`）。
+- 后端侧：`xhrRequest`（[`api/package.kt`](../modules/core/src/commonMain/kotlin/moe/lolosia/web/api/package.kt)）拿原始字节后交给
+  `decodeXhrData`（[`util/xhrdata/`](../modules/codecs/src/commonMain/kotlin/moe/lolosia/web/util/xhrdata/XhrData.kt)）；native 实现里 gzip 用
+  `platform.zlib`，msgpack 用 thirdparty 的 **msgpack-c** 静态库（`thirdparty/` + `modules/codecs/src/nativeInterop/cinterop/msgpack.def`）。
 - 中继侧：`relay.py` 用 `msgpack` 包做同样的编解码，因此**不再是纯标准库零依赖**（`pip install msgpack` 或
   `apt install python3-msgpack`）。
 
@@ -301,16 +301,16 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 - 中继新增两个接口（都走 §4.4 的鉴权）：`GET /anime/bangumi/covers/status`（走自定义通道，返回
   `data.{total, ready, ids}`）与 `GET /anime/bangumi/covers/{id}`（直接返回 JPEG 字节 —— 图片本身即不透明，
   不必再套通道）。
-- 后端 [`AnimeCoverService`](../src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeCoverService.kt) 周期分批回源
+- 后端 [`AnimeCoverService`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeCoverService.kt) 周期分批回源
   （间隔 / 批量见 §7 的 `coverPollMinutes` / `coverBatchSize`）；**直连模式**下直接从原始 URL 下载，无需中继。
 - `cover` 落地后就长成 `/res/resources/anime/cover/{bangumiId}.jpg`；目录同步再跑时
-  [`AnimeMetaService`](../src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeMetaService.kt) 的 upsert
+  [`AnimeMetaService`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/anime/AnimeMetaService.kt) 的 upsert
   **不再把它覆盖回原始 URL**（按 `isLocalAnimeCover` 判定）。
 - 存储走既有 `FileStore`（根 = `work`）：`resources/anime/cover/{id}.jpg` ⇒ URL `/res/resources/anime/cover/{id}.jpg`。
 - **大图不下发**：Bangumi 原图动辄上千像素、单张数 MB，直接塞进 62×86 的卡片会把浏览器拖卡（实测整页滚动掉到 ~13 FPS）。
   大图照旧留在 `work/resources/anime/cover/`，另由公开路由 `GET /res/anime-cover?id=&size=` 下发**缩略图**：
   首次访问时按档位解码缩放成有损 WebP，落盘 `<coverCacheRoot>/v1`（**复用文件管理器那套**
-  [`ThumbnailCache`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailCache.kt) + [`ThumbnailGenerator`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailGenerator.kt)，
+  [`ThumbnailCache`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailCache.kt) + [`ThumbnailGenerator`](../modules/codecs/src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailGenerator.kt)，
   档位 + SHA-1 分片 + 元数据），之后直接命中缓存。档位 / 质量 / 缓存根见 §7 的 `coverThumbSizes` / `coverThumbQuality` / `coverCacheRoot`。
   路由与 `/res/resources` 一样**公开**（`<img>` 带不了鉴权头），且封面本就是从公开图床回源的。
 - **缓存盘选择**：缩略图是**可再生**的写密集缓存，别放系统 SD 卡 —— tsp-1m 上 `/srv`（含 `work/`）就挂在 SD 卡上，
@@ -324,8 +324,8 @@ RSS 标题形态多样（`[LoliHouse] 魔法骑士雷阿斯 / Magic Knight Rayea
 
 **不新增推送通道**，直接用现成的三步握手与过滤广播：
 
-- 建流 / 登录补绑 / 前端封装见 [`SseService`](../src/commonMain/kotlin/moe/lolosia/web/service/SseService.kt)、
-  [`SseController`](../src/commonMain/kotlin/moe/lolosia/web/controller/SseController.kt)、[`api/sse.ts`](../../web/src/api/sse.ts)。
+- 建流 / 登录补绑 / 前端封装见 [`SseService`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/SseService.kt)、
+  [`SseController`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/controller/SseController.kt)、[`api/sse.ts`](../../web/src/api/sse.ts)。
 - `broadcast` 的 `allow` 回调收到**已绑定登录态**的连接所属 `userId` —— 正好表达「这个用户的关注命中了没」；
   未登录连接一律收不到（符合预期）。
 - 事件名固定 **`anime.release`**，`data`：
@@ -444,17 +444,17 @@ useEventBus().on('anime.release', (p: AnimeReleaseEvent) => {
 
 ```
 sql/anime_series.sql / anime_series_alias.sql / anime_release.sql / anime_subscription.sql
-src/commonMain/kotlin/moe/lolosia/web/
+modules/server/src/commonMain/kotlin/moe/lolosia/web/
   controller/AnimeController.kt
-  dto/AnimeDtos.kt
   database/model/AnimeSeriesEntity.kt / AnimeSeriesAliasEntity.kt / AnimeReleaseEntity.kt / AnimeSubscriptionEntity.kt
   database/repository/AnimeSeriesRepository.kt / AnimeSeriesAliasRepository.kt / AnimeReleaseRepository.kt / AnimeSubscriptionRepository.kt
   service/anime/AnimeFeedService.kt / AnimeMetaService.kt / AnimeCoverService.kt / AnimeSubscriptionService.kt
                / AnimeMatchAiService.kt / AnimeRssParser.kt / AnimeTitleMatcher.kt
   settings/AppSettings.kt（加 AnimeConfig）· resources/permissions.yaml（加三节点）· configuration/AppConfigure.kt（启三个服务）
-  util/xhrdata/XhrData.kt + nativeMain/…/util/xhrdata/XhrData.native.kt（自定义通道编解码，见 §4.4）
-  api/package.kt（加 xhrRequest：走通道请求外部服务）
-src/nativeInterop/cinterop/msgpack.def · thirdparty/（msgpack-c 静态库，见 §4.4）
+  api/XhrRequest.kt（xhrRequest：走通道请求外部服务）
+modules/protocol/src/commonMain/kotlin/moe/lolosia/web/dto/AnimeDtos.kt
+modules/codecs/src/commonMain/kotlin/moe/lolosia/web/util/xhrdata/XhrData.kt + nativeMain/…/XhrData.native.kt（自定义通道编解码，见 §4.4）
+modules/codecs/src/nativeInterop/cinterop/msgpack.def · thirdparty/（msgpack-c 静态库，见 §4.4）
 deploy/anime-relay/relay.py · anime-relay.service · relay.env.example（境外节点异步取数中继，见 §4.4）
 ```
 

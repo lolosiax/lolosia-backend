@@ -140,7 +140,7 @@ bmp 回 `UNKNOWN`；三种源图 → png（无损，逐像素 0 误差）/ webp 
 ### 冒烟（本机 mingw）
 
 ```powershell
-$exe = "build\bin\mingwX64\releaseExecutable\ktor-template.exe"
+$exe = "modules\app-desktop\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe"
 $p = Start-Process $exe -ArgumentList 7160 -PassThru
 Start-Sleep 4
 #> P0 收尾后**不再有免鉴权探针**：冒烟一律走真实链路（注册 → 登录 → 带 token）。
