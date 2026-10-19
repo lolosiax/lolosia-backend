@@ -551,3 +551,24 @@ user:   [图0][图1]…[图5]   ← 6 个图（低清档），与 i 对齐
 - **解析 / 映射**：`DeepSeekVisionProvider.toResult` 解析 `o/e/x`；`MediaAnalyzeService.tagRefs` 分别映射到
   `NAMESPACE_OBJECT` / `NAMESPACE_EVENT` / `NAMESPACE_ACTION`；`start()` 的维度日志同步加「物件 / 事件 / 动作」。
 - **代价**：每图输出多三项数组（多数为空 `[]`），输出 token 略增；这是「路径线索可检索」必须付的账。
+
+---
+
+## 16. 自定义命名空间标签（文件夹备注里的显式指令）
+
+**问题**：目录备注写「紫色头发角色标记为 `player:洛洛希雅`」后，模型确实照做了，但契约里没有
+承载自定义命名空间的字段，字符串只能塞进 `a`，最终落成 `attribute:player:洛洛希雅` —— 按 `player:` 检索不到。
+
+**修复**：输出契约新增 `t` 维度，**原样保留 `namespace:name`**：
+
+| 维度 | 短键 | 含义 | 命名空间 |
+| --- | --- | --- | --- |
+| 自定义标签 | `t` | 文件夹备注等上下文里**显式要求**的标签（如 `player:洛洛希雅`） | 由用户指定 |
+
+- **prompt**（`VisionPrompts.system`）：`t` 行说明「原样写成 `namespace:name`」；并明确「备注里以
+  `namespace:name` 形式给出的打标要求，画面满足其条件时必须原样放进 `t`，不要再放进 `a`」。
+- **解析 / 映射**：`DeepSeekVisionProvider.toResult` 用独立解析器校验形状与列宽（`namespace` ≤ 32、
+  `name` ≤ 128，不受固定维度 24 字上限约束）；`MediaAnalyzeService.tagRefs` 按**第一个冒号**拆成
+  `namespace` / `name` 后直接落库。
+- **修复历史数据**：tsp-1m 上的 `attribute:player:*` 已迁移为 `player:*`，旧标签软删（2026-10-19）。
+
