@@ -23,6 +23,7 @@ import platform.windows.*
 @Suppress("UNUSED_PARAMETER")
 internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? {
     val cpu = readCpu() ?: return null
+    val cores = readCpuCores()
     val mem = readMem() ?: return null
     val disk = readDisk()
     val net = readNet()
@@ -38,6 +39,8 @@ internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? 
         netOutBytes = net.second,
         diskReadBytes = io.first,
         diskWriteBytes = io.second,
+        cpuCoreBusyTicks = cores.first,
+        cpuCoreTotalTicks = cores.second,
     )
 }
 
@@ -54,6 +57,46 @@ private fun readCpu(): Pair<Long, Long>? = memScoped {
     val idleTicks = idle.ticks()
     val total = kernel.ticks() + user.ticks()
     (total - idleTicks).coerceAtLeast(0L) to total
+}
+
+/**
+ * 逐核 CPU：`NtQuerySystemInformation(SystemProcessorPerformanceInformation)` 每核返回
+ * idle / kernel / user 累计 100ns 节拍（kernel 含 idle），返回「(逐核繁忙节拍, 逐核总节拍)」。
+ *
+ * 缓冲按 `GetSystemInfo` 的逻辑处理器数 × [SYSTEM_PROCESSOR_INFO_SIZE] 申请；调用失败时返回空。
+ */
+private fun readCpuCores(): Pair<List<Long>, List<Long>> {
+    val module = LoadLibraryA("ntdll.dll") ?: return emptyList<Long>() to emptyList()
+    try {
+        val address = GetProcAddress(module, "NtQuerySystemInformation") ?: return emptyList<Long>() to emptyList()
+        val query = address.reinterpret<CFunction<(Int, COpaquePointer?, Int, CPointer<DWORDVar>?) -> Int>>()
+        return memScoped {
+            val info = alloc<SYSTEM_INFO>()
+            GetSystemInfo(info.ptr)
+            val count = info.dwNumberOfProcessors.toInt().coerceIn(1, MAX_CPU_CORES)
+            val size = count * SYSTEM_PROCESSOR_INFO_SIZE
+            val buffer = allocArray<ByteVar>(size)
+            val returned = alloc<DWORDVar>()
+            if (query(SYSTEM_PROCESSOR_PERFORMANCE_CLASS, buffer, size, returned.ptr) != 0) {
+                return@memScoped emptyList<Long>() to emptyList()
+            }
+            val raw = buffer.readBytes(size)
+            val busy = ArrayList<Long>(count)
+            val total = ArrayList<Long>(count)
+            for (index in 0 until count) {
+                val base = index * SYSTEM_PROCESSOR_INFO_SIZE
+                val idle = leU64(raw, base)
+                val kernel = leU64(raw, base + 8)
+                val user = leU64(raw, base + 16)
+                val all = kernel + user
+                busy += (all - idle).coerceAtLeast(0L)
+                total += all
+            }
+            busy to total
+        }
+    } finally {
+        FreeLibrary(module)
+    }
 }
 
 /** 内存：返回「(已用字节, 总字节)」。 */
@@ -208,3 +251,12 @@ private const val SYSTEM_PERFORMANCE_IO_READ: Int = 8
 
 /** `SYSTEM_PERFORMANCE_INFORMATION.IoWriteTransferCount` 偏移。 */
 private const val SYSTEM_PERFORMANCE_IO_WRITE: Int = 16
+
+/** `SystemProcessorPerformanceInformation` 类别号。 */
+private const val SYSTEM_PROCESSOR_PERFORMANCE_CLASS: Int = 8
+
+/** 单个 `SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION` 的固定字节数（x64，含尾部对齐）。 */
+private const val SYSTEM_PROCESSOR_INFO_SIZE: Int = 48
+
+/** 逐核缓冲的核数上限。 */
+private const val MAX_CPU_CORES: Int = 64

@@ -32,6 +32,7 @@ internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? 
     val diskstats = readText("/proc/diskstats") ?: return null
 
     val cpu = parseCpu(stat) ?: return null
+    val cores = parseCpuCores(stat)
     val mem = parseMem(meminfo) ?: return null
     val net = parseNetDev(netdev)
     val io = parseDiskStats(diskstats)
@@ -48,6 +49,8 @@ internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? 
         netOutBytes = net.second,
         diskReadBytes = io.first,
         diskWriteBytes = io.second,
+        cpuCoreBusyTicks = cores.first,
+        cpuCoreTotalTicks = cores.second,
     )
 }
 
@@ -135,6 +138,22 @@ private fun parseCpu(text: String): Pair<Long, Long>? {
     val total = fields.drop(1).sumOf { it.toLongOrNull() ?: 0L }
     val idle = (fields.getOrNull(4)?.toLongOrNull() ?: 0L) + (fields.getOrNull(5)?.toLongOrNull() ?: 0L)
     return (total - idle) to total
+}
+
+/** 逐核 CPU：`/proc/stat` 的 `cpu0…` 行，返回「(逐核繁忙节拍, 逐核总节拍)」。 */
+private fun parseCpuCores(text: String): Pair<List<Long>, List<Long>> {
+    val busy = mutableListOf<Long>()
+    val total = mutableListOf<Long>()
+    for (line in text.lineSequence()) {
+        if (!line.startsWith("cpu") || line.startsWith("cpu ")) continue
+        val fields = line.trim().split(' ').filter { it.isNotEmpty() }
+        if (fields.size < 5) continue
+        val all = fields.drop(1).sumOf { it.toLongOrNull() ?: 0L }
+        val idle = (fields.getOrNull(4)?.toLongOrNull() ?: 0L) + (fields.getOrNull(5)?.toLongOrNull() ?: 0L)
+        busy += (all - idle).coerceAtLeast(0L)
+        total += all
+    }
+    return busy to total
 }
 
 /** 内存：返回「(已用字节, 总字节)」。 */

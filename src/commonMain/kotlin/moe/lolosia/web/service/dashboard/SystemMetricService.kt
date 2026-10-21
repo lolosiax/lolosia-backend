@@ -41,6 +41,8 @@ class SystemMetricService(
     /** 最新一帧系统指标。 */
     data class SystemMetricsLatest(
         val cpu: Double = 0.0,
+        /** 逐核占用率（0~100），顺序与系统核编号一致；采集不到时为空。 */
+        val cpuCores: List<Double> = emptyList(),
         val mem: Double = 0.0,
         val memUsed: Long = 0L,
         val memTotal: Long = 0L,
@@ -53,6 +55,7 @@ class SystemMetricService(
     /** 内部可变的最新计算结果（环形缓冲之外的单值状态）。 */
     private data class Current(
         val cpu: Double = 0.0,
+        val cpuCores: List<Double> = emptyList(),
         val mem: Double = 0.0,
         val memUsed: Long = 0L,
         val memTotal: Long = 0L,
@@ -108,6 +111,7 @@ class SystemMetricService(
         val c = current
         SystemMetricsLatest(
             cpu = c.cpu,
+            cpuCores = c.cpuCores,
             mem = c.mem,
             memUsed = c.memUsed,
             memTotal = c.memTotal,
@@ -190,12 +194,27 @@ class SystemMetricService(
             }
             val mem = if (snap.memTotalBytes > 0L) snap.memUsedBytes.toDouble() / snap.memTotalBytes * 100.0 else 0.0
             val disk = if (snap.diskTotalBytes > 0L) snap.diskUsedBytes.toDouble() / snap.diskTotalBytes * 100.0 else 0.0
+            // 逐核占用：只在前后两帧核数一致时求差，否则沿用上一帧（首次采样还没有差值）
+            val cpuCores = if (prev != null && prev.cpuCoreTotalTicks.size == snap.cpuCoreTotalTicks.size) {
+                snap.cpuCoreTotalTicks.indices.map { index ->
+                    val coreTotal = snap.cpuCoreTotalTicks[index] - prev.cpuCoreTotalTicks[index]
+                    val coreBusy = snap.cpuCoreBusyTicks[index] - prev.cpuCoreBusyTicks[index]
+                    if (coreTotal > 0L) {
+                        (coreBusy.toDouble() / coreTotal * 100.0).coerceIn(0.0, 100.0)
+                    } else {
+                        current.cpuCores.getOrElse(index) { 0.0 }
+                    }
+                }
+            } else {
+                current.cpuCores
+            }
 
             last = snap
             lastAtMs = nowMs
             available = true
             current = Current(
                 cpu = cpu,
+                cpuCores = cpuCores,
                 mem = mem,
                 memUsed = snap.memUsedBytes,
                 memTotal = snap.memTotalBytes,
