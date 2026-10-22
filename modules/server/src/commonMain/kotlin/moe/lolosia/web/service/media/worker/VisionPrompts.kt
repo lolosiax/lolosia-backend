@@ -34,10 +34,12 @@ object VisionPrompts {
         if (objects) appendLine("- o：画面里的显著物件 / 道具 / 场景元素数组（如 [\"蛋糕\",\"气球\",\"黑板\",\"塔罗牌\"]）；没有则给空数组 []")
         if (events) appendLine("- e：这场合 / 活动是什么（如 [\"生日会\",\"合影留念\"]）；没有则给空数组 []")
         if (actions) appendLine("- x：画面里正在做的事 / 动作数组（如 [\"比耶\",\"切蛋糕\",\"举杯\"]）；没有则给空数组 []")
+        appendLine("- t：上下文（尤其文件夹备注）里**显式要求**的标签数组，原样写成 \"namespace:name\"（如 [\"player:洛洛希雅\"]）；没有则给空数组 []")
         appendLine()
         appendLine("每张图前会附上该图的路径与已有信息（已有标签 / 已有描述 / 文件夹备注），请当作参考：")
         appendLine("- 已有标签若仍然成立就继续输出；发现遗漏可补充；确实不成立可不再输出（不要凭空否定）。")
         appendLine("- 已有描述只作改写基础，让它更准更简洁，不必照抄。")
+        appendLine("- 文件夹备注里以 `namespace:name` 形式给出的打标要求，画面满足其条件时必须原样放进 t，不要再放进 a。")
         if (events) {
             appendLine("- 路径与文件夹名是判断「场合 / 活动」（e）的**重要依据**：如路径含「生日会」就应给出 e:[\"生日会\"]。")
             appendLine("  也可以结合画面里正在发生的事（望文生义），给路径里没明说、但画面明确支持的 e（如举杯切蛋糕 → 生日会）。")
@@ -90,6 +92,7 @@ object VisionPrompts {
         if (objects) append(",\"o\":[\"路灯\",\"栏杆\"]")
         if (events) append(",\"e\":[\"夜景街拍\"]")
         if (actions) append(",\"x\":[\"比耶\"]")
+        append(",\"t\":[]")
         append("}]")
     }
 }

@@ -31,6 +31,8 @@ object DashboardController {
         val available: Boolean = false,
         /** CPU 占用率（0~100）。 */
         val cpu: Double = 0.0,
+        /** 逐核 CPU 占用率（0~100）；采集不到时为空。 */
+        val cpuCores: List<Double> = emptyList(),
         /** 内存占用率（0~100）。 */
         val mem: Double = 0.0,
         val memUsed: Long = 0L,
@@ -129,6 +131,7 @@ object DashboardController {
         return DashboardSystemDto(
             available = true,
             cpu = latest.cpu,
+            cpuCores = latest.cpuCores,
             mem = latest.mem,
             memUsed = latest.memUsed,
             memTotal = latest.memTotal,

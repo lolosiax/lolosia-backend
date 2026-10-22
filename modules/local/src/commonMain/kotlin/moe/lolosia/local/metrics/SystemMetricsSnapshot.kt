@@ -32,4 +32,8 @@ data class SystemMetricsSnapshot(
     val diskReadBytes: Long,
     /** 累计磁盘写字节。 */
     val diskWriteBytes: Long,
+    /** 逐核累计繁忙节拍（顺序与系统核编号一致）；采集不到时为空。 */
+    val cpuCoreBusyTicks: List<Long> = emptyList(),
+    /** 逐核累计总节拍；采集不到时为空。 */
+    val cpuCoreTotalTicks: List<Long> = emptyList(),
 )

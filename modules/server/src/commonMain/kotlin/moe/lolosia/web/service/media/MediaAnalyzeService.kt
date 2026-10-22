@@ -461,6 +461,13 @@ class MediaAnalyzeService(
         if (a.objects) result.objects.forEach { out.add(NAMESPACE_OBJECT to it) }
         if (a.events) result.events.forEach { out.add(NAMESPACE_EVENT to it) }
         if (a.actions) result.actions.forEach { out.add(NAMESPACE_ACTION to it) }
+        // 用户备注里显式指定的命名空间（如 player:洛洛希雅）：原样拆分，不再套固定维度
+        for (raw in result.customTags) {
+            val parts = raw.split(':', limit = 2)
+            if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                out.add(parts[0].trim() to parts[1].trim())
+            }
+        }
         return out.distinct()
     }
 

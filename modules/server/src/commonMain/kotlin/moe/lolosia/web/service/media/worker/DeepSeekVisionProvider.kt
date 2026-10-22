@@ -86,6 +86,7 @@ class DeepSeekVisionProvider(
         objects = obj["o"].stringList(),
         events = obj["e"].stringList(),
         actions = obj["x"].stringList(),
+        customTags = obj["t"].tagRefList(),
     )
 
     private fun asBoolean(text: String): Boolean? = when (text.lowercase()) {
@@ -121,6 +122,28 @@ private fun JsonElement?.stringList(): List<String> {
     val array = this as? JsonArray ?: return emptyList()
     return array.mapNotNull { it.primitiveText() }
         .filter { it.length <= 24 }
+        .distinct()
+        .take(12)
+}
+
+/**
+ * 自定义标签数组：只保留 `namespace:name` 形状，长度按 `media_tag` 的列宽拦下。
+ *
+ * 命名空间与名字由**用户备注**指定，不能用 [stringList] 的 24 字上限 —— 那个是给固定维度
+ * 标签名设的。这里与 `media_tag` 对齐：`namespace` ≤ 32、`name` ≤ 128。
+ */
+private fun JsonElement?.tagRefList(): List<String> {
+    val array = this as? JsonArray ?: return emptyList()
+    return array.mapNotNull { it.primitiveText() }
+        .mapNotNull { text ->
+            val at = text.indexOf(':')
+            if (at <= 0) return@mapNotNull null
+            val namespace = text.substring(0, at).trim()
+            val name = text.substring(at + 1).trim()
+            if (namespace.isEmpty() || name.isEmpty()) return@mapNotNull null
+            if (namespace.length > 32 || name.length > 128) return@mapNotNull null
+            "$namespace:$name"
+        }
         .distinct()
         .take(12)
 }

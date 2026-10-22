@@ -62,6 +62,12 @@ interface TaggingProvider {
         val events: List<String> = emptyList(),
         /** 画面里正在做的事 / 动作（如 `比耶`、`切蛋糕`）。 */
         val actions: List<String> = emptyList(),
+        /**
+         * 上下文里**显式要求**的自定义标签，原样保留 `namespace:name`（如 `player:洛洛希雅`）。
+         *
+         * 来源是文件夹备注这类人工指令：命名空间由用户指定，不能用固定维度（`attribute` 等）承载。
+         */
+        val customTags: List<String> = emptyList(),
     )
 
     /** 一次分析的产物：逐图判定 + 本次 token 用量（来自响应 `usage`）。 */
