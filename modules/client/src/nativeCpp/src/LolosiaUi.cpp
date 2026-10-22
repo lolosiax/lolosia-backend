@@ -70,6 +70,8 @@ struct UiState {
     int safe_right;
     int safe_bottom;
     bool safe_area_dirty;
+    /** 上一帧因拿不到 swapchain 被跳过；恢复绘制时要记一笔，也用来做快速重试。 */
+    bool frame_skipped;
     char error[512];
 };
 
@@ -844,7 +846,28 @@ int32_t ll_ui_frame(void) {
     if (!keep_running) return 1;
 
     g_state.context->Update();
-    Backend::BeginFrame();
+    // 取不到 swapchain（切后台后 surface 正在重建、最小化）时这一帧没有可用的命令缓冲：
+    // 继续 Render/Present 会让渲染接口拿上一帧已提交并回收的裸指针去调 SDL/Vulkan，驱动直接崩。
+    if (!Backend::BeginFrame()) {
+        if (!g_state.frame_skipped) {
+            g_state.frame_skipped = true;
+            ll_log_info("本帧没有 swapchain，暂停绘制并重试");
+        }
+        // 不能就这么等下去：power_save 的等待上限是 10 秒，恢复后画面会晚很久才回来。
+        // 最小化 / 隐藏时不做快速重试 —— 那种场景没有“马上就好”的预期，重试只会空转。
+        if (g_state.window != nullptr) {
+            const SDL_WindowFlags flags = SDL_GetWindowFlags(g_state.window);
+            if ((flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) == 0) {
+                SDL_Delay(16);
+                ll_ui_wake();
+            }
+        }
+        return 0;
+    }
+    if (g_state.frame_skipped) {
+        g_state.frame_skipped = false;
+        ll_log_info("重新拿到 swapchain，恢复绘制");
+    }
     g_state.context->Render();
     Backend::PresentFrame();
     return 0;

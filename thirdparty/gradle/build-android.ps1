@@ -112,12 +112,61 @@ $freetypeInc = Join-Path $includeRoot 'freetype2'
 # 光标与选区几何是相对内容盒原点生成的，上游却用父元素 padding 盒的绝对偏移去平移，
 # 于是带内边距的输入框里光标贴着边框、和文字上下错开。改成内容盒偏移后，
 # 单行输入框只要靠 padding 把文字行挤到中间就垂直居中了，光标高度仍是字体行高。
+#
+# 第二组补丁（SDL_GPU 后端）：BeginFrame 在拿不到 swapchain 时（最小化 / Android surface
+# 正在重建）只做 cancel 就返回，既不刷新渲染接口缓存的命令缓冲与 swapchain 纹理，也不通知
+# 调用方。调用方随后照常 Render + Present，于是拿上一帧已提交并回收的裸指针去调
+# SDL_BeginGPURenderPass，Vulkan 驱动在 vkCmdPipelineBarrier 上崩溃（前后台切换必现）。
+# 改成：BeginFrame 返回 bool、失败时把命令缓冲置空；PresentFrame 在空缓冲时直接跳过；
+# 宿主据此跳过本帧的 Render。
 $rmluiPatches = @(
     @{
         Note = 'WidgetTextInput：光标与选区按内容盒定位'
         File = 'Source/Core/Elements/WidgetTextInput.cpp'
         Old  = "`tVector2f text_translation = parent->GetAbsoluteOffset() - Vector2f(parent->GetScrollLeft(), parent->GetScrollTop());"
         New  = "`t// 光标与选区的顶点都是相对内容盒原点算的，这里必须带上边框与内边距的偏移，`n`t// 否则带 padding 的输入框里光标会贴着边框、与文字错开。`n`tVector2f text_translation = parent->GetAbsoluteOffset(BoxArea::Content) - Vector2f(parent->GetScrollLeft(), parent->GetScrollTop());"
+    },
+    @{
+        Note = 'SDL_GPU 后端：BeginFrame 报告失败'
+        File = 'Backends/RmlUi_Backend.h'
+        Old  = 'void BeginFrame();'
+        New  = "// 返回 false 表示这一帧拿不到 swapchain（最小化，或 Android surface 正在重建）：`n// 此时没有可用的命令缓冲，调用方必须跳过 Render() 与 PresentFrame()。`nbool BeginFrame();"
+    },
+    @{
+        Note = 'SDL_GPU 后端：BeginFrame 返回 bool'
+        File = 'Backends/RmlUi_Backend_SDL_GPU.cpp'
+        Old  = "void Backend::BeginFrame()`n{"
+        New  = "bool Backend::BeginFrame()`n{"
+    },
+    @{
+        Note = 'SDL_GPU 后端：交换链纹理局部变量初始化'
+        File = 'Backends/RmlUi_Backend_SDL_GPU.cpp'
+        Old  = "`tSDL_GPUTexture* swapchain_texture;`n`tuint32_t width;`n`tuint32_t height;"
+        New  = "`tSDL_GPUTexture* swapchain_texture = nullptr;`n`tuint32_t width = 0;`n`tuint32_t height = 0;"
+    },
+    @{
+        Note = 'SDL_GPU 后端：取交换链失败时回收命令缓冲'
+        File = 'Backends/RmlUi_Backend_SDL_GPU.cpp'
+        Old  = "`t`tRml::Log::Message(Rml::Log::LT_ERROR, `"Failed to acquire command buffer: %s`", SDL_GetError());`n`t`treturn;"
+        New  = "`t`tRml::Log::Message(Rml::Log::LT_ERROR, `"Failed to acquire command buffer: %s`", SDL_GetError());`n`t`treturn false;"
+    },
+    @{
+        Note = 'SDL_GPU 后端：交换链不可用时回收命令缓冲'
+        File = 'Backends/RmlUi_Backend_SDL_GPU.cpp'
+        Old  = "`t`tRml::Log::Message(Rml::Log::LT_ERROR, `"Failed to acquire swapchain texture: %s`", SDL_GetError());`n`t`treturn;"
+        New  = "`t`tRml::Log::Message(Rml::Log::LT_ERROR, `"Failed to acquire swapchain texture: %s`", SDL_GetError());`n`t`t// 已取的命令缓冲既不能提交也不能留着：cancel 后置空，PresentFrame 据此跳过本帧。`n`t`tSDL_CancelGPUCommandBuffer(data->command_buffer);`n`t`tdata->command_buffer = nullptr;`n`t`treturn false;"
+    },
+    @{
+        Note = 'SDL_GPU 后端：无交换链（最小化 / surface 重建）不算错误但本帧无内容'
+        File = 'Backends/RmlUi_Backend_SDL_GPU.cpp'
+        Old  = "`t`t// Not an error. Happens on minimize`n`t`tSDL_CancelGPUCommandBuffer(data->command_buffer);`n`t`treturn;"
+        New  = "`t`t// Not an error. Happens on minimize, and while the Android surface is being recreated`n`t`tSDL_CancelGPUCommandBuffer(data->command_buffer);`n`t`tdata->command_buffer = nullptr;`n`t`treturn false;"
+    },
+    @{
+        Note = 'SDL_GPU 后端：PresentFrame 跳过无效帧'
+        File = 'Backends/RmlUi_Backend_SDL_GPU.cpp'
+        Old  = "`tdata->render_interface.BeginFrame(data->command_buffer, swapchain_texture, width, height);`n}`n`nvoid Backend::PresentFrame()`n{`n`tRMLUI_ASSERT(data);`n`tdata->render_interface.EndFrame();"
+        New  = "`tdata->render_interface.BeginFrame(data->command_buffer, swapchain_texture, width, height);`n`treturn true;`n}`n`nvoid Backend::PresentFrame()`n{`n`tRMLUI_ASSERT(data);`n`t// BeginFrame 没拿到 swapchain 时 command_buffer 已经置空：这一帧不能 EndFrame ——`n`t// 渲染接口里留着的还是上一帧那套已提交/已回收的裸指针，再让驱动去记账就会崩；`n`t// 也没有可提交的内容。`n`tif (!data->command_buffer)`n`t`treturn;`n`n`tdata->render_interface.EndFrame();"
     }
 )
 foreach ($patch in $rmluiPatches) {
