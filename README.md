@@ -1,4 +1,15 @@
+<img src=".github/assets/logo.png" width="96" align="right" alt="洛洛希雅" />
+
 # lolosia-backend
+
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Kotlin/Native](https://img.shields.io/badge/Kotlin%2FNative-3%20targets-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/docs/native-overview.html)
+[![Ktor](https://img.shields.io/badge/Ktor-3.4.2-087CFA?logo=ktor&logoColor=white)](https://ktor.io)
+[![Koin](https://img.shields.io/badge/Koin-4.2.2-F9A03C)](https://insert-koin.io)
+[![Gradle](https://img.shields.io/badge/Gradle-9.5.1-02303A?logo=gradle&logoColor=white)](https://gradle.org)
+[![sqlx4k](https://img.shields.io/badge/sqlx4k-1.14.0-4B5563)](https://github.com/smyrgeorge/sqlx4k)
+[![MariaDB](https://img.shields.io/badge/MariaDB-MySQL-003545?logo=mariadb&logoColor=white)](https://mariadb.org)
+[![License](https://img.shields.io/badge/License-MIT-3DA639)](LICENSE)
 
 洛洛希雅（Lolosia）的小网站后端：**Kotlin/Native 单文件服务端** —— 前端产物、SQL 脚本与默认配置都嵌在可执行文件里，部署时只有一个二进制。
 
