@@ -56,6 +56,14 @@ struct UiState {
     bool debugger;
     bool created;
     uint32_t wake_event_type;
+    /** 后端建好的窗口；取安全区与像素尺寸用，随 Backend::Shutdown 一起失效。 */
+    SDL_Window* window;
+    /** 上一次套到文档上的安全区边距（像素）；换成新文档时置 dirty 重套。 */
+    int safe_left;
+    int safe_top;
+    int safe_right;
+    int safe_bottom;
+    bool safe_area_dirty;
     char error[512];
 };
 
@@ -159,6 +167,69 @@ static void logToSystem(Rml::Log::Type level, const char* message) {
 void ll_log_info(const char* message) { logToSystem(Rml::Log::LT_INFO, message); }
 void ll_log_error(const char* message) { logToSystem(Rml::Log::LT_ERROR, message); }
 
+/**
+ * 把系统栏与刘海占掉的范围从文档根盒里让出来。
+ *
+ * Android 15 起窗口强制 edge-to-edge（本项目 targetSdk 36），状态栏、刘海、导航栏都盖在
+ * 应用画面上：不让位的话标题会顶进状态栏，底部 tabbar 会被导航栏压住。
+ * SDL 的 Android 后端把 SDLActivity.onApplyWindowInsets 收到的边距存成「安全区」，
+ * 这里换算成四边宽度套在文档根盒的**边框**上。为什么不是 padding：
+ * 绝对定位子元素（.tabbar / .content）的包含块是父级的 padding box，padding 推不动它们；
+ * 而边框既能把 padding box 缩进去，又能在边框区域上色 —— RmlUi 的背景不画到边框区，
+ * 所以边框颜色要跟着页面底色走，系统栏那一条才不会露出清屏色（见下面的赋值）。
+ *
+ * 桌面 / 无系统栏时四边为 0，直接把边框宽度清零，行为与不带安全区的版本一致。
+ */
+void applySafeArea() {
+    if (g_state.window == nullptr || g_state.document == nullptr) return;
+
+    SDL_Rect safe = {};
+    if (!SDL_GetWindowSafeArea(g_state.window, &safe)) return;
+
+    int width = 0;
+    int height = 0;
+    SDL_GetWindowSize(g_state.window, &width, &height);
+
+    // 安全区矩形是「窗口内可安全使用的区域」，四边差值就是系统栏 / 刘海的厚度
+    const int left = safe.x;
+    const int top = safe.y;
+    const int right = width - (safe.x + safe.w);
+    const int bottom = height - (safe.y + safe.h);
+
+    if (!g_state.safe_area_dirty &&
+        left == g_state.safe_left && top == g_state.safe_top &&
+        right == g_state.safe_right && bottom == g_state.safe_bottom) {
+        return;
+    }
+    g_state.safe_area_dirty = false;
+    g_state.safe_left = left;
+    g_state.safe_top = top;
+    g_state.safe_right = right;
+    g_state.safe_bottom = bottom;
+
+    char value[32];
+    g_state.document->SetProperty("box-sizing", "border-box");
+    snprintf(value, sizeof(value), "%dpx", top);
+    g_state.document->SetProperty("border-top-width", value);
+    snprintf(value, sizeof(value), "%dpx", right);
+    g_state.document->SetProperty("border-right-width", value);
+    snprintf(value, sizeof(value), "%dpx", bottom);
+    g_state.document->SetProperty("border-bottom-width", value);
+    snprintf(value, sizeof(value), "%dpx", left);
+    g_state.document->SetProperty("border-left-width", value);
+    // 边框是要露出来的：RmlUi 的背景不画到边框区域，透明边框会露出清屏色（黑），
+    // 所以边框取页面自己的底色，系统栏那一条看起来就是页面的延续。
+    const Rml::Colourb background = g_state.document->GetComputedValues().background_color();
+    char color[32];
+    if (background.alpha == 255) {
+        snprintf(color, sizeof(color), "#%02X%02X%02X", background.red, background.green, background.blue);
+    } else {
+        snprintf(color, sizeof(color), "rgba(%d, %d, %d, %d)",
+            (int)background.red, (int)background.green, (int)background.blue, (int)background.alpha);
+    }
+    g_state.document->SetProperty("border-color", color);
+}
+
 int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     if (g_state.created) {
         setError("ll_ui 已初始化，同一进程只允许一个窗口");
@@ -172,6 +243,12 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     g_state.wake_event_type = 0;
     g_state.document = nullptr;
     g_state.context = nullptr;
+    g_state.window = nullptr;
+    g_state.safe_left = -1;
+    g_state.safe_top = -1;
+    g_state.safe_right = -1;
+    g_state.safe_bottom = -1;
+    g_state.safe_area_dirty = true;
     g_state.created = true;
 
     // 后端自己开窗、建 GPU 设备、接管输入，并把 SDL 事件翻译成 RmlUi 输入
@@ -230,6 +307,7 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
         int window_count = 0;
         SDL_Window** windows = SDL_GetWindows(&window_count);
         if (windows != nullptr && window_count > 0) window = windows[0];
+        g_state.window = window;
 
         int pixel_width = 0;
         int pixel_height = 0;
@@ -451,6 +529,9 @@ int32_t ll_ui_load_document(const char* rml_utf8) {
         return -1;
     }
     g_state.document->Show();
+    // 新文档是一张新样式表算出来的盒子，边距要重新套一遍
+    g_state.safe_area_dirty = true;
+    applySafeArea();
     clearError();
     return 0;
 }
@@ -477,6 +558,9 @@ int32_t ll_ui_enable_debugger(void) {
 
 int32_t ll_ui_frame(void) {
     if (g_state.context == nullptr) return -1;
+
+    // 系统栏 / 刘海随时可能变（转屏、切换手势导航、外接显示器），每帧校验一次，变了才动文档
+    applySafeArea();
 
     // power_save：没有事件、也不需要动画时阻塞等待（最多等下一帧更新），不空转烧 CPU
     if (!Backend::ProcessEvents(g_state.context, &onKeyDown, true)) return 1;
@@ -517,6 +601,7 @@ void ll_ui_destroy(void) {
         g_state.context = nullptr;
     }
     g_state.document = nullptr;
+    g_state.window = nullptr;
     g_state.model = Rml::DataModelConstructor();
     if (g_state.created) {
         Rml::Shutdown();
