@@ -8,6 +8,8 @@
 
 > 项目风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 冒烟 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
 > JVM → Kotlin/Native 的迁移详设与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)。
+> 本项目 MIT 许可，构建进产物的第三方组件（zlib / libpng / libjpeg-turbo / libwebp / giflib / msgpack-c / SDL3 / FreeType / RmlUi）
+> 及其许可声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ## ✨ 特性
 
