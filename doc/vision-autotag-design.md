@@ -2,7 +2,7 @@
 
 > 状态：**V1–V4 已实现并线上端到端验证**（V5 角色参考库待做）。实现落点与偏差见 §12；原型指标（构图 / 有效性 / 题材 / 属性 / 一句话描述）已可跑。
 > 目标目录示例：`影集/娃照/20260930-CGF`（文件管理器路由 `…/home/files/…`，取图走 `GET /api/files/raw?path=…&exp=…&sig=…`）。
-> 依赖：复用刚落地的 [util/llm](../src/commonMain/kotlin/moe/lolosia/web/util/llm/)（原生 `ChatClient`）+ [media-index-design.md](./media-index-design.md) 已实现的本地索引。
+> 依赖：复用刚落地的 [util/llm](../modules/server/src/commonMain/kotlin/moe/lolosia/web/util/llm/)（原生 `ChatClient`）+ [media-index-design.md](./media-index-design.md) 已实现的本地索引。
 
 ---
 

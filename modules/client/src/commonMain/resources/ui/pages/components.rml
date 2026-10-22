@@ -1,0 +1,137 @@
+<rml>
+<head>
+	<link type="text/css" href="/ui/theme/theme.rcss"/>
+	<link type="text/css" href="/ui/theme/components.rcss"/>
+</head>
+<body data-model="main">
+	<div class="screen scroll">
+		<div class="navbar">
+			<div class="back" data-event-click="action('back')">‹</div>
+			<div class="nav-title">控件库</div>
+		</div>
+
+		<div class="section-title">按钮</div>
+		<div class="card">
+			<button>主要按钮</button>
+			<button class="secondary">次要按钮</button>
+			<button class="ghost">幽灵按钮</button>
+			<div class="spacer-8"></div>
+			<button class="danger small">危险操作</button>
+			<button class="small" disabled>禁用状态</button>
+		</div>
+
+		<div class="section-title">徽标与标签</div>
+		<div class="card">
+			<span class="badge">普通</span>
+			<span class="badge success">成功</span>
+			<span class="badge warning">警告</span>
+			<span class="badge danger">错误</span>
+			<div class="spacer-16"></div>
+			<span class="chip active">番剧</span>
+			<span class="chip">电影</span>
+			<span class="chip">收藏</span>
+		</div>
+
+		<div class="section-title">表单</div>
+		<div class="card">
+			<div class="field">
+				<div class="label">文本输入</div>
+				<input type="text" class="text" value="洛洛希雅"/>
+			</div>
+			<div class="field">
+				<div class="label">密码输入</div>
+				<input type="password" class="password" value="hunter2"/>
+			</div>
+			<div class="field">
+				<div class="label">多行文本</div>
+				<textarea class="text">第一行
+第二行</textarea>
+			</div>
+			<div class="field">
+				<div class="label">下拉选择</div>
+				<select>
+					<option>普通用户</option>
+					<option>管理员</option>
+					<option>访客</option>
+				</select>
+			</div>
+			<div class="field">
+				<div class="label">滑块</div>
+				<input type="range" class="range" value="60"/>
+			</div>
+			<div class="row">
+				<div class="checkbox checked">✓</div>
+				<span class="muted" style="width:auto;margin-left:10dp;">自绘复选框</span>
+				<div class="grow"></div>
+				<div class="switch on"><div class="knob"></div></div>
+			</div>
+			<div class="spacer-16"></div>
+			<div class="search-bar">搜索番剧、用户或文件</div>
+		</div>
+
+		<div class="section-title">分段与标签页</div>
+		<div class="card">
+			<div class="segmented">
+				<div class="segment active">全部</div>
+				<div class="segment">已关注</div>
+				<div class="segment">未看</div>
+			</div>
+			<div class="spacer-16"></div>
+			<div class="tabs">
+				<div class="tab-item active">概览</div>
+				<div class="tab-item">详情</div>
+				<div class="tab-item">评论</div>
+			</div>
+		</div>
+
+		<div class="section-title">进度与加载</div>
+		<div class="card">
+			<div class="progress"><div class="bar" style="width:64%;"></div></div>
+			<div class="spacer-16"></div>
+			<div class="row">
+				<div class="spinner"></div>
+				<span class="muted" style="width:auto;margin-left:10dp;">正在加载…</span>
+			</div>
+			<div class="spacer-16"></div>
+			<div class="skeleton"></div>
+			<div class="skeleton short"></div>
+		</div>
+
+		<div class="section-title">对话框 / 提示 / 底部面板</div>
+		<div class="dialog">
+			<div class="dialog-title">删除这条记录？</div>
+			<div class="muted">删除后无法恢复，请确认后继续。</div>
+			<div class="dialog-actions">
+				<button class="ghost small">取消</button>
+				<button class="danger small">删除</button>
+			</div>
+		</div>
+		<div class="spacer-16"></div>
+		<div class="toast">已保存到本地</div>
+		<div class="spacer-16"></div>
+		<div class="bottom-sheet">
+			<div class="sheet-handle"></div>
+			<div class="card-title">选择操作</div>
+			<button class="secondary block">下载到本地</button>
+			<div class="spacer-8"></div>
+			<button class="secondary block">复制链接</button>
+		</div>
+
+		<div class="section-title">列表行</div>
+		<div class="card">
+			<div class="info-row">
+				<span class="info-label">番剧</span>
+				<span class="info-value">列女战纪：女娲石记</span>
+			</div>
+			<div class="info-row">
+				<span class="info-label">状态</span>
+				<span class="info-value">放送中</span>
+			</div>
+			<div class="info-row">
+				<span class="info-label">操作</span>
+				<span class="info-value">→</span>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>

@@ -3,6 +3,7 @@ kotlin = "2.4.20"
 ksp = "2.3.12"
 koin = "4.2.2"
 kotlinx-serialization = "1.11.0"
+kotlinx-coroutines = "1.10.2"
 kotlinx-datetime = "0.8.0"
 okio = "3.9.1"
 kaml = "0.97.0"
@@ -20,6 +21,7 @@ koin-ktor = { module = "io.insert-koin:koin-ktor", version.ref = "koin" }
 # 序列化 / 时间 / IO
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 # YAML：kotlinx.serialization 官方不带 YAML，KAML 是带 native 产物的社区实现（磁盘配置用）
 kaml = { module = "com.charleskorn.kaml:kaml", version.ref = "kaml" }

@@ -1,0 +1,49 @@
+<rml>
+<head>
+	<link type="text/css" href="/ui/theme/theme.rcss"/>
+</head>
+<body data-model="main">
+	<div class="screen scroll tabbed">
+		<div class="avatar" data-if="hasAvatarText">{{ avatarInitial }}</div>
+		<img class="avatar-img" data-if="hasAvatarImage" src="{{ avatarPath }}"/>
+		<p class="profile-name">{{ displayName }}</p>
+		<p class="profile-role">{{ roleName }}</p>
+
+		<div class="card">
+			<div class="info-row">
+				<span class="info-label">姓名</span>
+				<span class="info-value">{{ realName }}</span>
+			</div>
+			<div class="info-row">
+				<span class="info-label">邮箱</span>
+				<span class="info-value">{{ email }}</span>
+			</div>
+			<div class="info-row">
+				<span class="info-label">手机</span>
+				<span class="info-value">{{ phone }}</span>
+			</div>
+		</div>
+
+		<div class="card">
+			<p class="card-title">本地服务</p>
+			<p class="muted">{{ localStatus }}</p>
+			<div class="metric-row">
+				<span class="metric">{{ localCpu }}</span>
+				<span class="metric">{{ localMem }}</span>
+				<span class="metric">{{ localDisk }}</span>
+			</div>
+		</div>
+
+		<button class="secondary block" data-event-click="action('refresh')">刷新资料</button>
+		<div class="spacer-8"></div>
+		<button class="secondary block" data-event-click="action('open-components')">控件库</button>
+		<div class="spacer-16"></div>
+		<button class="ghost block" data-event-click="action('logout')">退出登录</button>
+	</div>
+
+	<div class="tabbar">
+		<div class="tab" data-class-active="tabHome" data-event-click="action('tab-home')">番组</div>
+		<div class="tab" data-class-active="tabProfile" data-event-click="action('tab-profile')">我的</div>
+	</div>
+</body>
+</rml>

@@ -17,7 +17,7 @@
 | 数据库名 | `ktor-template` | `lolosia-backend` |
 
 部分文件里仍有旧名残留，均来自模板且不影响运行，**暂不改**（改了会与上游冲突）：
-`src/commonMain/kotlin/moe/lolosia/web/Main.kt` 的 KDoc、`src/commonMain/resources/static/home/index.html` 的标题、
+`modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt` 的 KDoc、`modules/server/src/commonMain/resources/static/home/index.html` 的标题、
 `sql/*.sql` 顶部的导出注释头、`AppSettings.DatasourceConfig.url` 的默认库名。
 
 ## 2. WebDAV
@@ -219,7 +219,8 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 
 | 分支 | 提交 | 形态 | 上游 | 说明 |
 | --- | --- | --- | --- | --- |
-| `native` | `cf1df5e` | **Kotlin/Native（KMP）** | `origin/native` | **当前主线、最新版**；`doc/` 五个笔记都在这条线上 |
+| `native` | `cf1df5e` | **Kotlin/Native（KMP）** | `origin/native` | **主线**；`doc/` 下的方案与笔记都在这条线上 |
+| `dev/modularization` | `069b200` | **KMP 多模块（Stage 0–3）** | `origin/dev/modularization` | 当前阶段分支：拆 `protocol/core/codecs/client/server/app-desktop` + Android 壳；完成后合入 `native` |
 | `master` | `b579347` | Spring Boot（WebFlux） | `origin/master` | Spring 时代的存档 |
 | `spring` | `b579347` | 同上 | 无 | 与 `master` 同提交的本地指针 |
 | `dev/avif` | `3124713` | Spring Boot | `origin/dev/avif` | 仅多一个「资源图片 avif 支持」提交 |
@@ -233,9 +234,9 @@ mingwX64 下 okio 走的是 **CRT 窄字符 API**：进程代码页不是 UTF-8 
 
 | 内容 | 路径 |
 | --- | --- |
-| 后端仓库 | `F:\Develop\Kotlin\lolosia-backend` |
-| 前端仓库 | `F:\Develop\Node\lolosia-web` |
-| Trae 工作区 | `F:\Develop\Trae\lolosia-home`（`backend/`、`web/` 均为 junction 指向上表两处） |
+| 后端仓库 | `E:\Dev\Trae\lolosia\backend` |
+| 前端仓库 | `E:\Dev\Trae\lolosia\web` |
+| Trae 工作区 | `E:\Dev\Trae\lolosia`（`backend/`、`web/`、`ftp/`） |
 
 ### 7.4 版本控制踩坑
 

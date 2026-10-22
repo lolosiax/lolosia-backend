@@ -1,0 +1,39 @@
+<rml>
+<head>
+	<link type="text/css" href="/ui/theme/theme.rcss"/>
+</head>
+<body data-model="main">
+	<div class="screen scroll">
+		<div class="spacer-24"></div>
+		<p class="title">洛洛希雅</p>
+		<p class="subtitle">登录以同步你的资料与番组表</p>
+
+		<div class="card">
+			<div class="field">
+				<span class="label">服务器地址</span>
+				<input type="text" data-value="baseUrl"/>
+			</div>
+			<div class="field">
+				<span class="label">用户名</span>
+				<input type="text" data-value="loginUserName"/>
+			</div>
+			<div class="field">
+				<span class="label">密码</span>
+				<input type="password" data-value="loginPassword"/>
+			</div>
+		</div>
+
+		<p class="error" data-if="loginHasError">{{ loginError }}</p>
+		<p class="loading" data-if="loginLoading">正在登录…</p>
+
+		<div data-if="!loginLoading">
+			<button class="block" data-event-click="action('login')">登录</button>
+			<div class="spacer-8"></div>
+			<button class="secondary block" data-event-click="action('save-server')">保存服务器地址</button>
+		</div>
+
+		<div class="spacer-24"></div>
+		<p class="muted">首次使用请先填写服务端地址；会话保存在本机，过期后会自动回到这里。</p>
+	</div>
+</body>
+</rml>

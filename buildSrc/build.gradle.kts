@@ -13,6 +13,10 @@ gradlePlugin {
             id = "moe.lolosia"
             implementationClass = "moe.lolosia.gradle.LolosiaPlugin"
         }
+        create("moe.lolosia.thirdparty") {
+            id = "moe.lolosia.thirdparty"
+            implementationClass = "moe.lolosia.gradle.thirdparty.ThirdpartyPlugin"
+        }
     }
 }
 

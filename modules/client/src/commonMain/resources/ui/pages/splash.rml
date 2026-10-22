@@ -1,0 +1,11 @@
+<rml>
+<head>
+	<link type="text/css" href="/ui/theme/theme.rcss"/>
+</head>
+<body data-model="main">
+	<div class="screen center">
+		<div class="title">洛洛希雅</div>
+		<p class="muted">正在恢复登录状态…</p>
+	</div>
+</body>
+</rml>

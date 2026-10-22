@@ -1,9 +1,0 @@
-# msgpack-c 绑定：异步取数中继的 msgpack 编解码（见 doc/anime-timetable-design.md）。
-# 静态库 libmsgpackc.a 由 cinterop 打进 klib，目标相关的搜索路径由 build.gradle.kts
-# 的 -libraryPath 提供（thirdparty/<目标>）。
-package = moe.lolosia.thirdparty.msgpack
-
-headers = msgpack.h
-headerFilter = msgpack.h msgpack/*.h
-
-staticLibraries = libmsgpackc.a

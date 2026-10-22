@@ -1,0 +1,608 @@
+<rml>
+<head>
+<style>
+/* ------------------------------------------------------------------
+   这个文档用来验证「不手算 x/y」：下面所有位置都由 flexbox 与盒模型算出来，
+   没有一处写死坐标。改布局只需要动这里的 flex-* / 尺寸。
+   ------------------------------------------------------------------ */
+
+body
+{
+	/* RmlUi 的文档元素（也就是 body）默认是 position: absolute（见 ElementDocument 构造），
+	   不给尺寸约束时它会按内容收缩 —— 于是背景只铺满内容那一块、窗口其余部分留白。
+	   这里用四边定位把它撑满视口（RmlUi 自带样例的 window.rml 就是这么做的）。 */
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+
+	font-family: lolosia-ui;
+	font-size: 15dp;
+	color: #d7dae3;
+	background-color: #12141a;
+	padding: 24dp;
+	/* 内容比视口高（实验页面堆的东西多）：让 body 自己滚，别把下面的控件裁掉 */
+	overflow-y: auto;
+}
+
+/* 滚动条的子元素同样是控件自己造的：不给尺寸与颜色就是不可见的（这里给一套最简的） */
+scrollbarvertical
+{
+	width: 10dp;
+	margin-left: 6dp;
+}
+
+scrollbarvertical slidertrack
+{
+	background-color: #1b1f29;
+}
+
+scrollbarvertical sliderbar
+{
+	width: 10dp;
+	min-height: 40dp;
+	border-radius: 5dp;
+	background-color: #38455a;
+}
+
+scrollbarvertical sliderbar:hover
+{
+	background-color: #5a6f92;
+}
+
+header
+{
+	display: block;
+	margin-bottom: 22dp;
+}
+
+/* 图片的两条路径都演示一下：结构里用 <img>，样式里用 background-image（走 decorator）。
+   路径以 / 开头 = classpath 根相对（RmlUi 的 JoinPath 会剥掉开头的 / 直接返回）。 */
+.brand
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.brand-text
+{
+	display: block;
+}
+
+.logo
+{
+	width: 56dp;
+	height: 56dp;
+	margin-right: 16dp;
+}
+
+h1
+{
+	display: block;
+	font-size: 26dp;
+	font-weight: bold;
+	color: #f2f4f8;
+	margin: 0 0 6dp 0;
+}
+
+.subtitle
+{
+	display: block;
+	font-size: 14dp;
+	color: #8d94a4;
+	margin: 0;
+}
+
+.section-title
+{
+	display: block;
+	font-size: 13dp;
+	color: #8d94a4;
+	margin: 0 0 10dp 0;
+}
+
+/* 卡片行：一行三张等宽卡片，宽度全靠 flex: 1 平分（RmlUi 的 flex 不支持 gap，用 margin 代替） */
+.cards
+{
+	display: flex;
+	flex-direction: row;
+	align-items: stretch;
+}
+
+.card
+{
+	display: block;
+	flex: 1;
+	margin-right: 14dp;
+	padding: 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+}
+
+.card.last
+{
+	margin-right: 0;
+}
+
+.card-label
+{
+	display: block;
+	font-size: 13dp;
+	color: #8d94a4;
+	margin: 0 0 8dp 0;
+}
+
+.card-value
+{
+	display: block;
+	font-size: 26dp;
+	color: #7fe6a3;
+	margin: 0;
+}
+
+.card-value.small
+{
+	font-size: 15dp;
+	color: #d7dae3;
+}
+
+/* 工具条：按钮横向排布，靠 justify-content 与 align-items 对齐 */
+.toolbar
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: flex-start;
+	margin-top: 20dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+}
+
+button
+{
+	display: inline-block;
+	margin-right: 12dp;
+	padding: 8dp 18dp;
+	border-radius: 8dp;
+	background-color: #26303f;
+	border: 1dp #38455a;
+	color: #d7dae3;
+	cursor: pointer;
+}
+
+button:hover
+{
+	background-color: #33415a;
+	border-color: #5a6f92;
+}
+
+button:active
+{
+	background-color: #3f5170;
+}
+
+.hint
+{
+	display: block;
+	margin: 18dp 0 0 0;
+	font-size: 14dp;
+	color: #8d94a4;
+}
+
+/* data-class-panel-active 生效时套上的样式 */
+.panel
+{
+	display: block;
+	margin-top: 18dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+	font-size: 14dp;
+	color: #8d94a4;
+}
+
+.panel.panel-active
+{
+	background-color: #14291d;
+	border: 1dp #2e6b47;
+	color: #a9e8c1;
+}
+
+/* .panel 里的段落：RmlUi 不带默认样式表，<p> 默认是行内 —— 不给 display 两段会挤成一行 */
+.panel p
+{
+	display: block;
+	margin: 0 0 6dp 0;
+}
+
+/* 反向数据流的回执：改完表单控件后由 Kotlin 的 ViewModel 写回这里 */
+.panel p.echo
+{
+	color: #7fe6a3;
+	margin: 8dp 0 0 0;
+}
+
+/* 图片：RmlUi 没有 CSS 的 background-image，图片装饰器要写成 decorator: image(<路径>)。
+   路径以 / 开头 = classpath 根相对（RmlUi 的 JoinPath 会剥掉开头的 / 直接返回）。 */
+.banner
+{
+	display: block;
+	margin-top: 18dp;
+	min-height: 96dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	border: 1dp #2b3140;
+	background-color: #1b1f29;
+	decorator: image( /ui/sample.png );
+	color: #f2f4f8;
+}
+
+/* ------------------------------------------------------------------
+   表单控件：RmlUi 只管行为与取值，外观得自己给（它自带的 rml.rcss 是样例资源，没进我们的
+   classpath）。这几个控件是拿来验证「控件能不能用 flexbox 摆好 + 能不能双向绑定」的，够用即可。
+   input 的 type 会变成同名 class（见 ElementFormControlInput::OnAttributeChange）：
+   input.text / input.checkbox / input.range。
+   ------------------------------------------------------------------ */
+.form
+{
+	display: flex;
+	flex-direction: column;
+	margin-top: 18dp;
+	padding: 14dp 16dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+}
+
+.field
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 10dp;
+}
+
+.field-label
+{
+	display: inline-block;
+	width: 260dp;
+	font-size: 14dp;
+	color: #8d94a4;
+}
+
+.field-control
+{
+	display: inline-block;
+	box-sizing: border-box;
+	width: 200dp;
+	height: 30dp;
+	padding: 0 8dp;
+	border-radius: 6dp;
+	background-color: #11141b;
+	border: 1dp #38455a;
+	color: #d7dae3;
+	font-size: 14dp;
+}
+
+.field-control:hover
+{
+	border-color: #5a6f92;
+}
+
+/* 复选框：选中态直接用背景色表示（上游样例用的是贴图） */
+input.checkbox
+{
+	display: inline-block;
+	width: 18dp;
+	height: 18dp;
+	margin: 0 8dp 0 0;
+	border-radius: 4dp;
+	background-color: #11141b;
+	border: 1dp #38455a;
+}
+
+input.checkbox:checked
+{
+	background-color: #7fe6a3;
+	border-color: #7fe6a3;
+}
+
+/* 滑杆的轨道 / 已选段 / 把手都是控件自己造的子元素，不给尺寸与颜色就是不可见的 */
+input.range slidertrack
+{
+	background-color: #2b3140;
+	border-radius: 4dp;
+}
+
+input.range sliderprogress
+{
+	background-color: #7fe6a3;
+	border-radius: 4dp;
+}
+
+input.range sliderbar
+{
+	width: 14dp;
+	height: 22dp;
+	border-radius: 4dp;
+	background-color: #d7dae3;
+}
+
+input.range sliderbar:hover
+{
+	background-color: #ffffff;
+}
+
+/* 多行输入：textarea 的文本行由控件自己排，给 box-sizing 与内边距才不会溢出边框 */
+textarea.field-control
+{
+	height: 88dp;
+	padding: 8dp;
+}
+
+/* 单选组：input 的 type 同样会变成同名 class（input.radio），选中态用背景色表示 */
+.radio-group
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.radio
+{
+	display: inline-block;
+	margin-right: 18dp;
+	font-size: 14dp;
+	color: #d7dae3;
+}
+
+input.radio
+{
+	display: inline-block;
+	width: 16dp;
+	height: 16dp;
+	margin: 0 6dp 0 0;
+	border-radius: 8dp;
+	background-color: #11141b;
+	border: 1dp #38455a;
+}
+
+input.radio:checked
+{
+	background-color: #7fe6a3;
+	border-color: #7fe6a3;
+}
+
+/* 进度条：填充段是控件内部造的 <fill> 子元素（不在 DOM 里），只能通过 fill 选择器上色 */
+.progress-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+progress
+{
+	display: inline-block;
+	width: 240dp;
+	height: 10dp;
+	margin-right: 12dp;
+	border-radius: 5dp;
+	background-color: #2b3140;
+	overflow: hidden;
+}
+
+progress fill
+{
+	background-color: #7fe6a3;
+	border-radius: 5dp;
+}
+
+.progress-value
+{
+	display: inline-block;
+	width: 56dp;
+	font-size: 14dp;
+	color: #8d94a4;
+	margin-right: 8dp;
+}
+
+/* 标签页：tabset 自带 tabs / panels 两个子容器；选中态是 :selected 伪类（不是 class） */
+tabset
+{
+	display: block;
+	margin-top: 18dp;
+	border-radius: 10dp;
+	background-color: #1b1f29;
+	border: 1dp #2b3140;
+	overflow: hidden;
+}
+
+tabset tabs
+{
+	display: flex;
+	flex-direction: row;
+	background-color: #171b24;
+}
+
+tabset tabs tab
+{
+	display: inline-block;
+	padding: 10dp 18dp;
+	font-size: 14dp;
+	color: #8d94a4;
+	border-right: 1dp #2b3140;
+}
+
+tabset tabs tab:hover
+{
+	color: #d7dae3;
+	background-color: #1f2532;
+}
+
+tabset tabs tab:selected
+{
+	color: #7fe6a3;
+	background-color: #1b1f29;
+}
+
+tabset panels panel
+{
+	display: block;
+	padding: 14dp 16dp;
+	font-size: 14dp;
+	color: #d7dae3;
+}
+
+tabset panels panel p
+{
+	display: block;
+	margin: 0 0 6dp 0;
+}
+</style>
+</head>
+
+<body data-model="main">
+	<header>
+		<div class="brand">
+			<img class="logo" src="/ui/sample.png"/>
+			<div class="brand-text">
+				<h1>{{ title }}</h1>
+				<p class="subtitle">{{ subtitle }}</p>
+			</div>
+		</div>
+	</header>
+
+	<p class="section-title">下面三张卡片是 flex 行里的 flex: 1 —— 宽度由布局算出，没有写死坐标</p>
+	<div class="cards">
+		<div class="card">
+			<p class="card-label">点击计数</p>
+			<p class="card-value">{{ count }}</p>
+		</div>
+		<div class="card">
+			<p class="card-label">高亮开关</p>
+			<p class="card-value" data-if="highlighted">开</p>
+			<p class="card-value" data-if="!highlighted">关</p>
+		</div>
+		<div class="card last">
+			<p class="card-label">最近动作</p>
+			<p class="card-value small">{{ lastAction }}</p>
+		</div>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">按钮点击走 data-event-click → C++ 回调 → Kotlin 的 ViewModel → 数据模型 → 重绘</p>
+	<div class="toolbar">
+		<button data-event-click="action('increment')">+1</button>
+		<button data-event-click="action('increment-ten')">+10</button>
+		<button data-event-click="action('reset')">归零</button>
+		<button data-event-click="action('toggle-highlight')">切换高亮</button>
+	</div>
+
+	<p class="hint" data-if="count > 0">已经点了 {{ count }} 次；这一行由 data-if="count > 0" 控制。</p>
+	<p class="hint" data-if="count == 0">还没点过按钮。</p>
+
+	<div class="panel" data-class-panel-active="highlighted">
+		<span data-if="highlighted">data-class-panel-active 生效：块样式随数据变了。</span>
+		<span data-if="!highlighted">data-class-panel-active 还没生效，点「切换高亮」试试。</span>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">图片：资源从 classpath 读、解码复用已有的 C 编解码库</p>
+	<div class="banner">
+		<span>这块背景是 background-image（decorator 路径）；标题左边的图标是 &lt;img&gt;（元素路径）。</span>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">表单控件：data-value / data-checked 是双向绑定，改完由宿主读回 ViewModel（F8 开调试器看数据模型）</p>
+	<div class="form">
+		<div class="field">
+			<span class="field-label">昵称（input.text → 字符串）</span>
+			<input type="text" class="field-control" data-value="nickname" data-event-change="action('sync-form')"/>
+		</div>
+		<div class="field">
+			<span class="field-label">主题（select → 字符串）</span>
+			<select class="field-control" data-value="theme" data-event-change="action('sync-form')">
+				<option value="dark">深色</option>
+				<option value="light">浅色</option>
+				<option value="auto">跟随系统</option>
+			</select>
+		</div>
+		<div class="field">
+			<span class="field-label">不透明度（input.range → 浮点）</span>
+			<input type="range" class="field-control" min="0" max="1" step="0.05" data-value="opacity" data-event-change="action('sync-form')"/>
+		</div>
+		<div class="field">
+			<label class="field-label">
+				<input type="checkbox" data-checked="agree" data-event-change="action('sync-form')"/>
+				我同意（input.checkbox → 布尔）
+			</label>
+		</div>
+	</div>
+
+	<div class="panel" data-class-panel-active="agree" data-style-opacity="opacity">
+		<p>滑杆直接改这块的不透明度：opacity = {{ opacity | format(2) }}</p>
+		<p>数据模型当前值：昵称 = {{ nickname }}，主题 = {{ theme }}，同意 = <span data-if="agree">是</span><span data-if="!agree">否</span></p>
+		<p class="echo">{{ formEcho }}</p>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">其余控件：textarea / 密码框 / 单选组 / 进度条</p>
+	<div class="form">
+		<div class="field">
+			<span class="field-label">简介（textarea → 字符串，支持换行）</span>
+			<textarea class="field-control" rows="3" data-value="bio" data-event-change="action('sync-form')"></textarea>
+		</div>
+		<div class="field">
+			<span class="field-label">密码（input.password → 字符串，界面掩码）</span>
+			<input type="password" class="field-control" data-value="password" data-event-change="action('sync-form')"/>
+		</div>
+		<div class="field">
+			<span class="field-label">主题（单选组 → 与上面的下拉共用 theme）</span>
+			<div class="radio-group">
+				<label class="radio"><input type="radio" name="theme" value="dark" data-checked="theme" data-event-change="action('sync-form')"/>深色</label>
+				<label class="radio"><input type="radio" name="theme" value="light" data-checked="theme" data-event-change="action('sync-form')"/>浅色</label>
+				<label class="radio"><input type="radio" name="theme" value="auto" data-checked="theme" data-event-change="action('sync-form')"/>跟随系统</label>
+			</div>
+		</div>
+		<div class="field">
+			<span class="field-label">载入进度（progress ← 浮点，按钮推进）</span>
+			<div class="progress-row">
+				<progress data-attr-value="load"></progress>
+				<span class="progress-value">{{ load | format(2) }}</span>
+				<button data-event-click="action('load-down')">−10%</button>
+				<button data-event-click="action('load-up')">+10%</button>
+				<button data-event-click="action('load-reset')">清零</button>
+			</div>
+		</div>
+	</div>
+
+	<div class="panel" data-style-opacity="opacity">
+		<p>多行文本读回（换行原样保留）：</p>
+		<p class="echo">{{ bio }}</p>
+	</div>
+
+	<p class="section-title" style="margin-top: 22dp;">标签页：tabset / tabs / panels（切换是视图层内部状态）</p>
+	<tabset>
+		<tabs>
+			<tab>概览</tab>
+			<tab>数据绑定</tab>
+			<tab>说明</tab>
+		</tabs>
+		<panels>
+			<panel>
+				<p>这一页把 RmlUi 的内置控件补齐：输入框、下拉、滑杆、复选框、单选、密码框、多行文本、进度条、标签页。</p>
+				<p>所有位置仍由 flexbox 算出，没有写死坐标。</p>
+			</panel>
+			<panel>
+				<p>data-value / data-checked 是表单控件的双向绑定；data-attr-value 把变量写成元素属性，进度条读的就是 value。</p>
+			</panel>
+			<panel>
+				<p>标签页自身不绑定数据模型：selected 是视图层内部状态，点击切换由 RmlUi 自己处理。</p>
+			</panel>
+		</panels>
+	</tabset>
+</body>
+</rml>

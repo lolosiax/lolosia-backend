@@ -20,11 +20,22 @@ out/
 
 # 日志与运行时数据
 /work/
+# workDir 指向仓库内时的服务专属目录（生产通常在 /mnt/hdd1/.lolosia，不在仓库里）
+/.lolosia/
 /log/
 *.log
 
 # 本地配置（运行时生成/机器相关，不入库）
 config.yml
 platforms.json
+local.properties
 /application*.yaml
 /application*.json
+
+# 自研门面 liblolosia 由 Gradle 任务 buildLolosia 现场编译，不再入库
+/thirdparty/mingwX64/liblolosia.a
+
+# Android 原生构建产物（thirdparty/gradle/build-android.ps1 生成）
+# liblolosia.so 随业务代码变化，libSDL3.so 与外部静态库一起视为构建中间产物，
+# 一律由脚本按需重建；外部库的 CMake 构建缓存留在 build/thirdparty（同样不入库）。
+/thirdparty/androidJniLibs/

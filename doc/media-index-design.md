@@ -18,7 +18,7 @@
    随机小文件远达不到）。默认只算 `quick_id`（读首尾各 64KiB），全量哈希走**低优先级后台补齐**。
 4. **元数据（光圈 / 设备 / GPS / 时间）在进程内自研解析。** K/N 上没有 `javax.imageio`，
    引 libexif / exiv2 要背上三目标的静态库 + cinterop（exiv2 还是 C++，K/N 侧基本没法绑）。
-   JPEG APP1 / TIFF IFD 规范稳定，几百行 Kotlin 够用，风格与 [`util/crypto/BCrypt.kt`](../src/commonMain/kotlin/moe/lolosia/web/util/crypto/BCrypt.kt) 一致。
+   JPEG APP1 / TIFF IFD 规范稳定，几百行 Kotlin 够用，风格与 [`util/crypto/BCrypt.kt`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/util/crypto/BCrypt.kt) 一致。
 5. **外发分析不自动跑：只有用户点了「全盘分析」才外发。** 后台周期扫描只做本地的事（stat / EXIF / 缩略图 / 规则打标），
    **一个字节都不出网**；标签、描述、向量这些「要把图交给模型」的事一律由用户显式触发（§8.2）。
    在那之前，打标是**人手动的**。
@@ -56,13 +56,13 @@
 
 | 组件 | 现状 | 对本方案的约束 |
 | --- | --- | --- |
-| [`FileBrowser`](../src/commonMain/kotlin/moe/lolosia/web/service/files/FileBrowser.kt) | 只读列目录，**每个子项只做一次 stat**，明说不读文件内容 | 目录列表是热路径；给它加索引摘要不能变成 N 次查询 / 读文件 |
-| [`FileTypes`](../src/commonMain/kotlin/moe/lolosia/web/service/files/FileTypes.kt) | `normalizeRelative` **拒绝一切 `.` 开头的段** | 索引数据天然可以塞进 `.cache/lolosia/` 下，用户与 WebDAV 都看不见 |
-| [`ThumbnailCache`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailCache.kt) | 按**相对路径 SHA-1** 分片落盘；新鲜度靠 `size + mtime`；**不读内容算哈希**（机械盘读不动） | 现成的「薄 DB / 落盘派生 / 零读取判新鲜」范式，本方案直接沿用 |
-| [`ThumbnailService`](../src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailService.kt) | **单工作协程 + 优先队列 + 去重集合**，完成后 SSE 推 `files:thumb` | 打标 / 索引服务与它**同构**，甚至共用队列骨架 |
-| [`FileSigner`](../src/commonMain/kotlin/moe/lolosia/web/service/files/FileSigner.kt) | `sig = HMAC-SHA256(key, "相对路径\|过期时间")` | 扩展为带 `flags` 才能防「无权限者直接拉 NSFW 原图」 |
+| [`FileBrowser`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/files/FileBrowser.kt) | 只读列目录，**每个子项只做一次 stat**，明说不读文件内容 | 目录列表是热路径；给它加索引摘要不能变成 N 次查询 / 读文件 |
+| [`FileTypes`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/files/FileTypes.kt) | `normalizeRelative` **拒绝一切 `.` 开头的段** | 索引数据天然可以塞进 `.cache/lolosia/` 下，用户与 WebDAV 都看不见 |
+| [`ThumbnailCache`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailCache.kt) | 按**相对路径 SHA-1** 分片落盘；新鲜度靠 `size + mtime`；**不读内容算哈希**（机械盘读不动） | 现成的「薄 DB / 落盘派生 / 零读取判新鲜」范式，本方案直接沿用 |
+| [`ThumbnailService`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/files/ThumbnailService.kt) | **单工作协程 + 优先队列 + 去重集合**，完成后 SSE 推 `files:thumb` | 打标 / 索引服务与它**同构**，甚至共用队列骨架 |
+| [`FileSigner`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/files/FileSigner.kt) | `sig = HMAC-SHA256(key, "相对路径\|过期时间")` | 扩展为带 `flags` 才能防「无权限者直接拉 NSFW 原图」 |
 | `DavStore` | 跳过一切 `.` 开头的段 | `.cache` 对 WebDAV 也隐藏（拿不到「别的客户端能看到 sidecar」的好处，见 §2.1） |
-| [`Image`](../src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt) | 只做「识别格式 / 尺寸 / 色彩类型 / 解码 / 绘制」，**没有 EXIF** | EXIF 是新增能力，落 `util/exif/` |
+| [`Image`](../modules/codecs/src/commonMain/kotlin/moe/lolosia/web/util/image/Image.kt) | 只做「识别格式 / 尺寸 / 色彩类型 / 解码 / 绘制」，**没有 EXIF** | EXIF 是新增能力，落 `util/exif/` |
 | `api/package.kt` | 已有对外 HTTP 客户端（Ktor Client） | 调外部打标 worker 走它，不引新依赖 |
 
 ### 1.3 硬约束
@@ -317,7 +317,7 @@ user:银发                   ← 根级自由标签：还不知道是什么时�
 ```
 
 **层级只用来「向下蕴含」**：查 `character:Vtuber` 要能命中所有成员的图。
-展开逻辑与 [`PermissionResolver`](../src/commonMain/kotlin/moe/lolosia/web/service/permission/PermissionResolver.kt) 的组链完全同构（已访问 id 收敛、防环），一并复用那套心智模型。
+展开逻辑与 [`PermissionResolver`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/service/permission/PermissionResolver.kt) 的组链完全同构（已访问 id 收敛、防环），一并复用那套心智模型。
 
 ### 4.4 `media_asset_tag` —— 关联
 
@@ -369,7 +369,7 @@ CREATE TABLE `media_tag_rule` (
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 ```
 
-**默认规则集放内嵌资源 `resources/media-rules.yaml`**（与 [`permissions.yaml`](../src/commonMain/resources/permissions.yaml) 同风格）：
+**默认规则集放内嵌资源 `resources/media-rules.yaml`**（与 [`permissions.yaml`](../modules/server/src/commonMain/resources/permissions.yaml) 同风格）：
 库里 `media_tag_rule` 一条都没有时用它兜底，库里有规则就完全以库为准（**完全照搬 rbac §3.6 的两条来源优先级**）。
 
 ### 4.6 `media_embedding` —— 只存索引
@@ -418,7 +418,7 @@ CREATE TABLE `media_embedding` (
    ```
    第二条**以 `media_asset_tag` 为驱动表** join 回来，符合 AGENTS.md §5 的「`@Query` 主表必须与实体 `@Table` 一致」。
 2. **聚合 / GROUP BY 不要写进 `@Query`**：`@Query` 的返回被当成实体映射，`group by` 出的列对不上表结构。
-   分面统计走**原生 SQL 逃生口**（`db.driver.fetchAll("select … group by …")` + `row.get("x")`，与 [`Database.ping()`](../src/commonMain/kotlin/moe/lolosia/web/database/Database.kt#L132-L141) 同一条路子），
+   分面统计走**原生 SQL 逃生口**（`db.driver.fetchAll("select … group by …")` + `row.get("x")`，与 [`Database.ping()`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/database/Database.kt#L132-L141) 同一条路子），
    或**取回后在 Kotlin 里算**（与 `PermissionResolver` 的「全量取回 + Kotlin 合并」一致）。
 3. **批量写入只能循环单条**（`@Query` 不支持 `IN`）：打一次标签的 N 个关联就是 N 条 `executeInsert`，包在一个 `ctx.transaction { }` 里。
 4. **DB 不可用时列目录不能挂**：`files/list` 的索引摘要必须**best-effort** —— 库没连上就当「无标签、`rating = unknown`」，照常回文件列表。
@@ -1049,7 +1049,7 @@ v1 不做：文件管理器当前只给 `admin`，§10.4 的签名已经够；�
 | `lolosia.media.location` | 看 GPS | 建议只给 `owner` |
 | `lolosia.files.nsfw` | 直链签名里允许带 `NSFW` 位 | 建议只给 `owner` / `admin` |
 
-前四个在 [`permissions.yaml`](../src/commonMain/resources/permissions.yaml) 里声明默认值（沿用 `admin +lolosia.*` 的覆盖关系）；
+前四个在 [`permissions.yaml`](../modules/server/src/commonMain/resources/permissions.yaml) 里声明默认值（沿用 `admin +lolosia.*` 的覆盖关系）；
 `lolosia.files.nsfw` 是**直链签发**用的，走 `@Permission` 的接口才需要标，签名器只读判定结果。
 
 ---

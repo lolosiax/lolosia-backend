@@ -32,4 +32,19 @@ dependencyResolutionManagement {
 rootProject.name = "lolosia-backend"
 
 // 自研路由插件的 KSP 处理器（必须跑在 JVM 上，独立模块）
-include(":router-ksp")
+include(":modules:router-ksp")
+// Stage 2：按依赖方向从小到大 include，便于脚本里按路径引用
+include(":modules:protocol")
+include(":modules:core")
+include(":modules:codecs")
+// 本机能力：本地服务 dispatcher / 指标采集 / 进程内传输（不含 Ktor server）
+include(":modules:local")
+include(":modules:ui")
+include(":modules:client")
+include(":modules:server")
+// 唯一桌面入口：三个 native 可执行文件都在这里
+include(":modules:app-desktop")
+
+// Android 壳是独立构建（modules/app-android/settings.gradle.kts）：
+// AGP 与 buildSrc 里的 Kotlin Gradle Plugin 不能共享 classpath。
+// 构建命令：gradlew -p modules/app-android assembleDebug

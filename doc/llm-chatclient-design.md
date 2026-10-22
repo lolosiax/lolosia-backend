@@ -432,7 +432,7 @@ data class LlmSettings(
 > 更像顶级包（如 `api/`）；但当前先与 `med-agent` 路径保持一致，落 `util/llm/`，将来拆包时整目录平移即可。
 
 ```
-src/commonMain/kotlin/moe/lolosia/web/llm/
+modules/server/src/commonMain/kotlin/moe/lolosia/web/util/llm/
   ChatClient.kt          门面：prompt() → ChatRequestSpec
   ChatRequestSpec.kt     链式构建 + stream()/text()
   ChatSession.kt         agent 工具循环（streamOnce + invoke）

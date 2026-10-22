@@ -31,11 +31,42 @@ DI 注册表（仓库 / 服务 / 注入 / 中间件 / 路由）改由 KSP 生成
 ### 构建
 
 ```powershell
-gradlew linkReleaseExecutableMingwX64     # Windows 本地产物
-gradlew linkReleaseExecutableLinuxArm64   # 开发板产物（aarch64）
-gradlew linkReleaseExecutableLinuxX64     # x64 云主机产物
+gradlew buildBinaries                     # 一次性构建全部目标 → build/bin（<项目>-<平台>-<类型>-<版本>.<扩展名>）
+gradlew :modules:app-desktop:linkReleaseExecutableMingwX64     # 单目标：Windows 本地产物
+gradlew :modules:app-desktop:linkReleaseExecutableLinuxArm64   # 单目标：开发板产物（aarch64）
+gradlew :modules:app-desktop:linkReleaseExecutableLinuxX64     # 单目标：x64 云主机产物
 gradlew deploy<服务器名>                   # 构建 + 部署到开发板 / 云主机（见 §3）
 ```
+
+### Android（Stage 3 首版）
+
+```powershell
+# 1) 原生库：NDK r27c + ninja（源码/中间产物在 build/thirdparty，产物落 thirdparty/androidJniLibs）
+gradlew androidNative                       # 默认 x86_64 + arm64-v8a
+gradlew androidNative -PandroidAbis=x86_64  # 只构建模拟器那一份
+
+# 2) APK：独立 Gradle 构建（不要从根 settings include；AGP 与 buildSrc 的 KGP 会抢 classpath）
+gradlew -p modules/app-android assembleDebug
+
+# 3) 安装并启动
+adb install -r modules/app-android/build/outputs/apk/debug/lolosia-android-debug.apk
+adb shell am start -n moe.lolosia.android/.MainActivity
+```
+
+- 支持 `x86_64`（`Medium_Phone_API_35` 模拟器）与 `arm64-v8a`（已在 `2509FPN0BC` / API 36 真机验证）。
+  `gradlew androidNative` 默认构建两份；只调模拟器时用 `-PandroidAbis=x86_64`。
+- 真机安装若报 `INSTALL_FAILED_USER_RESTRICTED`（HyperOS/MIUI），先在开发者选项打开「USB 安装」，
+  并执行 `adb shell settings put global verifier_verify_adb_installs 0` 与
+  `adb shell settings put secure install_non_market_apps 1`，再 `adb install -r`。
+- 上游/下游装配（单向，禁止回环）：
+  - 根 `buildBinaries` → `androidApp` → `:androidNative` → 下游 `modules/app-android:assembleDebug`；
+  - 下游单独构建（含 IDEA 直接跑）→ `preBuild` → 根 `:androidNative`（叶子任务，不会回到 `androidApp`）；
+  - 上游拉起下游时带 `-PlolosiaAndroidFromRoot=true`，下游跳过回调，避免嵌套根构建在项目锁上死等。
+  - 根构建会自动探测 Android SDK / NDK / cmake / ninja；缺失时打印警告并跳过 `androidNative` / `androidApp`，
+    `buildBinaries` 仍会产出桌面二进制。也可用 `-PskipAndroid=true` 显式跳过。
+- `modules/app-android/local.properties` 写 `sdk.dir=D:\\AndroidSdk`（gitignored）；NDK 默认找 `D:\AndroidSdk\ndk\android-ndk-r27c`。
+- APK 里的 `assets/ui/probe.rml`、`sample.png` 直接引用 `modules/client/src/commonMain/resources`；`jniLibs` 引用 `thirdparty/androidJniLibs`。
+- 字体用系统 `NotoSansCJK-Regular.ttc`；图片解码走 `BitmapFactory` + `libjnigraphics`，不引入 Android 版 png/jpeg/webp 静态库。
 
 **提交前自检**（防「文件在磁盘上但被 `.gitignore` 吃掉」）：
 
@@ -57,7 +88,7 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 
 图像编解码（WebP / PNG / JPEG / GIF）用 5 个 C 库：libwebp、libpng、zlib、libjpeg-turbo、giflib。
 **源码不入库、产物入库**：`thirdparty/<目标>/` 放 6 个 `.a`（`libwebp.a` 已并入编码侧的私有依赖 SharpYuv，见下），
-`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/build-libs.ps1` 是一次性重建脚本。目标有 `mingwX64` / `linuxArm64` / `linuxX64` 三份。
+`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/gradle/build-codecs.ps1` 是一次性重建脚本。目标有 `mingwX64` / `linuxArm64` / `linuxX64` 三份。
 
 日常 `gradlew` 构建完全不碰 C 工具链 —— `build.gradle.kts` 只把 `.def` 与 `-libraryPath` 交给 cinterop，
 `.def` 里 `staticLibraries` 声明的 `.a` 会打进 klib、在链接期随可执行文件静态链入（与 ktor 的 curl klib 同一机制）。
@@ -65,8 +96,8 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 只在换库版本 / 改编译选项时重建：
 
 ```powershell
-.\thirdparty\build-libs.ps1                                # 默认重建 mingwX64 + linuxArm64 + linuxX64
-.\thirdparty\build-libs.ps1 -Targets mingwX64 -Force       # 只重建一个目标（默认工作目录 build/thirdparty，已 gitignore）
+.\thirdparty\gradle\build-codecs.ps1                                # 默认重建 mingwX64 + linuxArm64 + linuxX64
+.\thirdparty\gradle\build-codecs.ps1 -Targets mingwX64 -Force       # 只重建一个目标（默认工作目录 build/thirdparty，已 gitignore）
 ```
 
 - **不需要额外安装任何工具链**：脚本用 `~/.konan` 里 Kotlin/Native 自带的 **llvm-21 clang** 交叉编译，
@@ -77,7 +108,7 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
   zlib 的真 `zconf.h` 在**构建目录**里（源码树那份被 CMake 改名成 `zconf.h.included`）。
 - libjpeg-turbo 只构建静态库目标（`jpeg-static` / `turbojpeg-static`）：`all` 会连带构建 CLI 可执行文件，Linux 目标链接不过。
 - ⚠️ **libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档 `libsharpyuv.a`，脚本会把它合并回单个 `libwebp.a`**（`.def` 里只声明 `libwebp.a`）。分成两个归档时，K/N 的 ELF 链接（ld.gold）按归档逐个解析，顺序被重排后 `libwebp.a` 里对 `SharpYuv*` 的引用会解析不到 —— arm64 与 x64 都会 `linkReleaseExecutable<目标>` 失败（mingw 的 PE 链接器宽容，才没暴露）。
-- 绑定：`.def` 在 `src/nativeInterop/cinterop/`，门面在 `src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
+- 绑定：`.def` 在 `modules/codecs/src/nativeInterop/cinterop/`，门面在 `modules/codecs/src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
   包名一律 `moe.lolosia.thirdparty.<库名>`。`gradle.properties` 开了 `kotlin.mpp.enableCInteropCommonization=true`，
   让 cinterop 声明对 `nativeMain` 可见（`kotlinx.cinterop` 的指针 API 本身仍只在 native 源集可用）。
 - 目标相关的类型宽度要当心：`size_t` 三个目标都是 64 位可以安全传递，`unsigned long` 不是（mingw 32 位 / linux 64 位），
@@ -109,7 +140,7 @@ bmp 回 `UNKNOWN`；三种源图 → png（无损，逐像素 0 误差）/ webp 
 ### 冒烟（本机 mingw）
 
 ```powershell
-$exe = "build\bin\mingwX64\releaseExecutable\ktor-template.exe"
+$exe = "modules\app-desktop\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe"
 $p = Start-Process $exe -ArgumentList 7160 -PassThru
 Start-Sleep 4
 #> P0 收尾后**不再有免鉴权探针**：冒烟一律走真实链路（注册 → 登录 → 带 token）。
@@ -197,7 +228,7 @@ $files += @(Get-ChildItem $sqlDir -Filter 'view_user_role.sql')   # 视图必须
 foreach ($f in $files) { & $exe --host=127.0.0.1 --port=3306 --user=root --password=123456 --default-character-set=utf8mb4 -D ktor-template -e "source $($f.FullName -replace '\\','/')" }
 ```
 > 建完是 **8** 个表/视图（7 表 + `view_user_role`），`sys_user` 里有 `lolosia`（bcrypt `$2a$10$…`）。
-> 默认配置（`src/commonMain/resources/application.json`）指向本机 `127.0.0.1:3306/ktor-template`。
+> 默认配置（`modules/server/src/commonMain/resources/application.json`）指向本机 `127.0.0.1:3306/ktor-template`。
 > `/api/svc/selftest` 探针已随 P0 收尾删除；现在 §2 冒烟会注册 `smoke-*` 用户（学生），跑多了要清理：
 >
 > ```sql
@@ -235,18 +266,18 @@ kill -9 <pid>; rm -f /tmp/ktor-test.kexe; rm -rf /tmp/ktortest
 
 ```powershell
 # 1) 后端：编译并运行本机产物（默认端口 7129）
-gradlew runReleaseExecutableMingwX64                       # 一条命令编译 + 运行
-# 或先 linkReleaseExecutableMingwX64，再直接跑：
-.\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129   # 首参覆盖端口，不传用配置里的
+gradlew runRelease                       # 根任务：一条命令编译 + 运行（cwd 已固定为 backend 根）
+# 或先跑 :modules:app-desktop:linkReleaseExecutableMingwX64，再直接跑：
+.\modules\app-desktop\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129   # 首参覆盖端口，不传用配置里的
 
 # 2) 前端：vite dev server（端口 5005）
 cd <工作区>/web
 pnpm dev
 ```
 
-- **配置来源**：启动目录下的 `application.yaml → yml → json` 里**第一个存在的**；`KTOR_CONFIG` 显式指定文件、`KTOR_PORT` / 首个命令行参数覆盖端口（优先级 命令行 > 环境变量 > 配置文件 > 内置默认）。内置默认见 `src/commonMain/resources/application.json`。
+- **配置来源**：启动目录下的 `application.yaml → yml → json` 里**第一个存在的**；`KTOR_CONFIG` 显式指定文件、`KTOR_PORT` / 首个命令行参数覆盖端口（优先级 命令行 > 环境变量 > 配置文件 > 内置默认）。内置默认见 `modules/server/src/commonMain/resources/application.json`。
 - **前端请求指向哪**：`web/.env.serve-dev` 里 `VITE_APP_BASE_MODE=port` + `VITE_APP_BASE_PORT=7129`，`utils/request.ts` 据此把 API 拼成 `http://<host>:7129/api/`。所以**本地后端跑在 7129 即可与 dev server（5005）互通**，不必额外配代理。
-- **前端要被后端内嵌时**才需要构建：`viteJar` 是 `link*` 的依赖，`gradlew link...` / `deploy` 会顺带跑（见下条「vite 前端的增量行为」）；纯调前端用 dev server 就够。
+- **前端要被后端内嵌时**才需要构建：`viteJar` 是 `link*` 的依赖，`gradlew buildBinaries` / `:modules:app-desktop:link...` / `deploy` 会顺带跑（见下条「vite 前端的增量行为」）；纯调前端用 dev server 就够。
 - **用浏览器 SKILL 做多步验收**：登录 → 打开番组表 → 关注番剧 / 发布组 → 点「立即拉取」，即可当场看到列表刷新与 `anime.release` 的站内 / 桌面通知。板子上同理，只是换成板子地址。
 
 ### vite 前端的增量行为
@@ -348,7 +379,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | 阿里云镜像缺 Ktor / sqlx4k 产物 | `settings.gradle.kts` 里 `excludeGroupByRegex("io\\.ktor")` / `io\\.github\\.smyrgeorge` 强制走 mavenCentral |
 | `Failed SFTP MKDIR: …/releaseExecutable` | link 任务的 `outputs.files` 是**输出目录**不是文件 → 用 `KotlinNativeLink.outputFile` |
 | `A problem occurred starting process 'aarch64-linux-gnu-objcopy'` | Windows 上没有可用的 aarch64/x86_64 objcopy → 借道 WSL（§2） |
-| `linkReleaseExecutable<linux目标>` 报 `libwebp.a(…picture_csp_enc.c.o): … SharpYuv* 未定义` | libwebp 1.6 把 SharpYuv 拆成 `libsharpyuv.a`，两个归档的解析顺序被重排 → 用 `thirdparty/build-libs.ps1` 重建（已合并回单个 `libwebp.a`，§2） |
+| `linkReleaseExecutable<linux目标>` 报 `libwebp.a(…picture_csp_enc.c.o): … SharpYuv* 未定义` | libwebp 1.6 把 SharpYuv 拆成 `libsharpyuv.a`，两个归档的解析顺序被重排 → 用 `thirdparty/gradle/build-codecs.ps1` 重建（已合并回单个 `libwebp.a`，§2） |
 | `The plugin is already on the classpath with an unknown version` | buildSrc 引了 KGP 后，主工程必须**无版本**应用 Kotlin 插件 |
 | buildSrc 看不到版本目录 | `buildSrc/settings.gradle.kts` 里 `create("libs").from(files("../gradle/libs.versions.toml"))` |
 | classpath 里混进垃圾条目 | `ViteJarTask` 产出多一个根目录 `MANIFEST.MF`，并入时排除 |
@@ -427,7 +458,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | `qemu-user-static` + `libc6-arm64-cross`（+ `libcrypt.so.1`） | 不开板子验证旧 aarch64 产物（接了 sqlx4k 后已失效，见 §2） |
 | Node 24 + pnpm 10.22 + 前端工程 `E:\Dev\Node\lolosia-web` | `viteJar` 构建前端产物 |
 | QUIC 客户端 `F:\Develop\Python\quic-socket` | SSH 隧道到开发板 |
-| （可选）`~/.konan` 自带的 clang + sysroot | 只在重建第三方 C 静态库时用（`thirdparty/build-libs.ps1`），日常构建不需要 |
+| （可选）`~/.konan` 自带的 clang + sysroot | 只在重建第三方 C 静态库时用（`thirdparty/gradle/build-codecs.ps1`），日常构建不需要 |
 | MariaDB / MySQL | 数据库 |
 | 目标机的 Docker（仅 `mode=docker` 时需要） | 原生产物挂进基础镜像运行，不构建镜像；基础镜像与国内加速源见 §3 |
 

@@ -37,7 +37,7 @@
 | 语言 / 构建 | Kotlin 2.4.20（Multiplatform）+ Gradle 9.5.1（Wrapper） |
 | Web 框架 | Ktor 3.4.2（CIO 引擎，`embeddedServer`） |
 | 序列化 | kotlinx.serialization 1.11.0（ContentNegotiation + JSON） |
-| 路由 | 自研插件：[router-ksp](router-ksp)（KSP 处理器）+ [util/router](src/commonMain/kotlin/moe/lolosia/web/util/router)（运行时） |
+| 路由 | 自研插件：[router-ksp](modules/router-ksp)（KSP 处理器）+ [util/router](modules/server/src/commonMain/kotlin/moe/lolosia/web/util/router)（运行时） |
 | DI | Koin 4.2.2（容器实例显式传递，不用全局容器） |
 | 数据访问 | sqlx4k 1.14.0（native 侧是预编译 Rust 静态库，无需 Rust 工具链） |
 | 数据库 | MariaDB / MySQL |
@@ -54,27 +54,19 @@
 │       ├── task/                 # ViteJar / GenerateConstants / NativeClasspath / Deploy / GitArchive
 │       ├── extension/            # lolosia { viteJar / classpath / deploy / docker } 配置
 │       └── NativeClasspath.kt    # classpath.zip 合并 + windres/objcopy 嵌入 + 链接参数
-├── router-ksp/                   # 自研路由的 KSP 处理器（JVM 件）：→ GeneratedRoutes / GeneratedInterceptors / GeneratedInjection
-├── src/
-│   ├── commonMain/kotlin/moe/lolosia/web/
-│   │   ├── Main.kt               # main（唯一入口：classpath → 配置 → Koin → CIO 引擎）
-│   │   ├── configuration/        # AppConfigure（Ktor Application 装配）/ AppModule（Koin 容器 + platformModule expect）
-│   │   ├── controller/           # 业务（Login / Sse / Oss / File）+ system/（User / Role / UserRole / Menu / Permission）+ Classpath（运维探针）
-│   │   ├── database/             # Database（sqlx4k 驱动）+ repository 各 @Repository + model 实体
-│   │   ├── dto/                  # ApiResult（{code,msg,data} 信封）/ RawJson / SystemDtos / LoginDtos
-│   │   ├── generated/            # GeneratedRegistries.kt（6 个 expect 签名；actual 由 router-ksp 生成到各目标）
-│   │   ├── interceptor/          # Traffic / Ctx / Auth / Envelope 四层（顺序由 @Interceptor 经 KSP 生成）
-│   │   ├── service/              # SessionManager / CacheManager / SessionMap / LoginService / WebpCache / oss / dav（WebDAV）/ files（在线文件管理器：浏览·签名·缩略图）/ permission（RBAC 注册表·解析·管理）
-│   │   │   └── system/           # UserService / RoleService / UserRoleService（业务服务）
-│   │   ├── settings/             # AppSettings（@Serializable）+ 多级覆盖 SettingsLoader
-│   │   └── util/                 # captcha / classpath / crypto(BCrypt) / image(Image) / json / koin / ktor / log / router / session / time
-│   ├── commonMain/resources/     # application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ static/home/ / hello.txt
-│   ├── nativeMain/kotlin/…/      # ZipClasspath / DiskClasspath 等实现 + installPlatformClasspath / 平台 Env / platformModule（expect/actual）
-│   ├── mingwX64Main/kotlin/…/    # ApiClient / EmbeddedClasspath / Mkdir / Shell 的平台实现（无入口）
-│   └── linuxMain/kotlin/…/       # 两个 linux 目标共享的 ApiClient / EmbeddedClasspath / Mkdir / Shell 实现（无入口）
+├── modules/
+│   ├── protocol/                 # 跨端 DTO / EventSource 契约（无平台依赖）
+│   ├── core/                     # classpath / fs / log / time / platform / json / 出站 HTTP
+│   ├── codecs/                   # 图像编解码、缩略图、EXIF、msgpack 通道（cinterop）
+│   ├── router-ksp/               # 自研路由的 KSP 处理器（JVM 件）
+│   ├── server/                   # Ktor 服务端：controller / service / database / settings
+│   ├── client/                   # UI 实验：mvvm / RmlUi 宿主（nativeCpp）
+│   ├── app-desktop/              # 桌面唯一入口 Main.kt + 三个可执行文件
+│   └── app-android/              # Android 壳（独立 Gradle 构建，SDLActivity + JNI 宿主）
 ├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── classpath/mingw/app.manifest  # 应用清单（RT_MANIFEST）：把进程代码页切成 UTF-8，否则中文文件名会被 okio 丢弃
 ├── sql/                          # 建表脚本（15 张表 + view_user_role 视图）+ migrate_rbac_groups.sql（历史库组模型迁移）
+├── doc/                          # 方案 / 迁移记录 / 排障
 ├── lolosia-backend-native.service # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```
@@ -124,8 +116,9 @@ mysql -u root -p -D lolosia-backend < sql/view_user_role.sql   # 视图放最后
 ### 3. 构建与启动（本机 mingwX64）
 
 ```powershell
-gradlew linkReleaseExecutableMingwX64                       # 产物：build\bin\mingwX64\releaseExecutable\lolosia-backend.exe
-build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129  # 首参覆盖端口（可选）
+gradlew runDebug                                                 # 本机调试启动（工作目录 backend/，能读到磁盘 application.json）
+gradlew :modules:app-desktop:linkReleaseExecutableMingwX64       # release 可执行文件
+modules\app-desktop\build\bin\mingwX64\releaseExecutable\lolosia-backend.exe 7129
 ```
 
 服务默认监听 `0.0.0.0:7129`，静态首页在 `http://127.0.0.1:7129/home/`。冒烟：
@@ -153,14 +146,16 @@ curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: applicati
 
 | 任务 | 说明 |
 | --- | --- |
-| `gradlew linkReleaseExecutableMingwX64` | Windows 本机可执行文件 |
-| `gradlew linkReleaseExecutableLinuxArm64` | 开发板（aarch64）可执行文件 |
-| `gradlew linkReleaseExecutableLinuxX64` | x64 云主机可执行文件 |
-| `gradlew viteJar` | 构建 vite 前端工程（路径取自 `platforms.json` 的 `webPath`） |
-| `gradlew generateConstants` | 依 vite 平台生成 `VITE_DEFAULT` 常量（值 = `contextPath`，避免把 `/home` 写死） |
-| `gradlew classpathZip<目标>` | 把各源集 `resources` + vite 产物合并成 `classpath.zip`（link 任务自动依赖） |
+| `gradlew runDebug` / `gradlew runRelease` | 按宿主平台链接并启动；release 先跑 vite |
+| `gradlew buildBinaries` | 桌面三目标汇总到 `build/bin/`；环境具备时顺带构建 Android APK |
+| `gradlew :modules:app-desktop:linkReleaseExecutable<目标>` | 单一目标：`MingwX64` / `LinuxArm64` / `LinuxX64` |
+| `gradlew :modules:app-desktop:viteJar` | 构建 vite 前端工程（路径取自 `platforms.json` 的 `webPath`） |
+| `gradlew :modules:app-desktop:generateConstants` | 依 vite 平台生成 `VITE_DEFAULT` 常量（值 = `contextPath`，避免把 `/home` 写死） |
+| `gradlew :modules:app-desktop:classpathZip<目标>` | 把各源集 `resources` + vite 产物合并成 `classpath.zip`（link 任务自动依赖） |
+| `gradlew androidNative` | 用 NDK 构建 x86_64 + arm64-v8a 原生库（`-PandroidAbis=x86_64` 可只建一份） |
+| `gradlew androidApp` | 构建 Android debug APK（独立下游构建） |
 | `gradlew deploy<服务器名>` / `deploy` | 按 `platforms.json` 部署（`deploy` 指向 `deploy.active` 那台）；配了 `abi` 走原生二进制，否则找 `bootJar`；`mode` 选 systemd / docker |
-| `gradlew gitArchive` | 按 vite 平台导出 git 归档 |
+| `gradlew :modules:app-desktop:gitArchive` | 按 vite 平台导出 git 归档 |
 
 ## 🧭 写一个控制器
 
@@ -215,11 +210,11 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 
 ## ⚙️ 配置
 
-配置只有一个入口：[AppSettings](src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable` 数据类）。
+配置只有一个入口：[AppSettings](modules/server/src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable` 数据类）。
 优先级由低到高，**按字段深合并**：
 
 1. 数据类里的默认值
-2. classpath 内嵌的 [application.json](src/commonMain/resources/application.json)（随二进制分发）
+2. classpath 内嵌的 [application.json](modules/server/src/commonMain/resources/application.json)（随二进制分发）
 3. 磁盘 `application.json`（相对启动目录；systemd 下即 `/srv/lolosia-backend/`，可用 `KTOR_CONFIG` 指定其它路径）
 4. 环境变量：`KTOR_HOST` / `KTOR_PORT` / `KTOR_LOG_LEVEL` / `KTOR_DB_URL` / `KTOR_DB_USERNAME` / `KTOR_DB_PASSWORD`
 5. 命令行第一个参数（仅端口，如 `lolosia-backend.exe 8080`）
@@ -277,7 +272,7 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
   - MySQL 方言下**不要用生成的 `insert` / `update`**（会拼成多语句脚本，MariaDB 报 `1064`），写入用单语句 `@Query`
 - **连接池懒建**：`Database` 构造只存配置、不连库；启动由后台协程周期重连（失败只记日志，不崩进程）。库未就绪时**读库的请求返回 `503 数据库暂不可用`**（静态资源、SSE 不受影响），库恢复后自动可用；别在启动路径上建池（`mySQL(...)` 会阻塞到超时）
 - **建池前鉴权预检**：sqlx4k 底层是 Rust FFI，**账号密码错时会直接 panic 崩进程**（Kotlin 侧捕获不了）。故 `Database.connect()` 在建池前先跑 `MySqlAuthProbe`（自写裸 TCP 握手）：能连且登录成功（`Ok`）才交 sqlx4k；主机不可达（`Unreachable`，顺带省掉 ~30s 阻塞）或鉴权失败 / 库不存在（`Denied`）直接判失败并交给后台重连；协议不认识 / 需 TLS（`Inconclusive`）才回退 sqlx4k
-- **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）。DI 绑定**不用手写**：`router-ksp` 扫 `@Repository` / `@Injectable` / `@Service` 生成 `GeneratedInjection.kt`（`repositoryModules()` + `serviceModule()` + `Koin.registerInjectables()`），签名在 commonMain 的 [GeneratedRegistries.kt](src/commonMain/kotlin/moe/lolosia/web/generated/GeneratedRegistries.kt) 声明为 `expect`、生成物是 `actual`，[Main.kt](src/commonMain/kotlin/moe/lolosia/web/Main.kt) 直接调用；实现类名按 sqlx4k 的固定约定 `<接口名>Impl` 推导，对不上会在 KSP 阶段报错
+- **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）。DI 绑定**不用手写**：`router-ksp` 扫 `@Repository` / `@Injectable` / `@Service` 生成 `GeneratedInjection.kt`（`repositoryModules()` + `serviceModule()` + `Koin.registerInjectables()`），签名在 commonMain 的 [GeneratedRegistries.kt](modules/server/src/commonMain/kotlin/moe/lolosia/web/generated/GeneratedRegistries.kt) 声明为 `expect`、生成物是 `actual`，[Main.kt](modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt) 直接调用；实现类名按 sqlx4k 的固定约定 `<接口名>Impl` 推导，对不上会在 KSP 阶段报错
 - **时间列一律 `kotlin.time.Instant`**（业务用 `Clock.System.now()`），驱动按 UTC 往返；只有日志用本地时间展示
 
 ## 🚢 部署

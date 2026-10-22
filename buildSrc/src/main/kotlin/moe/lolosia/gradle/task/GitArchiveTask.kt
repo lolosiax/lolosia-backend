@@ -48,7 +48,7 @@ abstract class GitArchiveTask : DefaultTask() {
 
         platforms.forEach { (name, config) ->
             if (config.dir != null) {
-                val frontendDir = project.file(config.dir!!)
+                val frontendDir = project.rootProject.file(config.dir!!)
                 if (frontendDir.exists()) {
                     exportGitRepo(frontendDir, tempDir, "${project.rootProject.name}-$name")
                 }

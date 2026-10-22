@@ -4,6 +4,7 @@ import moe.lolosia.gradle.extension.ClasspathExtension
 import moe.lolosia.gradle.extension.LolosiaExtension
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.Project
+import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.file.Directory
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.provider.Provider
@@ -47,6 +48,7 @@ import java.io.File
  */
 internal fun Project.configureNativeClasspath(lolosia: LolosiaExtension) {
     val extension = lolosia.classpath
+    if (!extension.enabled) return
     val kotlinExt = extensions.findByType(KotlinMultiplatformExtension::class.java) ?: return
 
     val targets = kotlinExt.targets.withType<KotlinNativeTarget>()
@@ -116,7 +118,17 @@ private fun Project.registerClasspath(
         // 只有 release 这条才并 vite 产物：debug 链连依赖都不建，`runDebugExecutable*` 就不会去跑 vite build
         if (includeVite) includeViteJar(extension)
         resourceSourceSetsOf(target).forEach { sourceSet -> from(sourceSet.resources) }
+        extension.perTargetResources[target.name]?.forEach { from(it) }
         extension.additionalResources.forEach { from(it) }
+    }
+
+    // 依赖模块的资源由构建系统自动收集：项目依赖的 commonMain / nativeMain / 目标源集
+    // 都按「先入者优先」追加在本模块资源之后。这样 `:app-desktop` 不需要手写
+    // resources(":server/src/...", ":client/src/...")。
+    project.gradle.projectsEvaluated {
+        dependencyClasspathResources(project, target.name).forEach { resource ->
+            zipTask.configure { from(resource) }
+        }
     }
 
     return when {
@@ -148,6 +160,45 @@ private fun resourceSourceSetsOf(target: KotlinNativeTarget): List<KotlinSourceS
     return ordered
 }
 
+/**
+ * 收集所有项目依赖（含传递依赖）中与 [targetName] 对应的源集资源。
+ *
+ * 可执行模块的 `classpath.zip` 由此自动包含 `:server` / `:client` 等依赖模块的
+ * `commonMain` / `nativeMain` / 目标源集资源，不需要在 build.gradle.kts 里手写路径。
+ * 顺序沿用「先入者优先」：调用方先放自己的资源，这里最后追加依赖资源。
+ */
+private fun dependencyClasspathResources(project: Project, targetName: String): List<Any> {
+    val result = mutableListOf<Any>()
+    val visitedProjects = mutableSetOf<String>()
+    val visitedSourceSets = mutableSetOf<String>()
+
+    fun visit(current: Project) {
+        if (current == project || !visitedProjects.add(current.path)) return
+
+        val kotlinExt = current.extensions.findByType(KotlinMultiplatformExtension::class.java)
+        val target = kotlinExt?.targets?.findByName(targetName) as? KotlinNativeTarget
+        if (target != null) {
+            resourceSourceSetsOf(target).forEach { sourceSet ->
+                if (visitedSourceSets.add("${current.path}:${sourceSet.name}")) {
+                    result.add(sourceSet.resources)
+                }
+            }
+        }
+
+        projectDependenciesOf(current).forEach { visit(it) }
+    }
+
+    projectDependenciesOf(project).forEach { visit(it) }
+    return result
+}
+
+/** 当前工程声明的全部项目依赖（只读声明，不解析外部依赖）。 */
+private fun projectDependenciesOf(project: Project): List<Project> =
+    project.configurations
+        .flatMap { configuration -> configuration.dependencies.withType(ProjectDependency::class.java) }
+        .mapNotNull { dependency -> project.findProject(dependency.path) }
+        .distinctBy { it.path }
+
 /** vite 前端产物并入 classpath（zip 内前缀由 viteJar 的 contextPath 决定）。 */
 private fun Zip.includeViteJar(extension: ClasspathExtension) {
     if (!extension.includeViteJar) return
@@ -174,7 +225,7 @@ private fun Project.embedAsWindowsResource(
     val prepareRc = tasks.register("prepareClasspathRc$suffix$flavorSuffix", Copy::class.java) {
         group = "classpath"
         description = "把 classpath.rc 与 app.manifest 放到 classpath.zip 同级目录，供 windres 使用"
-        from(layout.projectDirectory.dir("classpath/mingw"))
+        from(rootProject.layout.projectDirectory.dir("classpath/mingw"))
         into(embedDir)
     }
 
