@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     thirdparty 下各构建脚本共用的工具链定位（被 dot-source，不单独运行）。
@@ -112,12 +112,59 @@ function Write-ToolchainSummary($Tool) {
 
 <#
 .SYNOPSIS
+    读取自建工件仓库配置；没配置时返回 $null。
+.DESCRIPTION
+    地址与账号只有本地知道，不入库。取值顺序：
+      1. Gradle 传下来的环境变量 LOLOSIA_THIRDPARTY_REPO / _USERNAME / _PASSWORD；
+      2. 主工程根目录的 local.properties（直接跑脚本时）。
+    静态库由 Gradle 从 <repo>/maven 拉取，源码包放在同一仓库的 /sources 下。
+    脚本在下载源码前先用这份配置拼出镜像地址，取不到再回退到上游。
+#>
+function Get-LolosiaArtifactRepo {
+    $url = $env:LOLOSIA_THIRDPARTY_REPO
+    $username = $env:LOLOSIA_THIRDPARTY_USERNAME
+    $password = $env:LOLOSIA_THIRDPARTY_PASSWORD
+
+    if (-not $url) {
+        $props = Join-Path (Get-LolosiaRepoRoot) 'local.properties'
+        if (Test-Path $props) {
+            $map = @{}
+            foreach ($line in Get-Content $props) {
+                if ($line -match '^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.+?)\s*$') { $map[$Matches[1]] = $Matches[2] }
+            }
+            $url = $map['lolosia.thirdparty.repo']
+            $username = $map['lolosia.thirdparty.username']
+            $password = $map['lolosia.thirdparty.password']
+        }
+    }
+    if (-not $url) { return $null }
+
+    return @{
+        Sources  = ($url -replace '/maven/?$', '/sources').TrimEnd('/')
+        Username = $username
+        Password = $password
+    }
+}
+
+<#
+.SYNOPSIS
     下载并解压第三方源码包，返回解压后的目录。
 .DESCRIPTION
     源码落在 <WorkDir>/src 与 <WorkDir>/tree（默认 <repo>/build/thirdparty，已被 .gitignore 忽略），
     不随仓库提交；产物才提交。下载时会检查前两个字节，避免把 404 页面当成 tar 包解压。
+
+    给了 -Library / -Version / -FileName 且 local.properties 配了工件仓库时，先按
+    <repo>/sources/<Library>/<Version>/<FileName> 取；镜像不可用或文件缺失再回退 [Url]。
 #>
-function Get-ThirdpartySource([string]$Name, [string]$Url, [string]$WorkDir, [switch]$Force) {
+function Get-ThirdpartySource(
+    [string]$Name,
+    [string]$Url,
+    [string]$WorkDir,
+    [string]$Library,
+    [string]$Version,
+    [string]$FileName,
+    [switch]$Force
+) {
     $srcDir = Join-Path $WorkDir 'src'
     $treeDir = Join-Path $WorkDir 'tree'
     $tarball = Join-Path $srcDir "$Name.tar.gz"
@@ -130,19 +177,45 @@ function Get-ThirdpartySource([string]$Name, [string]$Url, [string]$WorkDir, [sw
     New-Item -ItemType Directory -Force -Path $srcDir, $treeDir | Out-Null
 
     if (-not (Test-Path $tarball)) {
-        Write-Step "下载 $Name"
-        Invoke-WebRequest -Uri $Url -OutFile $tarball -UseBasicParsing -TimeoutSec 600
-        $magic = [IO.File]::ReadAllBytes($tarball)[0..1]
-        if ($magic[0] -eq 0x3C -and $magic[1] -eq 0x21) {
-            Remove-Item $tarball -Force
-            Stop-WithError "下载到的是 HTML 而非 tar 包，源地址已失效（$Url）"
+        $repo = Get-LolosiaArtifactRepo
+        $urls = @()
+        if ($repo -and $Library -and $Version -and $FileName) {
+            $urls += "$($repo.Sources)/$Library/$Version/$FileName"
         }
+        if ($Url) { $urls += $Url }
+        if ($urls.Count -eq 0) { Stop-WithError "没有可用的 $Name 源码地址" }
+
+        $downloaded = $false
+        foreach ($u in $urls) {
+            try {
+                Write-Step "下载 $Name <- $u"
+                $headers = @{}
+                if ($repo -and $u.StartsWith($repo.Sources) -and $repo.Username) {
+                    $pair = "$($repo.Username):$($repo.Password)"
+                    $headers['Authorization'] = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pair))
+                }
+                Invoke-WebRequest -Uri $u -OutFile $tarball -Headers $headers -UseBasicParsing -TimeoutSec 600
+                $magic = [IO.File]::ReadAllBytes($tarball)[0..1]
+                if ($magic[0] -eq 0x3C -and $magic[1] -eq 0x21) {
+                    throw '下载到的是 HTML 而非 tar 包'
+                }
+                $downloaded = $true
+                break
+            } catch {
+                Write-Host "!!  失败：$($_.Exception.Message)" -ForegroundColor Yellow
+                if (Test-Path $tarball) { Remove-Item $tarball -Force }
+            }
+        }
+        if (-not $downloaded) { Stop-WithError "无法下载 $Name 源码（已尝试：$($urls -join ' | ')）" }
     } else {
         Write-Host "    已存在 $Name.tar.gz"
     }
 
-    if (-not (Test-Path $tree)) {
+    # 注意不能只看目录是否存在：Gradle 会为声明了 outputs.dir 的任务预先建好空目录，
+    # 空目录直接跳过解压就会得到「源码目录不完整」。
+    if (-not (Test-Path (Join-Path $tree 'CMakeLists.txt'))) {
         Write-Step "解压 $Name"
+        if (Test-Path $tree) { Remove-Item $tree -Recurse -Force }
         & tar -xzf $tarball -C $treeDir
         if ($LASTEXITCODE -ne 0) { Stop-WithError "解压失败：$tarball" }
     }

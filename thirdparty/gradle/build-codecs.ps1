@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 thirdparty/ 下的第三方原生静态库（zlib / libpng / libwebp / libjpeg-turbo / giflib / msgpack-c）。
@@ -40,6 +40,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $thirdpartyRoot = Join-Path $repoRoot 'thirdparty'
@@ -56,13 +57,13 @@ function Fail([string]$m) { throw $m }
 # ---------------------------------------------------------------- 源码清单
 # giflib 官方只在 SourceForge 放 tarball（直连返回 HTML 说明页），走 Debian pool 的原始包。
 $sources = @(
-    @{ Name = 'zlib';          Version = '1.3.1';  Url = 'https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz' }
-    @{ Name = 'libpng';        Version = '1.6.44'; Url = 'https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.44.tar.gz' }
-    @{ Name = 'libwebp';       Version = '1.6.0';  Url = 'https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz' }
-    @{ Name = 'libjpeg-turbo'; Version = '3.1.0';  Url = 'https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.0/libjpeg-turbo-3.1.0.tar.gz' }
-    @{ Name = 'giflib';        Version = '5.2.2';  Url = 'https://deb.debian.org/debian/pool/main/g/giflib/giflib_5.2.2.orig.tar.gz' }
+    @{ Name = 'zlib';          Version = '1.3.1';  File = 'zlib-1.3.1.tar.gz';          Url = 'https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz' }
+    @{ Name = 'libpng';        Version = '1.6.44'; File = 'libpng-1.6.44.tar.gz';        Url = 'https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.44.tar.gz' }
+    @{ Name = 'libwebp';       Version = '1.6.0';  File = 'libwebp-1.6.0.tar.gz';        Url = 'https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz' }
+    @{ Name = 'libjpeg-turbo'; Version = '3.1.0';  File = 'libjpeg-turbo-3.1.0.tar.gz';  Url = 'https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.0/libjpeg-turbo-3.1.0.tar.gz' }
+    @{ Name = 'giflib';        Version = '5.2.2';  File = 'giflib-5.2.2.tar.gz';         Url = 'https://deb.debian.org/debian/pool/main/g/giflib/giflib_5.2.2.orig.tar.gz' }
     # msgpack-c 的 C 库（tag 前缀 c-）；sysdep.h / pack_template.h 由 cmake 模板生成，见下文手工替换
-    @{ Name = 'msgpack-c';     Version = '7.0.2';  Url = 'https://github.com/msgpack/msgpack-c/releases/download/c-7.0.2/msgpack-c-7.0.2.tar.gz' }
+    @{ Name = 'msgpack-c';     Version = '7.0.2';  File = 'msgpack-c-7.0.2.tar.gz';      Url = 'https://github.com/msgpack/msgpack-c/releases/download/c-7.0.2/msgpack-c-7.0.2.tar.gz' }
 )
 
 # ------------------------------------------------ 1. 定位 Kotlin/Native 工具链
@@ -115,23 +116,43 @@ if ($Force) {
 }
 New-Item -ItemType Directory -Force -Path $srcDir, $treeDir, $cmakeDir | Out-Null
 
+$artifactRepo = Get-LolosiaArtifactRepo
 foreach ($s in $sources) {
-    $tarball = Join-Path $srcDir "$($s.Name)-$($s.Version).tar.gz"
+    $tarball = Join-Path $srcDir $s.File
     if ((Test-Path $tarball) -and -not $Force) {
-        Write-Host "    已存在 $($s.Name)-$($s.Version).tar.gz"
+        Write-Host "    已存在 $($s.File)"
         continue
     }
-    Info "下载 $($s.Name) $($s.Version)"
-    Invoke-WebRequest -Uri $s.Url -OutFile $tarball -UseBasicParsing -TimeoutSec 300
-    $magic = [System.IO.File]::ReadAllBytes($tarball)[0..1]
-    if ($magic[0] -eq 0x3C -and $magic[1] -eq 0x21) {
-        Remove-Item $tarball -Force
-        Fail "$($s.Name)：下载到的是 HTML 而非 tarball，源地址已失效（$($s.Url)）"
+
+    # 先问自建仓库的 /sources（配置了 local.properties 时），取不到再走上游
+    $urls = @()
+    if ($artifactRepo) { $urls += "$($artifactRepo.Sources)/$($s.Name)/$($s.Version)/$($s.File)" }
+    $urls += $s.Url
+
+    $downloaded = $false
+    foreach ($url in $urls) {
+        try {
+            Info "下载 $($s.Name) $($s.Version) <- $url"
+            $headers = @{}
+            if ($artifactRepo -and $url.StartsWith($artifactRepo.Sources) -and $artifactRepo.Username) {
+                $pair = "$($artifactRepo.Username):$($artifactRepo.Password)"
+                $headers['Authorization'] = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pair))
+            }
+            Invoke-WebRequest -Uri $url -OutFile $tarball -Headers $headers -UseBasicParsing -TimeoutSec 300
+            $magic = [System.IO.File]::ReadAllBytes($tarball)[0..1]
+            if ($magic[0] -eq 0x3C -and $magic[1] -eq 0x21) { throw '下载到的是 HTML 而非 tarball' }
+            $downloaded = $true
+            break
+        } catch {
+            Warn "$($s.Name)：$($_.Exception.Message)"
+            if (Test-Path $tarball) { Remove-Item $tarball -Force }
+        }
     }
+    if (-not $downloaded) { Fail "$($s.Name)：源码下载失败（已尝试：$($urls -join ' | ')）" }
 }
 
 foreach ($s in $sources) {
-    $tarball = Join-Path $srcDir "$($s.Name)-$($s.Version).tar.gz"
+    $tarball = Join-Path $srcDir $s.File
     $dirName = "$($s.Name)-$($s.Version)"
     # libpng 的 GitHub 归档解出来是 libpng-1.6.44，与本地命名一致；逐个确认
     if (Test-Path (Join-Path $treeDir $dirName)) { continue }

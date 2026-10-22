@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 RmlUi 静态库（thirdparty/<目标>/librmlui.a + thirdparty/include/RmlUi/**）。
@@ -75,6 +75,7 @@ if (-not (Test-Path $ftLib)) {
 
 # ---------------------------------------------------------------- 3. 源码
 $tree = Get-ThirdpartySource -Name "RmlUi-$Version" `
+    -Library 'rmlui' -Version $Version -FileName "RmlUi-$Version.tar.gz" `
     -Url "https://github.com/mikke89/RmlUi/archive/refs/tags/$Version.tar.gz" `
     -WorkDir $WorkDir -Force:$Force
 

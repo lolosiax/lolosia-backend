@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     为 Android 构建 UI 实验所需的原生库（SDL3 / FreeType / RmlUi / liblolosia.so）。
@@ -93,12 +93,15 @@ foreach ($p in @($toolchainFile, $clangXX, $cmake, $ninja)) {
 
 # ---------------------------------------------------------------- 1. 源码
 $sdlTree = Get-ThirdpartySource -Name 'SDL3-3.4.18' `
+    -Library 'sdl3' -Version '3.4.18' -FileName 'SDL3-3.4.18.tar.gz' `
     -Url 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz' `
     -WorkDir $WorkDir -Force:$Force
 $ftTree = Get-ThirdpartySource -Name 'freetype-VER-2-15-0' `
+    -Library 'freetype' -Version '2.15.0' -FileName 'freetype-VER-2-15-0.tar.gz' `
     -Url 'https://github.com/freetype/freetype/archive/refs/tags/VER-2-15-0.tar.gz' `
     -WorkDir $WorkDir -Force:$Force
 $rmluiTree = Get-ThirdpartySource -Name 'RmlUi-6.3' `
+    -Library 'rmlui' -Version '6.3' -FileName 'RmlUi-6.3.tar.gz' `
     -Url 'https://github.com/mikke89/RmlUi/archive/refs/tags/6.3.tar.gz' `
     -WorkDir $WorkDir -Force:$Force
 

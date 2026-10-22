@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 FreeType 静态库（thirdparty/<目标>/libfreetype.a + thirdparty/include/freetype2/**）。
@@ -65,6 +65,7 @@ Write-Host "    ninja   : $ninja"
 # ---------------------------------------------------------------- 2. 源码
 $tag = 'VER-' + ($Version -replace '\.', '-')
 $tree = Get-ThirdpartySource -Name "freetype-$tag" `
+    -Library 'freetype' -Version $Version -FileName "freetype-$tag.tar.gz" `
     -Url "https://github.com/freetype/freetype/archive/refs/tags/$tag.tar.gz" `
     -WorkDir $WorkDir -Force:$Force
 

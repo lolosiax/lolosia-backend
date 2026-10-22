@@ -14,7 +14,53 @@ version = rootProject.version
 val thirdparty = rootProject.extensions.getByType<ThirdpartyExtension>()
 
 val lolosiaLibDir = layout.buildDirectory.dir("thirdparty/lolosia/mingwX64/lib")
+
+// 仓库地址与账号不入库；Gradle 从 local.properties 读入后经环境变量交给脚本
+fun Exec.passThirdpartyRepo() {
+    if (thirdparty.repoUrl.isNotBlank()) {
+        environment("LOLOSIA_THIRDPARTY_REPO", thirdparty.repoUrl)
+        environment("LOLOSIA_THIRDPARTY_USERNAME", thirdparty.repoUsername)
+        environment("LOLOSIA_THIRDPARTY_PASSWORD", thirdparty.repoPassword)
+    }
+}
+
+// RmlUi 的后端胶水源码只在源码包里，不在静态库工件中；编译 liblolosia 前先把它放到
+// build/thirdparty/tree/RmlUi-6.3，优先从自建仓库 sources/ 获取。
+val prepareRmlUiSource = tasks.register<Exec>("prepareRmlUiSource") {
+    group = "thirdparty"
+    description = "准备 RmlUi 源码树（供 liblolosia 的 SDL_GPU 后端胶水使用）"
+    workingDir = rootProject.projectDir
+    commandLine(
+        "powershell", "-ExecutionPolicy", "Bypass",
+        "-File", "modules/client/src/nativeCpp/fetch-rmlui.ps1",
+    )
+    passThirdpartyRepo()
+    inputs.file(layout.projectDirectory.file("src/nativeCpp/fetch-rmlui.ps1"))
+    outputs.dir(rootProject.layout.buildDirectory.dir("thirdparty/tree/RmlUi-6.3"))
+}
+
+val buildLolosia = tasks.register<Exec>("buildLolosia") {
+    group = "build"
+    description = "从源码编译自研门面 liblolosia.a（mingwX64）"
+    workingDir = rootProject.projectDir
+    dependsOn(prepareRmlUiSource)
+    dependsOn(thirdparty.syncTask("sdl3", "mingwX64"))
+    dependsOn(thirdparty.syncTask("freetype", "mingwX64"))
+    dependsOn(thirdparty.syncTask("rmlui", "mingwX64"))
+    commandLine(
+        "powershell", "-ExecutionPolicy", "Bypass",
+        "-File", "modules/client/src/nativeCpp/build.ps1",
+        "-Target", "mingwX64",
+    )
+    inputs.dir(layout.projectDirectory.dir("src/nativeCpp/src"))
+    inputs.dir(layout.projectDirectory.dir("src/nativeCpp/include"))
+    inputs.file(layout.projectDirectory.file("src/nativeCpp/build.ps1"))
+    inputs.dir(rootProject.layout.projectDirectory.dir("thirdparty/include"))
+    outputs.file(rootProject.layout.projectDirectory.file("thirdparty/mingwX64/liblolosia.a"))
+}
+
 val copyLolosiaLib = tasks.register<Sync>("copyLolosiaStaticLib") {
+    dependsOn(buildLolosia)
     from(rootProject.layout.projectDirectory.file("thirdparty/mingwX64/liblolosia.a"))
     into(lolosiaLibDir)
 }

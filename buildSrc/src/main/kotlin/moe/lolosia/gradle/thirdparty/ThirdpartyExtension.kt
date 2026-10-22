@@ -20,6 +20,12 @@ open class ThirdpartyExtension {
     var repoUrl: String = ""
         internal set
 
+    var repoUsername: String = ""
+        internal set
+
+    var repoPassword: String = ""
+        internal set
+
     private val dirs = linkedMapOf<Pair<String, String>, Provider<Directory>>()
 
     private val syncTasks = linkedMapOf<Pair<String, String>, TaskProvider<*>>()

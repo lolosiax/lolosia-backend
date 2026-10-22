@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 SDL3 静态库（thirdparty/<目标>/libSDL3.a + thirdparty/include/SDL3/**）。
@@ -73,6 +73,7 @@ $windres = $tool.Windres
 
 # ------------------------------------------------ 2. 下载解压（源码不入库）
 $sdlTree = Get-ThirdpartySource -Name "SDL3-$Version" `
+    -Library 'sdl3' -Version $Version -FileName "SDL3-$Version.tar.gz" `
     -Url "https://github.com/libsdl-org/SDL/releases/download/release-$Version/SDL3-$Version.tar.gz" `
     -WorkDir $WorkDir -Force:$Force
 
