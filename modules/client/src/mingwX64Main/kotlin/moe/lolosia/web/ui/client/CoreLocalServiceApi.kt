@@ -20,11 +20,11 @@ import okio.Path.Companion.toPath
  * 每次调用都重新读取发现文件：服务重启后端口与 token 会轮换，UI 无需重启即可恢复。
  * 文件缺失、协议不匹配或请求失败一律按「服务未运行」降级，不向页面抛异常。
  *
- * @param endpointPath 发现文件路径；默认与服务端一致（`%ProgramData%\Lolosia\local-service.json`）。
+ * @param endpointPath 发现文件路径；为空时用默认位置（`%ProgramData%\Lolosia\local-service.json`）。
  * @author 洛洛希雅Lolosia
  */
 class CoreLocalServiceApi(
-    private val endpointPath: String = defaultEndpointPath(),
+    private val endpointPath: String? = null,
 ) : LocalServiceApi {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -63,7 +63,7 @@ class CoreLocalServiceApi(
 
     /** 读取发现文件；不存在或协议版本不一致时返回 `null`。 */
     private fun loadEndpoint(): LocalEndpoint? = runCatching {
-        val file = endpointPath.toPath()
+        val file = (endpointPath ?: defaultEndpointPath()).toPath()
         if (!FileSystem.SYSTEM.exists(file)) return null
         val endpoint = json.decodeFromString<LocalEndpoint>(FileSystem.SYSTEM.read(file) { readUtf8() })
         endpoint.takeIf { it.protocol == LOCAL_PROTOCOL_VERSION && it.port in 1..65535 }

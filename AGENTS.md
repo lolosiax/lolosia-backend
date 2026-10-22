@@ -249,9 +249,11 @@ gradlew :modules:app-desktop:compileKotlinMingwX64 :modules:app-desktop:compileK
   - **重启**：先杀旧的 `lolosia-backend.exe`（`Get-Process lolosia-backend | Stop-Process -Force`）再跑；
     否则链接会因 exe 被旧进程占用报 `AccessDeniedException`。
   - **UI 实验**（RmlUi 视图层 + SDL3 GPU/Vulkan 出帧）：`.\modules\app-desktop\build\bin\mingwX64\debugExecutable\lolosia-backend.exe ui` —— 首个参数是 `ui` 时不进服务器启动路径。
+    - **单进程调试**：同一可执行文件用 `--embed` 启动时，本地服务走**进程内传输**（`InProcessTransport`，不建端口、不写发现文件），再进 UI；无需 SCM / systemd，关窗后服务一起退出。`ui` 模式不启本地服务，页面按「服务未运行」降级。
     范围：RML/RCSS 描述界面（**flexbox 自动排版，不手算坐标**）+ data-model 数据绑定（Kotlin 的 ViewModel ↔ 文档变量，按钮走 `data-event-click="action('x')"`，表单控件走 `data-value` / `data-checked` 并读回 ViewModel），界面在 `resources/ui/probe.rml`；
     图片可用：资源从 classpath 读、解码复用已有的 C 编解码库（见 §7）；**F8 开内置调试器**（元素树 / 数据模型 / 日志 / 元素边框）；关窗即退出。图形栈的构建约定见 §7。
     排障：RmlUi 的日志走 stderr（直接跑控制台里就能看到）；要留档就重定向到文件 —— 但如果哪天日志「消失」，先怀疑 stderr 缓冲（见 §7 那条 `fflush`）。
+  - **服务进程**：`--service` 同时启动本地 loopback API 与事件订阅；两者都是同一进程内的模块，没有独立的 `--event-service*` 入口。Windows 下内置 SCM dispatcher（服务名 `LolosiaService`），非 SCM 启动（命令行 / systemd）自动回退为当前进程运行；事件订阅读 UI 写入的共享设置文件（Windows `%ProgramData%\Lolosia\client-settings.json`，Linux `work/client-settings.json`），登录后自动接上。
   - **UI 冒烟帮手**（Windows 专用，手动跑，`tools/ui-smoke/`，不进 Gradle）：改完界面想确认「到底画成什么样」时用，
     别指望它们能替你点按钮 —— SDL3 只处理窗口有鼠标焦点时的鼠标消息，`PostMessage` 注入的点击会被丢掉（键盘消息不丢，可以注入）。
     - `tools/ui-smoke/CaptureUi.ps1`：抓窗口客户区到 PNG（Vulkan 出帧，`PrintWindow` 会抓到黑屏，所以走置顶 + `CopyFromScreen`）。
@@ -312,8 +314,18 @@ modules/codecs/src/commonMain/kotlin/moe/lolosia/web/
   service/files/                AutoCrop / ThumbnailGenerator（expect）
 modules/codecs/src/nativeMain/kotlin/…/      thirdparty/（C 库门面：RgbaImage + png / webp / jpeg / gif）+ Image(actual) / ThumbnailGenerator(actual) / xhrdata(actual)
 modules/codecs/src/nativeInterop/cinterop/   第三方 C 库绑定（zlib / png / webp / jpeg / gif / msgpack 各一个 .def）
+modules/local/src/commonMain/kotlin/moe/lolosia/local/  本地服务（Win/Linux，不含 Ktor server）：
+                                LocalDispatcher（方法表 / 鉴权 / 错误帧）· LocalServer · LocalTransport · InProcessTransport ·
+                                metrics/（SystemMetricsSnapshot / readSystemMetrics + MetricsSampler）
+modules/local/src/mingwX64Main|linuxMain/kotlin/…/metrics/  readSystemMetrics 的平台 actual（Win32/NT API / /proc）
 modules/client/src/commonMain/kotlin/…/ui/   UI 实验里与平台无关的部分：mvvm/（Property·Command）· experiment/（ModelField·UiProbeViewModel）
                                 + UiExperiment.kt（expect fun runUiExperiment）
+modules/client/src/commonMain/kotlin/…/ui/client/  EventBusRuntime（服务进程内的事件订阅模块，随 `--service` 启动/停止）·
+                                FileSettingsStore（UI 与服务共用设置文件）· package.kt（共享设置路径与运行时工厂的 expect）·
+                                local/LocalClient（帧收发、请求挂起表、事件流；进程内 / loopback 共用）
+modules/client/src/nativeMain/kotlin/…/ui/client/  CurlEventStreamTransport（SSE 需要 libcurl 的增量读）
+modules/client/src/mingwX64Main/kotlin/…/ui/client/ Windows 实现：共享设置路径（ProgramData）· event spool 与通知 · 本地服务发现
+modules/client/src/linuxMain/kotlin/…/ui/client/  Linux 事件运行时（设置落 `work/client-settings.json`，事件只落日志）
 modules/client/src/mingwX64Main/kotlin/…/ui/ UiExperiment.mingw.kt：唯一接触 ll_ui_* 的地方 —— 声明数据模型字段、订阅 ViewModel、转发 action、跑帧循环
 modules/client/src/linuxMain/kotlin/…/ui/    UiExperiment.linux.kt：占位 actual（linux 目标还没有 SDL3）
 modules/client/src/commonMain/resources/ui/  probe.rml（实验界面：RML + 内联 RCSS，flexbox 排版 + data-model 绑定 + 表单控件）与 sample.png（图片链路的测试图案）
@@ -344,7 +356,10 @@ modules/server/src/commonMain/kotlin/moe/lolosia/web/
 modules/server/src/commonMain/resources/       application.json（内嵌默认配置）/ permissions.yaml（默认权限注册表）/ media-rules.yaml / static/home/ / hello.txt
 modules/server/src/nativeMain/kotlin/…/configuration/PlatformModule.kt   platformModule(actual)：PosixFileStore 等绑定
 modules/server/src/linuxMain|mingwX64Main/kotlin/…/   平台实现：util/proc/Shell + util/system/SystemMetricsReader
-modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt   唯一入口：装 classpath → 读配置 → 起 Koin → 起 CIO 引擎
+modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt   唯一入口：装 classpath → 读配置 → 起 Koin → 起 CIO 引擎；`--service` 走服务进程
+modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/package.kt runServiceProcess（expect：SCM / 信号驱动的服务主体）
+modules/app-desktop/src/mingwX64Main/kotlin/…/ServiceProcess.mingw.kt SCM dispatcher（`LolosiaService`）+ 非 SCM 启动时回退控制台
+modules/app-desktop/src/linuxMain/kotlin/…/ServiceProcess.linux.kt   信号驱动的服务主体
 modules/app-android/           独立 Gradle 构建（AGP）：MainActivity（继承 SDLActivity）+ SDL3 的 Java 胶水（org.libsdl.app）
                                 assets 复用 modules/client/src/commonMain/resources；jniLibs 指向 thirdparty/androidJniLibs
 modules/client/src/nativeCpp/android/LolosiaUiAndroid.cpp   Android JNI 宿主：SDL_main、assets 资源、BitmapFactory 解码、probe 数据模型
@@ -371,4 +386,5 @@ tools/ui-smoke/                 UI 实验的冒烟帮手（Windows 专用、手�
 | [doc/footprint-map-design.md](doc/footprint-map-design.md) | 足迹地图：带 GPS / 拍摄时间的照片聚成热点与拍摄会话、人工画圈命名区域；聚类算法（DBSCAN + 相邻间隔切段）、接口契约、区域表、地图底图（高德）选型与替代方案 |
 | [doc/anime-timetable-design.md](doc/anime-timetable-design.md) | 番组表：订阅 MioBT 系发布站 RSS（发布事件）+ Bangumi API（番剧目录 / 播出时间），按 (番剧, 发布组) 关注；标题匹配与手动映射学习闭环、`anime_*` 四表、经既有 SSE 通道实时推送 |
 | [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 / 工程形态（运行层面） |
+| [doc/local-service-design.md](doc/local-service-design.md) | 本地服务（Win/Linux）：独立 dispatcher、进程内 / loopback 两种传输、request/response/event 帧、job 与 prompt 语义 |
 | [doc/native-migration-plan.md](doc/native-migration-plan.md) | JVM → Kotlin/Native 迁移详设与实测记录（历史） |

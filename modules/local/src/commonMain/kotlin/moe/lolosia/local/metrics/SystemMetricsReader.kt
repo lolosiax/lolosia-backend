@@ -1,4 +1,4 @@
-package moe.lolosia.web.util.system
+package moe.lolosia.local.metrics
 
 /**
  * 读取一份系统指标快照。
@@ -8,4 +8,4 @@ package moe.lolosia.web.util.system
  *
  * @param diskPath 统计磁盘容量用的挂载点（如 `/mnt/hdd1`），Linux 生效；Windows 固定统计系统盘，忽略该参数。
  */
-internal expect fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot?
+expect fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot?

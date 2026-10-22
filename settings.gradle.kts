@@ -37,6 +37,8 @@ include(":modules:router-ksp")
 include(":modules:protocol")
 include(":modules:core")
 include(":modules:codecs")
+// 本机能力：本地服务 dispatcher / 指标采集 / 进程内传输（不含 Ktor server）
+include(":modules:local")
 include(":modules:ui")
 include(":modules:client")
 include(":modules:server")

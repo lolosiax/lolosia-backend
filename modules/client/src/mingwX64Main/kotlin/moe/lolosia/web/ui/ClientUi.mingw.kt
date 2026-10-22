@@ -2,15 +2,17 @@ package moe.lolosia.web.ui
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import moe.lolosia.web.ui.api.LocalServiceApi
 import moe.lolosia.web.ui.app.ClientApp
 import moe.lolosia.web.ui.app.ClientHost
 import moe.lolosia.web.ui.client.CoreLocalServiceApi
 import moe.lolosia.web.ui.client.CoreRemoteApi
+import moe.lolosia.web.ui.client.FileSettingsStore
 import moe.lolosia.web.ui.client.WindowsImageLoader
 import moe.lolosia.web.ui.client.WindowsEventSpoolWatcher
 import moe.lolosia.web.ui.client.WindowsNotifier
-import moe.lolosia.web.ui.client.WindowsSettingsStore
 import moe.lolosia.web.ui.client.WindowsUiBackend
+import moe.lolosia.web.ui.client.sharedSettingsPath
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.Logger
@@ -32,7 +34,7 @@ private val FONT_CANDIDATES = listOf(
 /** 环境变量，用于在不改设置文件的情况下临时切换服务端。 */
 private const val ENV_BASE_URL = "LOLOSIA_BASE_URL"
 
-actual fun runClientUi(): Int {
+actual fun runClientUi(localService: LocalServiceApi?): Int {
     val log = Log.of("UiClient")
     val classpath = installPlatformClasspath()
     val backend = WindowsUiBackend(classpath)
@@ -53,9 +55,9 @@ actual fun runClientUi(): Int {
         WindowsEventSpoolWatcher { message -> notifier.show(message.title, message.text) }.run()
     }
     val app = ClientApp(
-        settingsStore = WindowsSettingsStore(),
+        settingsStore = FileSettingsStore(sharedSettingsPath()),
         remoteApiFactory = { CoreRemoteApi(it) },
-        localServiceApi = CoreLocalServiceApi(),
+        localServiceApi = localService ?: CoreLocalServiceApi(),
         imageLoader = WindowsImageLoader(backend),
         scope = scope,
         postToUi = {

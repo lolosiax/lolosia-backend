@@ -22,6 +22,8 @@ kotlin {
             api(project(":modules:protocol"))
             api(project(":modules:core"))
             api(project(":modules:codecs"))
+            // 仪表盘复用本地服务的系统指标采集
+            api(project(":modules:local"))
 
             // DI：Koin（native 产物已核实齐全）；日志与配置为自研，无额外依赖
             implementation(libs.koin.core)

@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import moe.lolosia.local.metrics.MetricsSampler
 import moe.lolosia.web.dto.ApiResult
 import moe.lolosia.web.dto.LOCAL_PROTOCOL_VERSION
 import moe.lolosia.web.dto.LocalCapabilitiesDto
@@ -20,8 +21,6 @@ import moe.lolosia.web.dto.LocalMetricsDto
 import moe.lolosia.web.dto.LocalVersionDto
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.platform.envOrNull
-import moe.lolosia.web.util.system.SystemMetricsSnapshot
-import moe.lolosia.web.util.system.readSystemMetrics
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import kotlin.concurrent.Volatile
@@ -69,7 +68,7 @@ private val json = Json {
 suspend fun startLocalService(endpointPath: String = defaultLocalEndpointPath()): LocalService {
     val token = randomToken()
     val startedAt = TimeSource.Monotonic.markNow()
-    val metrics = LocalMetricsReader()
+    val metrics = MetricsSampler()
     val server = embeddedServer(CIO, port = 0, host = "127.0.0.1") {
         routing {
             get("/local/v1/health") {
@@ -163,41 +162,3 @@ private const val HEX = "0123456789abcdef"
 
 /** 未授权响应：仍是 `{code,msg,data}` 信封。 */
 private const val UNAUTHORIZED_BODY: String = """{"code":401,"msg":"本地服务未授权","data":null}"""
-
-/**
- * 指标采样：把累计计数器对上一次快照求差，得到瞬时占用率。
- *
- * 首次调用没有基准，会短暂等待后再采一次；仍然拿不到时 CPU 返回 `null`。
- */
-private class LocalMetricsReader {
-
-    @Volatile
-    private var previous: SystemMetricsSnapshot? = null
-
-    suspend fun read(): LocalMetricsDto {
-        var before = previous
-        var current = readSystemMetrics("")
-        if (before == null) {
-            // 首次调用没有基准：先用当前快照当基准，等一小会儿再采一次。
-            before = current
-            delay(FIRST_SAMPLE_DELAY_MS)
-            current = readSystemMetrics("")
-        }
-        if (current == null) return LocalMetricsDto()
-        previous = current
-        val totalDelta = before?.let { current.cpuTotalTicks - it.cpuTotalTicks } ?: 0L
-        val busyDelta = before?.let { current.cpuBusyTicks - it.cpuBusyTicks } ?: 0L
-        val cpu = if (totalDelta > 0) busyDelta.toDouble() / totalDelta * 100 else null
-        return LocalMetricsDto(
-            cpu = cpu,
-            mem = ratio(current.memUsedBytes, current.memTotalBytes),
-            disk = ratio(current.diskUsedBytes, current.diskTotalBytes),
-        )
-    }
-
-    private fun ratio(used: Long, total: Long): Double? =
-        if (total > 0) used.toDouble() / total * 100 else null
-}
-
-/** 首次采样等待时长；足够让 CPU 计数器产生可观测的增量。 */
-private const val FIRST_SAMPLE_DELAY_MS: Long = 150

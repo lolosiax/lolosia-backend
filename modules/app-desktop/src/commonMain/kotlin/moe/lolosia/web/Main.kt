@@ -2,7 +2,9 @@ package moe.lolosia.web
 
 import io.ktor.server.cio.*
 import io.ktor.server.engine.*
-import kotlinx.coroutines.runBlocking
+import moe.lolosia.local.InProcessTransport
+import moe.lolosia.local.LocalDispatcher
+import moe.lolosia.local.LocalServer
 import moe.lolosia.web.configuration.configureApplication
 import moe.lolosia.web.configuration.platformModule
 import moe.lolosia.web.configuration.startAppKoin
@@ -12,8 +14,9 @@ import moe.lolosia.web.localservice.startLocalService
 import moe.lolosia.web.settings.ENV_SETTINGS_FILE
 import moe.lolosia.web.settings.loadAppSettings
 import moe.lolosia.web.ui.runClientUi
-import moe.lolosia.web.ui.runEventBusService
 import moe.lolosia.web.ui.runUiExperiment
+import moe.lolosia.web.ui.client.createEventBusRuntime
+import moe.lolosia.web.ui.client.local.LocalClient
 import moe.lolosia.web.util.classpath.installPlatformClasspath
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.LogLevel
@@ -23,8 +26,8 @@ import moe.lolosia.web.util.platform.envOrNull
 /**
  * 应用程序主入口点：装载 classpath、加载配置、装配 Koin、启动 CIO 引擎。
  *
- * 首个参数为 `ui` 时改走 UI 实验（SDL3 + Vulkan 窗口，见 `ui/UiExperiment.kt`），
- * 不进服务器启动路径；否则按下面的规则解析端口。
+ * 首个参数为 `ui` 时只开界面；`--service` 是不带界面的服务进程（本地 API + 事件订阅）；
+ * `--embed` 在同一进程里把服务与 UI 一起拉起，便于调试；否则按下面的规则解析端口。
  *
  * 端口可用第一个命令行参数覆盖：`./ktor-template.kexe 7130`。
  * 优先级：命令行参数 > 环境变量 `KTOR_PORT` > 配置文件 `application.json` > 内置默认值。
@@ -34,23 +37,44 @@ import moe.lolosia.web.util.platform.envOrNull
  */
 fun main(args: Array<String>) {
     val first = args.firstOrNull()
-    // 本地系统服务：无界面，只监听 loopback，等待进程被 SCM / systemd 结束。
+    // 服务进程：无界面，包含「本地 loopback API」与「远程事件订阅」两个模块。
+    // 事件订阅随服务启动，不是独立服务，也不需要单独配置。
     if (first == "--service" || first == "service") {
+        val code = runServiceProcess { awaitStop ->
+            val log = Log.of("Main")
+            val localService = startLocalService()
+            val eventBus = createEventBusRuntime()
+            eventBus.start()
+            log.info { "服务已启动：本地 API 127.0.0.1:${localService.endpoint.port}，事件订阅运行中" }
+            try {
+                awaitStop()
+            } finally {
+                eventBus.stop()
+                localService.stop()
+            }
+        }
+        if (code != 0) Log.of("Main").error { "服务退出码 $code" }
+        return
+    }
+    // 单进程调试：本地服务、事件订阅与 UI 跑在同一个进程里，无需先安装 / 启动系统服务。
+    // 本地服务走进程内传输：不建端口、不写发现文件，但仍经过同一套 dispatcher。
+    if (first == "--embed" || first == "embed") {
         val log = Log.of("Main")
-        val service = runBlocking { startLocalService() }
-        log.info { "本地服务监听 127.0.0.1:${service.endpoint.port}" }
-        awaitSignalTermination()
-        service.stop()
-        return
-    }
-    if (first == "--event-service") {
-        val code = runEventBusService(console = false)
-        if (code != 0) Log.of("Main").error { "事件服务退出码 $code" }
-        return
-    }
-    // 仅供本地调试：不经过 SCM，直接在控制台跑订阅循环（Ctrl+C 结束）。
-    if (first == "--event-service-console") {
-        runEventBusService(console = true)
+        val (serverEnd, clientEnd) = InProcessTransport.create()
+        val server = LocalServer(LocalDispatcher(), serverEnd)
+        server.start()
+        val localClient = LocalClient(clientEnd)
+        val eventBus = createEventBusRuntime()
+        eventBus.start()
+        log.info { "单进程模式：本地服务（进程内传输）与事件订阅随 UI 启动" }
+        val code = try {
+            runClientUi(localClient)
+        } finally {
+            eventBus.stop()
+            localClient.close()
+            server.stop()
+        }
+        if (code != 0) log.error { "客户端退出码 $code" }
         return
     }
     // UI 会占住当前线程直到窗口关闭，也不参与 Koin 装配，因此先于一切启动逻辑分流。

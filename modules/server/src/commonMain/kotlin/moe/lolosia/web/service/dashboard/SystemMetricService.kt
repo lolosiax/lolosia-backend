@@ -9,8 +9,8 @@ import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import moe.lolosia.web.util.session.Context
-import moe.lolosia.web.util.system.SystemMetricsSnapshot
-import moe.lolosia.web.util.system.readSystemMetrics
+import moe.lolosia.local.metrics.SystemMetricsSnapshot
+import moe.lolosia.local.metrics.readSystemMetrics
 import moe.lolosia.web.util.time.PROCESS_START_MS
 import moe.lolosia.web.util.time.nowEpochMs
 import kotlin.time.Clock

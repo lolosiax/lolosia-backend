@@ -1,4 +1,4 @@
-package moe.lolosia.web.util.system
+package moe.lolosia.local.metrics
 
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.UnsafeNumber
@@ -25,7 +25,7 @@ import platform.posix.popen
  *
  * 任意一步解析失败都返回 `null`，不抛异常。
  */
-internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? {
+actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? {
     val stat = readText("/proc/stat") ?: return null
     val meminfo = readText("/proc/meminfo") ?: return null
     val netdev = readText("/proc/net/dev") ?: return null

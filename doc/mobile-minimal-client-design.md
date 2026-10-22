@@ -369,9 +369,10 @@ RML: decorator: image(/mem/<hash>) / img src
 ### 6.1 Windows
 
 - 继续使用 `lolosia-backend.exe ui` / `--ui`；SDL3 + RmlUi + `liblolosia.a`。
+- 调试可用 `--embed`：同一进程内启动本地服务（进程内传输，不建端口、不写发现文件），不依赖 SCM / systemd；生产仍按 §7 的进程模型拆分。
 - `UiBackend` 由 `:client` 的 cinterop 实现；资源走 classpath，字体走磁盘/系统字体。
 - 新增 `--service` 模式（§7），UI 与服务通过 loopback 通信。
-- 开发命令：`gradlew runDebug -PappArgs=ui`；服务模式 `-PappArgs=--service`。
+- 开发命令：`gradlew runDebug -PappArgs=ui`（只开 UI）、`gradlew runDebug -PappArgs=--embed`（UI + 本地服务单进程）；服务模式 `-PappArgs=--service`。
 
 ### 6.2 Android
 
@@ -481,7 +482,10 @@ adb shell am start -n moe.lolosia.android/.MainActivity
 
 ### 7.7 远程事件订阅（EventBus）
 
-- Android 用前台 Service（`EventBusService`，`dataSync` 类型）保持一条 `/api/sse` 长连接；
+- **Windows / Linux**：事件订阅是 `--service` 服务进程内的一个模块，随服务启动、随服务停止；不再单独注册 `LolosiaEventBus`，也不再有 `--event-service*` 入口。
+- Windows 的 `--service` 内置 SCM dispatcher（服务名 `LolosiaService`），可直接用 `sc create ... binPath= "...\lolosia-backend.exe --service"` 注册；非 SCM 启动自动回退为控制台模式。
+- 服务与 UI 共用同一份客户端设置（Windows `%ProgramData%\Lolosia\client-settings.json`，Linux `work/client-settings.json`），UI 登录后写入，服务每 10 秒重读，因此不需要单独配置 token。
+- **Android** 用前台 Service（`EventBusService`，`dataSync` 类型）保持一条 `/api/sse` 长连接；
   三步握手与服务端 `SseController` 一致：`POST /api/sse`（`x-upgrade: event-source`）→
   `POST /api/sse/registry`（Bearer token）→ `GET /api/sse?eventSourceId=…`。
 - 事件转系统通知：`anime.release` 显示「番名 + 第 N 话 + 发布标题」；未知事件显示事件名与原始数据。
@@ -598,7 +602,7 @@ modules/client/src/commonMain/resources/ui/
 
 ### M4：本地服务
 
-- Windows `--service` + SCM、loopback、token 文件；Android 前台 Service + loopback。
+- Windows `--service`（本地 API + 事件订阅同进程）、loopback、共享设置文件；Android 前台 Service + loopback。
 - UI `LocalServiceApi`、Profile 本地状态卡片。
 - 验收：服务未启动时 UI 正常；启动后显示 CPU/内存/磁盘；服务重启后 UI 自动恢复。
 

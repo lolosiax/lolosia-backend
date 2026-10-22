@@ -1,4 +1,4 @@
-package moe.lolosia.web.util.system
+package moe.lolosia.local.metrics
 
 import kotlinx.cinterop.*
 import platform.posix.getenv
@@ -21,7 +21,7 @@ import platform.windows.*
  * @param diskPath 该平台忽略（Linux 用挂载点，Windows 固定统计系统盘）。
  */
 @Suppress("UNUSED_PARAMETER")
-internal actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? {
+actual fun readSystemMetrics(diskPath: String): SystemMetricsSnapshot? {
     val cpu = readCpu() ?: return null
     val mem = readMem() ?: return null
     val disk = readDisk()

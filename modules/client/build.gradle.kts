@@ -37,11 +37,13 @@ kotlin {
             api(project(":modules:core"))
             api(project(":modules:codecs"))
             api(project(":modules:ui"))
+            // 本地服务的帧模型与进程内传输
+            api(project(":modules:local"))
             implementation(libs.okio)
         }
         // EventBus 的 SSE 需要增量读取响应体；WinHTTP 引擎会先读完整个响应，
-        // 长连接因此拿不到任何一帧。libcurl 的写回调是流式的，TLS 走 Schannel。
-        mingwX64Main.dependencies {
+        // 长连接因此拿不到任何一帧。libcurl 的写回调是流式的。
+        nativeMain.dependencies {
             implementation(ktorLibs.client.curl)
         }
         commonTest.dependencies {

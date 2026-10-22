@@ -1,4 +1,4 @@
-package moe.lolosia.web.util.system
+package moe.lolosia.local.metrics
 
 /**
  * 一份系统指标的**原始计数快照**。

@@ -8,15 +8,16 @@ import okio.FileSystem
 import okio.Path.Companion.toPath
 
 /**
- * Windows 本地设置：落在工作目录下的 JSON 文件。
+ * JSON 文件形式的客户端设置。
  *
- * 文件里含会话 id，不写日志；读写失败一律退回默认值 / 静默忽略。
+ * UI 与服务进程共用同一份文件：UI 登录后写入，服务进程按固定间隔重新读取，
+ * 因此服务不需要单独配置 token。文件里含会话 id，不写日志；读写失败退回默认值或静默忽略。
  *
- * @param path 设置文件路径，相对当前工作目录。
+ * @param path 设置文件的绝对路径，由各平台的 [sharedSettingsPath] 给出。
  * @author 洛洛希雅Lolosia
  */
-class WindowsSettingsStore(
-    private val path: String = "work/client-settings.json",
+class FileSettingsStore(
+    private val path: String,
 ) : SettingsStore {
 
     private val json = Json {
