@@ -24,6 +24,7 @@ open class LolosiaExtension {
     val constants: ConstantsExtension = ConstantsExtension()
     val docker: DockerExtension = DockerExtension()
     val classpath: ClasspathExtension = ClasspathExtension()
+    val windows: WindowsResourceExtension = WindowsResourceExtension()
 
     fun deploy(action: Action<DeployExtension>) {
         action.execute(deploy)
@@ -43,5 +44,9 @@ open class LolosiaExtension {
 
     fun classpath(action: Action<ClasspathExtension>) {
         action.execute(classpath)
+    }
+
+    fun windows(action: Action<WindowsResourceExtension>) {
+        action.execute(windows)
     }
 }

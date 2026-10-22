@@ -156,8 +156,11 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
     `media-rules.yaml` 与仓库里的占位 `static/home/index.html`。两条链路各有 `classpathZip<Target>[Debug]` 与
     `windres|objcopyClasspath<Target>[Debug]`，产物分放在 `build/generated/classpath/<目标>[/debug]`（zip 同名，混放会互相覆盖）。
   - ⚠️ **改了 `resources/**` 必须重新链接**：`buildSrc/NativeClasspath.kt` 已把 `classpath.res` / `classpath.o` 声明为链接任务的输入，只改资源内容也会触发 `classpathZip → windres/objcopy → link`；若发现改动没生效，先看 link 任务是不是被判了 UP-TO-DATE（debug 认 `windresClasspath<Target>Debug` / `objcopyClasspath<Target>Debug`）。
-- **Windows 进程代码页**：`classpath/mingw/app.manifest`（`activeCodePage=UTF-8`）由 `classpath.rc` 以 `RT_MANIFEST` 引用，随 `classpath.res` 一起链进 exe。
+- **Windows 进程代码页**：`classpath/mingw/app.manifest`（`activeCodePage=UTF-8`）由构建期生成的 `.rc` 以 `RT_MANIFEST` 引用，随 `classpath.res` 一起链进 exe。
   没有它，okio 走的 CRT 窄字符 API 会把中文文件名解错而**直接丢弃** —— 症状是目录里「看着少文件」，排查时先怀疑代码页。
+- **Windows exe 的版本信息与图标也在这个 `.rc` 里**（`VERSIONINFO` + `ICON`），由 `buildSrc/NativeClasspath.kt` 生成到 `build/generated/classpath/<目标>/`，不要手写：
+  版本号取工程 `version`（`1.0.0-SNAPSHOT` → FILEVERSION `1,0,0,0`），名称/公司/版权/图标来自 `lolosia { windows { … } }`（`:modules:app-desktop` 里配的，图标复用前端 `public/favicon.ico`）。
+  资源脚本是 UTF-8，windres 以 `--codepage=65001` 读，改这段代码时别把编码搞丢。
 - **默认权限注册表**是内嵌资源 `permissions.yaml`（`classpath` 根下），由 `loadPermissionRegistry` 在 `appModule` 里解析成 `PermissionRegistry` 单例；改它同样要重新编译。
 - **运行期资源目录**（不在二进制内）：`/res/resources/**` → `work/resources/**`，用 `FileStoreClasspath` 把 `FileStore` 的子目录挂给 `staticClasspath`（前端 landing 页背景图走这条）。
   带 `?webp` 时按旧版语义转 WebP 并落盘缓存 `work/cache/webp/{源文件内容md5}.webp`；不支持解码的格式（bmp / tiff）或转换失败一律回退原图（`service/WebpCache.kt` 落盘，转码走 `util/image/Image.kt`）。

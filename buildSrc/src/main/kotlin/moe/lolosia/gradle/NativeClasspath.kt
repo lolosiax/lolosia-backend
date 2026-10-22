@@ -8,7 +8,6 @@ import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.file.Directory
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.provider.Provider
-import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
@@ -55,15 +54,19 @@ internal fun Project.configureNativeClasspath(lolosia: LolosiaExtension) {
         .filter { extension.targets.isEmpty() || it.name in extension.targets }
     if (targets.isEmpty()) return
 
-    targets.forEach { configureTargetClasspath(it, extension) }
+    targets.forEach { configureTargetClasspath(it, extension, lolosia) }
 }
 
-private fun Project.configureTargetClasspath(target: KotlinNativeTarget, extension: ClasspathExtension) {
+private fun Project.configureTargetClasspath(
+    target: KotlinNativeTarget,
+    extension: ClasspathExtension,
+    lolosia: LolosiaExtension,
+) {
     val suffix = target.name.replaceFirstChar { it.uppercaseChar() }
 
     // 任务名沿用旧的无后缀命名（release），debug 那条补「Debug」后缀以示区分
-    val release = registerClasspath(target, suffix, "", extension, includeVite = true)
-    val debug = registerClasspath(target, suffix, "Debug", extension, includeVite = false)
+    val release = registerClasspath(target, suffix, "", extension, lolosia, includeVite = true)
+    val debug = registerClasspath(target, suffix, "Debug", extension, lolosia, includeVite = false)
 
     target.binaries.withType<Executable>().configureEach {
         val embed = if (buildType == NativeBuildType.DEBUG) debug else release
@@ -95,6 +98,7 @@ private fun Project.registerClasspath(
     suffix: String,
     flavorSuffix: String,
     extension: ClasspathExtension,
+    lolosia: LolosiaExtension,
     includeVite: Boolean,
 ): ClasspathEmbed {
     val embedDir = layout.buildDirectory.dir(
@@ -133,7 +137,7 @@ private fun Project.registerClasspath(
 
     return when {
         target.name.startsWith("mingw") ->
-            embedAsWindowsResource(suffix, flavorSuffix, zipTask, embedDir)
+            embedAsWindowsResource(suffix, flavorSuffix, zipTask, embedDir, lolosia)
 
         target.name.startsWith("linux") ->
             embedAsLinuxObject(target, suffix, flavorSuffix, zipTask, embedDir, extension)
@@ -221,12 +225,56 @@ private fun Project.embedAsWindowsResource(
     flavorSuffix: String,
     zipTask: TaskProvider<Zip>,
     embedDir: Provider<Directory>,
+    lolosia: LolosiaExtension,
 ): ClasspathEmbed {
-    val prepareRc = tasks.register("prepareClasspathRc$suffix$flavorSuffix", Copy::class.java) {
+    val windows = lolosia.windows
+    val productName = lolosia.projectName ?: rootProject.name
+    val version = project.version.toString()
+    val icon = windows.icon?.takeIf { it.isFile }
+    if (windows.icon != null && icon == null) {
+        logger.warn("lolosia.windows.icon 不存在，这次不嵌图标：${windows.icon}")
+    }
+
+    val prepareRc = tasks.register("prepareClasspathRc$suffix$flavorSuffix") {
         group = "classpath"
-        description = "把 classpath.rc 与 app.manifest 放到 classpath.zip 同级目录，供 windres 使用"
-        from(rootProject.layout.projectDirectory.dir("classpath/mingw"))
-        into(embedDir)
+        description = "生成 PE 资源脚本（classpath / 清单 / 版本信息 / 图标）"
+        dependsOn(zipTask)
+
+        val manifest = rootProject.layout.projectDirectory.file("classpath/mingw/$APP_MANIFEST").asFile
+        val dir = embedDir.get().asFile
+        val rcFile = dir.resolve(RC_FILE)
+
+        inputs.file(manifest)
+        inputs.property("version", version)
+        inputs.property("productName", productName)
+        inputs.property("fileDescription", windows.fileDescription.ifBlank { productName })
+        inputs.property("companyName", windows.companyName.ifBlank { productName })
+        inputs.property("copyright", windows.copyright)
+        inputs.property("hasIcon", icon != null)
+        outputs.file(rcFile)
+        if (icon != null) {
+            inputs.file(icon)
+            outputs.file(dir.resolve(ICON_FILE))
+        }
+
+        doLast {
+            dir.mkdirs()
+            manifest.copyTo(dir.resolve(APP_MANIFEST), overwrite = true)
+            icon?.copyTo(dir.resolve(ICON_FILE), overwrite = true)
+            rcFile.writeText(
+                buildWindowsResourceScript(
+                    version = version,
+                    productName = productName,
+                    fileDescription = windows.fileDescription.ifBlank { productName },
+                    companyName = windows.companyName.ifBlank { productName },
+                    copyright = windows.copyright,
+                    internalName = rootProject.name,
+                    executableName = "${rootProject.name}.exe",
+                    withIcon = icon != null,
+                ),
+                Charsets.UTF_8,
+            )
+        }
     }
 
     val windres = tasks.register("windresClasspath$suffix$flavorSuffix", Exec::class.java) {
@@ -236,22 +284,99 @@ private fun Project.embedAsWindowsResource(
 
         val dir = embedDir.get().asFile
         workingDir = dir
-        inputs.file(dir.resolve("classpath.rc"))
-        // app.manifest 由 classpath.rc 引用（RT_MANIFEST），内容变化也要重新编译
+        inputs.file(dir.resolve(RC_FILE))
+        // app.manifest / app.ico 由 classpath.rc 引用，内容变化也要重新编译
         inputs.file(dir.resolve(APP_MANIFEST))
+        if (icon != null) inputs.file(dir.resolve(ICON_FILE))
         inputs.file(dir.resolve(CLASSPATH_ZIP_NAME))
         outputs.file(dir.resolve(CLASSPATH_RES))
 
         val binDir = konanMingwBinDir()
         commandLine(
             File(binDir, "windres").absolutePath,
-            "classpath.rc", "-O", "coff", "-o", CLASSPATH_RES,
+            // 资源脚本是 UTF-8（版本信息里有中文），windres 默认按 GBK 读会乱码
+            "--codepage=65001",
+            RC_FILE, "-O", "coff", "-o", CLASSPATH_RES,
         )
         environment("PATH", "${binDir.absolutePath}${File.pathSeparator}${System.getenv("PATH")}")
     }
 
     val resource = embedDir.get().asFile.resolve(CLASSPATH_RES)
     return ClasspathEmbed(windres, resource, listOf(resource.absolutePath))
+}
+
+/**
+ * 生成 windres 用的 `.rc`。
+ *
+ * 版本号取 Gradle 的 `version`（FILEVERSION 只认 4 段数字，`-SNAPSHOT` 这类后缀会被丢掉），
+ * 文件内容按 UTF-8 写，windres 侧用 `--codepage=65001` 读。
+ */
+private fun buildWindowsResourceScript(
+    version: String,
+    productName: String,
+    fileDescription: String,
+    companyName: String,
+    copyright: String,
+    internalName: String,
+    executableName: String,
+    withIcon: Boolean,
+): String {
+    val quad = winVersionParts(version).joinToString(",")
+    val quote = { value: String -> value.replace("\"", "'") }
+
+    return buildString {
+        appendLine("// 由 Gradle 生成，不要手改：版本号取工程 version，名称与图标来自 lolosia { windows { … } }。")
+        appendLine("// 文件本身是 UTF-8，windres 以 --codepage=65001 读取。")
+        appendLine()
+        appendLine("// 内嵌 classpath.zip（自定义资源类型），名字与 Classpath.mingw.kt 的查找逻辑对应。")
+        appendLine("IDR_CLASSPATH  CLASSPATH  \"$CLASSPATH_ZIP_NAME\"")
+        appendLine()
+        appendLine("// 应用程序清单（RT_MANIFEST = 24）：把进程代码页切成 UTF-8，否则中文文件名会被 okio 丢弃。")
+        appendLine("1  24  \"$APP_MANIFEST\"")
+        if (withIcon) {
+            appendLine()
+            appendLine("// Explorer / 任务栏图标")
+            appendLine("1  ICON  \"$ICON_FILE\"")
+        }
+        appendLine()
+        appendLine("1 VERSIONINFO")
+        appendLine("FILEVERSION $quad")
+        appendLine("PRODUCTVERSION $quad")
+        appendLine("FILEFLAGSMASK 0x3fL")
+        appendLine("FILEFLAGS 0x0L")
+        appendLine("FILEOS 0x40004L")
+        appendLine("FILETYPE 0x1L")
+        appendLine("FILESUBTYPE 0x0L")
+        appendLine("BEGIN")
+        appendLine("  BLOCK \"StringFileInfo\"")
+        appendLine("  BEGIN")
+        appendLine("    BLOCK \"040904b0\"")
+        appendLine("    BEGIN")
+        appendLine("      VALUE \"CompanyName\", \"${quote(companyName)}\"")
+        appendLine("      VALUE \"FileDescription\", \"${quote(fileDescription)}\"")
+        appendLine("      VALUE \"FileVersion\", \"${quote(version)}\"")
+        appendLine("      VALUE \"InternalName\", \"${quote(internalName)}\"")
+        if (copyright.isNotBlank()) {
+            appendLine("      VALUE \"LegalCopyright\", \"${quote(copyright)}\"")
+        }
+        appendLine("      VALUE \"OriginalFilename\", \"${quote(executableName)}\"")
+        appendLine("      VALUE \"ProductName\", \"${quote(productName)}\"")
+        appendLine("      VALUE \"ProductVersion\", \"${quote(version)}\"")
+        appendLine("    END")
+        appendLine("  END")
+        appendLine("  BLOCK \"VarFileInfo\"")
+        appendLine("  BEGIN")
+        appendLine("    VALUE \"Translation\", 0x409, 1200")
+        appendLine("  END")
+        appendLine("END")
+    }
+}
+
+/** `1.0.0-SNAPSHOT` → `[1, 0, 0, 0]`：FILEVERSION 只接受 4 段数字。 */
+private fun winVersionParts(version: String): List<Int> {
+    val numeric = version.substringBefore('-').substringBefore('+')
+    val parts = numeric.split('.').map { segment -> segment.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+    return (parts + List(4) { 0 }).take(4)
 }
 
 /** Kotlin/Native 自带的 mingw 工具链目录（windres 在其中，无需另装 MinGW）。 */
@@ -348,6 +473,10 @@ private fun objcopyConfigFor(targetName: String): ObjcopyConfig? = when (targetN
 private const val CLASSPATH_ZIP_NAME = "classpath.zip"
 private const val CLASSPATH_RES = "classpath.res"
 
-/** Windows 应用程序清单文件名（classpath.rc 里以 RT_MANIFEST 引用）。 */
+/** Windows 应用程序清单文件名（生成出的 classpath.rc 里以 RT_MANIFEST 引用）。 */
 private const val APP_MANIFEST = "app.manifest"
+
+/** 生成出来的 PE 资源脚本与其引用的图标（都落在 build/generated/classpath/<target>/ 下）。 */
+private const val RC_FILE = "classpath.rc"
+private const val ICON_FILE = "app.ico"
 private const val CLASSPATH_OBJECT = "classpath.o"

@@ -1,3 +1,5 @@
+import java.time.Year
+
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("moe.lolosia")
@@ -92,6 +94,16 @@ lolosia {
 
     classpath {
         compressed = true
+    }
+
+    // Windows exe 的 PE 资源：版本号取工程 version（不用手改），图标复用前端的 favicon.ico
+    windows {
+        val webPath = platformConfig["webPath"] as? String
+        if (!webPath.isNullOrBlank()) {
+            icon = File(webPath, "public/favicon.ico")
+        }
+        companyName = "洛洛希雅"
+        copyright = "© ${Year.now().value} 洛洛希雅Lolosia"
     }
 
     // VITE_DEFAULT 由 :modules:server 生成，这里不能重复生成

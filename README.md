@@ -65,8 +65,8 @@
 │   └── app-android/              # Android 壳（独立 Gradle 构建，SDLActivity + JNI 宿主）
 ├── thirdparty/                   # 第三方原生库独立构建：manifest + .def + 构建/发布脚本（产物不入库）
 ├── build/thirdparty/out/         # 【生成物，不入库】下载的头文件 + 各目标 .a / .so
-├── classpath/mingw/classpath.rc  # Windows 资源脚本（windres 把 classpath.zip 编成 PE 资源）
 ├── classpath/mingw/app.manifest  # 应用清单（RT_MANIFEST）：把进程代码页切成 UTF-8，否则中文文件名会被 okio 丢弃
+                                # 同目录的 classpath.rc 由构建期生成（classpath.zip / 清单 / 版本信息 / 图标）
 ├── sql/                          # 建表脚本（15 张表 + view_user_role 视图）+ migrate_rbac_groups.sql（历史库组模型迁移）
 ├── doc/                          # 方案 / 迁移记录 / 排障
 ├── lolosia-backend-native.service # systemd 单元模板（部署插件据此改写 ExecStart）
