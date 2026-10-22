@@ -1,24 +1,29 @@
-<img src=".github/assets/logo.png" width="96" align="right" alt="洛洛希雅" />
+<div align="center">
+
+<img src=".github/assets/logo.png" width="128" alt="洛洛希雅" />
 
 # lolosia-backend
+
+**洛洛希雅的小网站后端**
+
+Kotlin/Native 单文件服务端 —— 前端产物、SQL 脚本与默认配置都嵌在可执行文件里，部署时只有一个二进制
+
+[快速开始](#快速开始) · [特性](#特性) · [接口](#接口与鉴权) · [配置](#配置) · [部署](#部署) · [文档](#延伸阅读)
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Kotlin/Native](https://img.shields.io/badge/Kotlin%2FNative-3%20targets-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/docs/native-overview.html)
 [![Ktor](https://img.shields.io/badge/Ktor-3.4.2-087CFA?logo=ktor&logoColor=white)](https://ktor.io)
 [![Koin](https://img.shields.io/badge/Koin-4.2.2-F9A03C)](https://insert-koin.io)
-[![Gradle](https://img.shields.io/badge/Gradle-9.5.1-02303A?logo=gradle&logoColor=white)](https://gradle.org)
 [![sqlx4k](https://img.shields.io/badge/sqlx4k-1.14.0-4B5563)](https://github.com/smyrgeorge/sqlx4k)
 [![MariaDB](https://img.shields.io/badge/MariaDB-MySQL-003545?logo=mariadb&logoColor=white)](https://mariadb.org)
 [![License](https://img.shields.io/badge/License-MIT-3DA639)](LICENSE)
 
-洛洛希雅（Lolosia）的小网站后端：**Kotlin/Native 单文件服务端** —— 前端产物、SQL 脚本与默认配置都嵌在可执行文件里，部署时只有一个二进制。
+</div>
 
-- 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k + MariaDB**
-- 目标平台：**`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（开发板）、**`linuxX64`**（x64 云主机）；没有 JVM 目标
-- 自研件：注解式路由（KSP 代码生成）、`classpath.zip` 资源中间层、多级配置、bcrypt、图形验证码、WebDAV、在线文件管理器、RBAC
+- **目标平台**：**`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（开发板）、**`linuxX64`**（x64 云主机）；没有 JVM 目标
+- **自研件**：注解式路由（KSP 代码生成）、`classpath.zip` 资源中间层、多级配置、bcrypt、图形验证码、WebDAV、在线文件管理器、RBAC
 
-> 代码风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
-> 第三方组件与许可声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+> 代码风格与硬性约定见 [AGENTS.md](AGENTS.md) · 构建 / 部署 / 排障见 [doc/development-notes.md](doc/development-notes.md) · 第三方组件与许可声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 
 ## 特性
 
