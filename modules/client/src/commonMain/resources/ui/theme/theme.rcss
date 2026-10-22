@@ -204,7 +204,9 @@ input.password
 	box-sizing: border-box;
 	width: 100%;
 	height: 46dp;
-	padding: 0 14dp;
+	/* 上下内边距把内容盒压到一行的高度（46dp - 2dp 边框 - 2×13dp = 18dp ≈ 1.2 × 15dp），
+	   单行文本行就从框顶开始也居中；不要用 line-height 撑满，那样光标会被拉成整框高 */
+	padding: 13dp 14dp;
 	border-radius: 8dp;
 	background-color: #FFFFFF;
 	border: 1dp #D1D1D6;

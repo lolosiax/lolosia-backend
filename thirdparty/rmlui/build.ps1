@@ -78,6 +78,32 @@ $tree = Get-ThirdpartySource -Name "RmlUi-$Version" `
     -Url "https://github.com/mikke89/RmlUi/archive/refs/tags/$Version.tar.gz" `
     -WorkDir $WorkDir -Force:$Force
 
+# ---------------------------------------------------------------- 3.1 打补丁
+# 光标与选区几何是相对内容盒原点生成的，上游却用父元素 padding 盒的绝对偏移去平移，
+# 于是带内边距的输入框里光标贴着边框、和文字上下错开。改成内容盒偏移后，
+# 单行输入框只要靠 padding 把文字行挤到中间就垂直居中了，光标高度仍是字体行高。
+$rmluiPatches = @(
+    @{
+        Note = 'WidgetTextInput：光标与选区按内容盒定位'
+        File = 'Source/Core/Elements/WidgetTextInput.cpp'
+        Old  = "`tVector2f text_translation = parent->GetAbsoluteOffset() - Vector2f(parent->GetScrollLeft(), parent->GetScrollTop());"
+        New  = "`t// 光标与选区的顶点都是相对内容盒原点算的，这里必须带上边框与内边距的偏移，`n`t// 否则带 padding 的输入框里光标会贴着边框、与文字错开。`n`tVector2f text_translation = parent->GetAbsoluteOffset(BoxArea::Content) - Vector2f(parent->GetScrollLeft(), parent->GetScrollTop());"
+    }
+)
+foreach ($patch in $rmluiPatches) {
+    $file = Join-Path $tree $patch.File
+    if (-not (Test-Path $file)) { Stop-WithError "补丁目标不存在：$file" }
+    $text = [IO.File]::ReadAllText($file)
+    if ($text.Contains($patch.Old)) {
+        Write-Step "打补丁  $($patch.Note)"
+        [IO.File]::WriteAllText($file, $text.Replace($patch.Old, $patch.New))
+    } elseif (-not $text.Contains($patch.New)) {
+        Stop-WithError "补丁无法应用（内容与预期不符）：$($patch.File)"
+    } else {
+        Write-Host "    已打过：$($patch.Note)"
+    }
+}
+
 # ---------------------------------------------------------------- 4. CMake 交叉构建
 if (Test-Path $buildDir) { Remove-Item $buildDir -Recurse -Force }
 
