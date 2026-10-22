@@ -2,7 +2,8 @@
 #
 # 门面内部用 RmlUi（视图层：RML/RCSS + flexbox 布局 + data-model 数据绑定），
 # RmlUi 的 SDL_GPU 后端出帧（Windows / Linux 上即 Vulkan），字体走 FreeType。
-# 五个静态库都在 thirdparty/<目标>/ 下，cinterop 的 libraryPath 由 build.gradle.kts 指向该目录。
+# 五个静态库分别来自 thirdparty 工件（SDL3 / FreeType / RmlUi）与本地 liblolosia，
+# cinterop 的 libraryPath 由 build.gradle.kts 逐个指向这些目录。
 #
 # 顺序就是链接顺序（静态库按左到右解析未定义符号）：
 #   liblolosia -> librmlui_debugger -> librmlui -> libfreetype -> libSDL3

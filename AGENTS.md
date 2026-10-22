@@ -181,19 +181,19 @@ generatedPermissions()                 // @Permission 节点目录（给管理�
   - `files/list` 的条目还带索引侧字段 `rating` / `indexed` / `takenAt` / `sample` / `tags`（见 [media-index-design.md](doc/media-index-design.md) §11.1）：
     `tags` **只给 `namespace` + `name`**（够网格标心 `feature:喜欢`、目录 `feature:` 分组开关与将来的标签分组 / 筛选）——
     否决位与来源仍只在 `media/detail` 给全。**别往列表里塞标签正文**，列目录要能扛住大目录。
-- **第三方 C 库**（图像编解码 + 通道用的 msgpack-c）固定在仓库里：`thirdparty/<目标>/*.a`（预编译静态库）+ `thirdparty/include/**`（公共头文件）+ `modules/codecs/src/nativeInterop/cinterop/*.def`。
-  - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/build-libs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
+- **第三方 C 库**（图像编解码 + 通道用的 msgpack-c）以独立工件发布：`thirdparty/manifest.json` 声明版本，`thirdparty/<库>/<库>.def` 是 cinterop 定义；日常构建优先从工件仓库拉取，未配置时回退到 `thirdparty/<目标>/*.a` + `thirdparty/include/**`。
+  - **产物入库、源码不入库**；日常 Gradle 构建只做 cinterop 解析 + 链接，**不需要任何 C 工具链**。重建/升级用 `thirdparty/gradle/build-codecs.ps1`（用法见 [doc/development-notes.md](doc/development-notes.md)）。
   - 绑定包名 **`moe.lolosia.thirdparty.<库名>`**；门面只以 `ByteArray` / `RgbaImage` / `JsonElement` 收发，不把 C 指针泄漏给调用方（msgpack 的门面是 [`util/xhrdata/`](modules/codecs/src/commonMain/kotlin/moe/lolosia/web/util/xhrdata/XhrData.kt)，见 §4.4 自定义请求通道）。
   - 一律选**不依赖 `setjmp/longjmp` 的接口**（libpng 用 `png_image` 简化接口、libjpeg-turbo 用 `tj3*`、libwebp / giflib 本身回错误码），坏图只回 `null`，不会把进程带走。
   - ⚠️ C 库只保留调用期间有效的裸指针（libpng 的 `png_image_begin_read_from_memory` 就是典型）：`usePinned` 必须覆盖到真正的解码调用为止，中途解 pin 只会得到「不报错但像素全错」。
   - ⚠️ `size_t` 三个目标都是 64 位可安全传递；`unsigned long` 不是（mingw 32 位 / linux 64 位），跨目标代码别写出具体宽度。
-  - ⚠️ libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档，`build-libs.ps1` 已把它合并回单个 `libwebp.a`：K/N 的 ELF 链接（ld.gold）按归档逐个解析，分成两个归档时 `SharpYuv*` 会解析不到（arm64 / x64 都失败）。
+  - ⚠️ libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档，`gradle/build-codecs.ps1` 已把它合并回单个 `libwebp.a`：K/N 的 ELF 链接（ld.gold）按归档逐个解析，分成两个归档时 `SharpYuv*` 会解析不到（arm64 / x64 都失败）。
   - ⚠️ **msgpack-c**：`msgpack_unpacked_init` / `msgpack_unpacked_destroy` 是 `static inline`，**cinterop 不导出** —— 用 `alloc<msgpack_unpacked>()`（零初始化）替代 init，收尾手动 `msgpack_zone_free` 替代 destroy。另外 `msgpack_object_kv` 的字段名 `val` 与 Kotlin 关键字撞名，访问要写反引号 `` `val` ``；`CPointer` 的 `get` / `plus` 等运算符需显式 `import kotlinx.cinterop.*`。
 - **UI 实验的图形栈**（SDL3 → FreeType → RmlUi → 自研门面 `liblolosia`）沿用同一套「产物入库、源码不入库」：
-  - 四层各有一个一次性重建脚本，**有先后依赖**：[`build-sdl3.ps1`](thirdparty/build-sdl3.ps1) → [`build-freetype.ps1`](thirdparty/build-freetype.ps1)（RmlUi 的字体引擎）→ [`build-rmlui.ps1`](thirdparty/build-rmlui.ps1)（核心库）→ [`nativeCpp/build.ps1`](modules/client/src/nativeCpp/build.ps1)（门面 + RmlUi 的 SDL_GPU 后端胶水）。产物一律落 `thirdparty/<目标>/` 与 `thirdparty/include/`，cinterop 只需一个 libraryPath。
-  - 与 `build-libs.ps1` 的差异：这几个脚本自己找 cmake / ninja（本机没有系统级 cmake，`python -m pip install cmake ninja` 即可，脚本会在 python 的用户级 Scripts 目录里找 —— 别用 `& python` 直接探，PATH 上的商店占位 stub 会抛错）；公共的工具链定位与源码下载解压抽在 [`thirdparty/toolchain.ps1`](thirdparty/toolchain.ps1)，各脚本 dot-source 它。
+  - 四层各有一个一次性重建脚本，**有先后依赖**：[`sdl3/build.ps1`](thirdparty/sdl3/build.ps1) → [`freetype/build.ps1`](thirdparty/freetype/build.ps1)（RmlUi 的字体引擎）→ [`rmlui/build.ps1`](thirdparty/rmlui/build.ps1)（核心库）→ [`nativeCpp/build.ps1`](modules/client/src/nativeCpp/build.ps1)（门面 + RmlUi 的 SDL_GPU 后端胶水）。产物一律落 `thirdparty/<目标>/` 与 `thirdparty/include/`，cinterop 只需一个 libraryPath。
+  - 与 `gradle/build-codecs.ps1` 的差异：这几个脚本自己找 cmake / ninja（本机没有系统级 cmake，`python -m pip install cmake ninja` 即可，脚本会在 python 的用户级 Scripts 目录里找 —— 别用 `& python` 直接探，PATH 上的商店占位 stub 会抛错）；公共的工具链定位与源码下载解压抽在 [`thirdparty/gradle/toolchain.ps1`](thirdparty/gradle/toolchain.ps1)，各脚本 dot-source 它。
   - 交叉编译的坑都用**定点补丁**解决，且补丁失配会直接报错（不会静默失效）：SDL3 的 `SDL_assert.h` / `SDL_intrin.h`（clang 与 mingw 的 `<intrin.h>` 在 C++ 下冲突，而 CMake 给目标挂了 PCH）、FreeType 的 `CMakeLists.txt`（去掉 `ftver.rc`：windres 预处理要能用的 gcc，K/N 的 sysroot 里只有缺 cc1 的驱动壳）。
-  - RmlUi 出两个静态库：`rmlui_core`（`librmlui.a`）与内置调试器 `rmlui_debugger`（`librmlui_debugger.a`，见下面那条）；不出 samples / tests / Lua / Lottie / SVG 插件。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `modules/client/src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 build-rmlui.ps1）。
+  - RmlUi 出两个静态库：`rmlui_core`（`librmlui.a`）与内置调试器 `rmlui_debugger`（`librmlui_debugger.a`，见下面那条）；不出 samples / tests / Lua / Lottie / SVG 插件。它的 **SDL_GPU 后端不产出独立库**：三个 .cpp（`RmlUi_Backend_SDL_GPU` / `RmlUi_Renderer_SDL_GPU` / `RmlUi_Platform_SDL`）由 `modules/client/src/nativeCpp/build.ps1` 连同门面一起编进 `liblolosia.a`，源码从 `build/thirdparty/tree/RmlUi-*/Backends` 取（所以必须先跑过 rmlui/build.ps1）。
   - **内置调试器**（查元素树 / 盒模型、看与改数据模型、看日志、画元素边框）：门面只暴露 `ll_ui_enable_debugger()`，**F8 开关**（按键钩子挂在 `Backend::ProcessEvents(context, &onKeyDown, true)` 的第二个参数上；返回 `true` 放行、`false` 吃掉，与上游 `Samples/shell` 一致）。要点：
     - 调试器往**宿主上下文**里加自己的文档（不是另开 context），字体是内嵌的 Courier Prime（只有拉丁字形、界面文案英文），与宿主字体互不干扰；启用时机放在 `ll_ui_load_document` 之后，让它画的菜单压在主文档之上。
     - 它会把**全局系统接口**换成自己的包装（以便截获日志进它的日志面板），所以销毁时要先 `Rml::Debugger::Shutdown()` 再 `RemoveContext` —— 它会把自己的文档从上下文摘掉并还原系统接口。
@@ -265,11 +265,12 @@ gradlew :modules:app-desktop:compileKotlinMingwX64 :modules:app-desktop:compileK
   环境具备时还会顺带构建 Android APK，APK 留在 `modules/app-android/build/outputs/apk/debug/`）；
   单一目标用 `gradlew :modules:app-desktop:linkReleaseExecutableMingwX64`（linuxArm64 / linuxX64 同理）；
   部署：`gradlew deploy<服务器名>`（配置见 `platforms.json`；`abi` 决定架构、`mode` 选 `systemd` / `docker`，细节见 [doc/development-notes.md](doc/development-notes.md)）。
-- **第三方 C 库只在升级时重建**：`thirdparty/build-libs.ps1`（图像编解码）与 UI 实验那四层（`build-sdl3.ps1` → `build-freetype.ps1` → `build-rmlui.ps1` → `modules/client/src/nativeCpp/build.ps1`，见 §7）
+- **第三方 C 库只在升级时重建**：`thirdparty/gradle/build-codecs.ps1`（图像编解码）与 UI 实验那四层（`sdl3/build.ps1` → `freetype/build.ps1` → `rmlui/build.ps1` → `modules/client/src/nativeCpp/build.ps1`，见 §7）
   —— 都是借 Kotlin/Native 自带的 clang + sysroot 交叉编译，不用额外装工具链；改 `.def` 或换库后至少跑一次 `linkReleaseExecutable<目标>` 验证能链上。
+  第三方独立构建的显式入口：`gradlew -p thirdparty publishAll`（打包并发布当前产物）、`compileAll`（从源码重编）、`rebuildAndPublish`（先编再发）；主工程日常构建只 `thirdpartySync` 拉取或本地回退。
 - **Android（Stage 3 首版，x86_64 模拟器 / arm64 真机）**：
   - 原生库：`gradlew androidNative`（默认同时构建 x86_64 与 arm64-v8a；只跑模拟器可用 `-PandroidAbis=x86_64`）。
-    底层是 `powershell -ExecutionPolicy Bypass -File thirdparty/build-android.ps1 -Abi <abi>`；
+    底层是 `powershell -ExecutionPolicy Bypass -File thirdparty/gradle/build-android.ps1 -Abi <abi>`；
     需要 NDK r27c（默认 `D:\AndroidSdk\ndk\android-ndk-r27c`）与 ninja，源码下载到 `build/thirdparty`，
     产物落 `thirdparty/androidJniLibs/<abi>/`。
   - APK：`gradlew -p modules/app-android assembleDebug`（**独立构建**，不要从根 `settings.gradle.kts` include）。
@@ -363,10 +364,13 @@ modules/app-desktop/src/linuxMain/kotlin/…/ServiceProcess.linux.kt   信号驱
 modules/app-android/           独立 Gradle 构建（AGP）：MainActivity（继承 SDLActivity）+ SDL3 的 Java 胶水（org.libsdl.app）
                                 assets 复用 modules/client/src/commonMain/resources；jniLibs 指向 thirdparty/androidJniLibs
 modules/client/src/nativeCpp/android/LolosiaUiAndroid.cpp   Android JNI 宿主：SDL_main、assets 资源、BitmapFactory 解码、probe 数据模型
-thirdparty/                     预编译 C 静态库与头文件（入库产物，按 mingwX64 / linuxArm64 / linuxX64 三份）+ build-libs.ps1（图像编解码）
-                                + build-android.ps1（NDK 交叉编译 SDL3/FreeType/RmlUi 与 liblolosia.so → thirdparty/androidJniLibs/<ABI>/）
-                                + UI 实验那四层的一次性重建脚本（build-sdl3 / build-freetype / build-rmlui）与共用的 toolchain.ps1
-                                （liblolosia.a 由 modules/client/src/nativeCpp/build.ps1 产出到同一目录，RmlUi 的 librmlui.a + librmlui_debugger.a 由 build-rmlui.ps1 产出；四层的依赖顺序见 §7）
+thirdparty/                     第三方原生库独立构建：manifest.json（版本/头文件/各目标库）
+                                + buildSrc（moe.thirdparty.publish 插件：打包、发布、buildFromSource）
+                                + <库>/build.gradle.kts + <库>/<库>.def（zlib/png/webp/jpeg/gif/msgpack/sdl3/freetype/rmlui）
+                                + <库>/build.ps1（SDL3/FreeType/RmlUi 源码重建）
+                                + gradle/build-codecs.ps1（六个编解码库共用重建脚本）、gradle/toolchain.ps1
+                                + gradle/build-android.ps1（NDK 交叉编译 SDL3/FreeType/RmlUi 与 liblolosia.so → thirdparty/androidJniLibs/<ABI>/）
+                                （liblolosia.a 由 modules/client/src/nativeCpp/build.ps1 产出到 thirdparty/<目标>/；四层依赖顺序见 §7）
 modules/router-ksp/src/main/kotlin/…/   KSP 处理器：RouterProcessor（@Controller）/ InterceptorProcessor（@Interceptor）/
                                 InjectionProcessor（@Repository·@Injectable·@Service）
 buildSrc/src/main/kotlin/…/     Gradle 插件 moe.lolosia：task/（ViteJar / GenerateConstants / Deploy / GitArchive）、

@@ -1,3 +1,6 @@
+import moe.lolosia.gradle.thirdparty.ThirdpartyExtension
+import org.gradle.api.tasks.Sync
+
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
     alias(libs.plugins.kotlin.serialization)
@@ -6,22 +9,45 @@ plugins {
 group = "moe.lolosia"
 version = rootProject.version
 
-// 第三方 C 库与 nativeCpp 门面都以 Gradle 根为基准定位
-val thirdpartyDir = rootProject.layout.projectDirectory.dir("thirdparty")
+// 第三方原生库（SDL3 / FreeType / RmlUi）由根工程的 thirdparty 插件解析；
+// 自研门面 liblolosia.a 仍从 thirdparty/mingwX64 取。
+val thirdparty = rootProject.extensions.getByType<ThirdpartyExtension>()
+
+val lolosiaLibDir = layout.buildDirectory.dir("thirdparty/lolosia/mingwX64/lib")
+val copyLolosiaLib = tasks.register<Sync>("copyLolosiaStaticLib") {
+    from(rootProject.layout.projectDirectory.file("thirdparty/mingwX64/liblolosia.a"))
+    into(lolosiaLibDir)
+}
 
 kotlin {
     mingwX64 {
-        // UI 实验（moe.lolosia.web.ui）：C ABI 门面 liblolosia.a 与 SDL3 都在 thirdparty/mingwX64 下。
+        // UI 实验（moe.lolosia.web.ui）：C ABI 门面 liblolosia.a + RmlUi/SDL3/FreeType。
         // 只给 mingwX64 建 cinterop —— linux 目标还没有交叉构建好的 SDL3。
         compilations.getByName("main").cinterops {
             create("lolosia") {
                 definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/lolosia.def"))
-                includeDirs.allHeaders(
-                    thirdpartyDir.dir("include").asFile,
-                    layout.projectDirectory.dir("src/nativeCpp/include").asFile,
+                includeDirs.allHeaders(layout.projectDirectory.dir("src/nativeCpp/include").asFile)
+                val sdl3 = thirdparty.dir("sdl3", "mingwX64").get().dir("lib").asFile.absolutePath
+                val freetype = thirdparty.dir("freetype", "mingwX64").get().dir("lib").asFile.absolutePath
+                val rmlui = thirdparty.dir("rmlui", "mingwX64").get().dir("lib").asFile.absolutePath
+                val lolosia = lolosiaLibDir.get().asFile.absolutePath
+                extraOpts(
+                    "-libraryPath", sdl3,
+                    "-libraryPath", freetype,
+                    "-libraryPath", rmlui,
+                    "-libraryPath", lolosia,
                 )
-                extraOpts("-libraryPath", thirdpartyDir.dir("mingwX64").asFile.absolutePath)
             }
+        }
+        tasks.matching { it.name == "cinteropLolosiaMingwX64" }.configureEach {
+            dependsOn(copyLolosiaLib)
+            dependsOn(thirdparty.syncTask("sdl3", "mingwX64"))
+            dependsOn(thirdparty.syncTask("freetype", "mingwX64"))
+            dependsOn(thirdparty.syncTask("rmlui", "mingwX64"))
+            inputs.dir(lolosiaLibDir)
+            inputs.dir(thirdparty.dir("sdl3", "mingwX64"))
+            inputs.dir(thirdparty.dir("freetype", "mingwX64"))
+            inputs.dir(thirdparty.dir("rmlui", "mingwX64"))
         }
     }
     linuxArm64()

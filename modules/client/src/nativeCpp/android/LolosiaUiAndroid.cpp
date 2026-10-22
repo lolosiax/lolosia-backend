@@ -1,6 +1,6 @@
 // LolosiaUiAndroid.cpp —— Android 上的 UI 宿主：把 SDLActivity 的 native 入口接到 ll_ui_*。
 //
-// 只参与 Android 构建（thirdparty/build-android.ps1 单独编译这个目录），桌面脚本只扫 src/，
+// 只参与 Android 构建（thirdparty/gradle/build-android.ps1 单独编译这个目录），桌面脚本只扫 src/，
 // 因此这里可以直接依赖 NDK 的 AAssetManager / BitmapFactory / libjnigraphics。
 //
 // 分工与桌面版一致：窗口、GPU 设备、输入事件由 RmlUi 的 SDL_GPU 后端负责。

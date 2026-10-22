@@ -88,7 +88,7 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 
 图像编解码（WebP / PNG / JPEG / GIF）用 5 个 C 库：libwebp、libpng、zlib、libjpeg-turbo、giflib。
 **源码不入库、产物入库**：`thirdparty/<目标>/` 放 6 个 `.a`（`libwebp.a` 已并入编码侧的私有依赖 SharpYuv，见下），
-`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/build-libs.ps1` 是一次性重建脚本。目标有 `mingwX64` / `linuxArm64` / `linuxX64` 三份。
+`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/gradle/build-codecs.ps1` 是一次性重建脚本。目标有 `mingwX64` / `linuxArm64` / `linuxX64` 三份。
 
 日常 `gradlew` 构建完全不碰 C 工具链 —— `build.gradle.kts` 只把 `.def` 与 `-libraryPath` 交给 cinterop，
 `.def` 里 `staticLibraries` 声明的 `.a` 会打进 klib、在链接期随可执行文件静态链入（与 ktor 的 curl klib 同一机制）。
@@ -96,8 +96,8 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 只在换库版本 / 改编译选项时重建：
 
 ```powershell
-.\thirdparty\build-libs.ps1                                # 默认重建 mingwX64 + linuxArm64 + linuxX64
-.\thirdparty\build-libs.ps1 -Targets mingwX64 -Force       # 只重建一个目标（默认工作目录 build/thirdparty，已 gitignore）
+.\thirdparty\gradle\build-codecs.ps1                                # 默认重建 mingwX64 + linuxArm64 + linuxX64
+.\thirdparty\gradle\build-codecs.ps1 -Targets mingwX64 -Force       # 只重建一个目标（默认工作目录 build/thirdparty，已 gitignore）
 ```
 
 - **不需要额外安装任何工具链**：脚本用 `~/.konan` 里 Kotlin/Native 自带的 **llvm-21 clang** 交叉编译，
@@ -379,7 +379,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | 阿里云镜像缺 Ktor / sqlx4k 产物 | `settings.gradle.kts` 里 `excludeGroupByRegex("io\\.ktor")` / `io\\.github\\.smyrgeorge` 强制走 mavenCentral |
 | `Failed SFTP MKDIR: …/releaseExecutable` | link 任务的 `outputs.files` 是**输出目录**不是文件 → 用 `KotlinNativeLink.outputFile` |
 | `A problem occurred starting process 'aarch64-linux-gnu-objcopy'` | Windows 上没有可用的 aarch64/x86_64 objcopy → 借道 WSL（§2） |
-| `linkReleaseExecutable<linux目标>` 报 `libwebp.a(…picture_csp_enc.c.o): … SharpYuv* 未定义` | libwebp 1.6 把 SharpYuv 拆成 `libsharpyuv.a`，两个归档的解析顺序被重排 → 用 `thirdparty/build-libs.ps1` 重建（已合并回单个 `libwebp.a`，§2） |
+| `linkReleaseExecutable<linux目标>` 报 `libwebp.a(…picture_csp_enc.c.o): … SharpYuv* 未定义` | libwebp 1.6 把 SharpYuv 拆成 `libsharpyuv.a`，两个归档的解析顺序被重排 → 用 `thirdparty/gradle/build-codecs.ps1` 重建（已合并回单个 `libwebp.a`，§2） |
 | `The plugin is already on the classpath with an unknown version` | buildSrc 引了 KGP 后，主工程必须**无版本**应用 Kotlin 插件 |
 | buildSrc 看不到版本目录 | `buildSrc/settings.gradle.kts` 里 `create("libs").from(files("../gradle/libs.versions.toml"))` |
 | classpath 里混进垃圾条目 | `ViteJarTask` 产出多一个根目录 `MANIFEST.MF`，并入时排除 |
@@ -458,7 +458,7 @@ ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 6023 <user>@127.
 | `qemu-user-static` + `libc6-arm64-cross`（+ `libcrypt.so.1`） | 不开板子验证旧 aarch64 产物（接了 sqlx4k 后已失效，见 §2） |
 | Node 24 + pnpm 10.22 + 前端工程 `E:\Dev\Node\lolosia-web` | `viteJar` 构建前端产物 |
 | QUIC 客户端 `F:\Develop\Python\quic-socket` | SSH 隧道到开发板 |
-| （可选）`~/.konan` 自带的 clang + sysroot | 只在重建第三方 C 静态库时用（`thirdparty/build-libs.ps1`），日常构建不需要 |
+| （可选）`~/.konan` 自带的 clang + sysroot | 只在重建第三方 C 静态库时用（`thirdparty/gradle/build-codecs.ps1`），日常构建不需要 |
 | MariaDB / MySQL | 数据库 |
 | 目标机的 Docker（仅 `mode=docker` 时需要） | 原生产物挂进基础镜像运行，不构建镜像；基础镜像与国内加速源见 §3 |
 

@@ -1,0 +1,81 @@
+{
+  "groupId": "moe.lolosia.thirdparty",
+  "kotlinNative": "2.4.20",
+  "libraries": {
+    "zlib": {
+      "version": "1.3.1",
+      "headers": ["zlib"],
+      "libs": {
+        "mingwX64": ["libz.a"],
+        "linuxArm64": ["libz.a"],
+        "linuxX64": ["libz.a"]
+      }
+    },
+    "png": {
+      "version": "1.6.44",
+      "headers": ["libpng"],
+      "libs": {
+        "mingwX64": ["libpng.a", "libz.a"],
+        "linuxArm64": ["libpng.a", "libz.a"],
+        "linuxX64": ["libpng.a", "libz.a"]
+      }
+    },
+    "webp": {
+      "version": "1.6.0",
+      "headers": ["libwebp"],
+      "libs": {
+        "mingwX64": ["libwebp.a"],
+        "linuxArm64": ["libwebp.a"],
+        "linuxX64": ["libwebp.a"]
+      }
+    },
+    "jpeg": {
+      "version": "3.1.0",
+      "headers": ["libjpeg"],
+      "libs": {
+        "mingwX64": ["libturbojpeg.a", "libjpeg.a"],
+        "linuxArm64": ["libturbojpeg.a", "libjpeg.a"],
+        "linuxX64": ["libturbojpeg.a", "libjpeg.a"]
+      }
+    },
+    "gif": {
+      "version": "5.2.2",
+      "headers": ["giflib"],
+      "libs": {
+        "mingwX64": ["libgif.a"],
+        "linuxArm64": ["libgif.a"],
+        "linuxX64": ["libgif.a"]
+      }
+    },
+    "msgpack": {
+      "version": "7.0.2",
+      "headers": ["msgpack.h", "msgpack"],
+      "libs": {
+        "mingwX64": ["libmsgpackc.a"],
+        "linuxArm64": ["libmsgpackc.a"],
+        "linuxX64": ["libmsgpackc.a"]
+      }
+    },
+    "sdl3": {
+      "version": "3.4.18",
+      "headers": ["SDL3"],
+      "libs": {
+        "mingwX64": ["libSDL3.a"]
+      }
+    },
+    "freetype": {
+      "version": "2.15.0",
+      "headers": ["freetype2"],
+      "libs": {
+        "mingwX64": ["libfreetype.a"]
+      }
+    },
+    "rmlui": {
+      "version": "6.3",
+      "headers": ["RmlUi"],
+      "libs": {
+        "mingwX64": ["librmlui.a", "librmlui_debugger.a"]
+      }
+    }
+  }
+}

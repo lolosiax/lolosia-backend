@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     为 Android 构建 UI 实验所需的原生库（SDL3 / FreeType / RmlUi / liblolosia.so）。
@@ -29,7 +29,7 @@
     清掉中间目录与源码树，全部重来。
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File thirdparty/build-android.ps1 -Abi x86_64
+    powershell -ExecutionPolicy Bypass -File thirdparty/gradle/build-android.ps1 -Abi x86_64
 #>
 [CmdletBinding()]
 param(

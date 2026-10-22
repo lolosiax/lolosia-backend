@@ -32,7 +32,7 @@ local.properties
 /application*.yaml
 /application*.json
 
-# Android 原生构建产物（thirdparty/build-android.ps1 生成）
+# Android 原生构建产物（thirdparty/gradle/build-android.ps1 生成）
 # liblolosia.so 随业务代码变化，libSDL3.so 与外部静态库一起视为构建中间产物，
 # 一律由脚本按需重建；外部库的 CMake 构建缓存留在 build/thirdparty（同样不入库）。
 /thirdparty/androidJniLibs/

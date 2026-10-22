@@ -7,6 +7,8 @@ import java.util.Properties
 plugins {
     // 根只做聚合与发布：deploy / runDebug / runRelease / buildBinaries
     id("moe.lolosia")
+    // 第三方原生库按库/目标解析（仓库优先，本地回退）
+    id("moe.lolosia.thirdparty")
 }
 
 group = "moe.lolosia"
@@ -268,12 +270,12 @@ val androidNativeTasks = androidAbis.map { abi ->
         onlyIf { androidCapable() }
         workingDir = rootDir
         inputs.files(fileTree("modules/client/src/nativeCpp") { exclude("**/build/**") })
-        inputs.file("thirdparty/build-android.ps1")
+        inputs.file("thirdparty/gradle/build-android.ps1")
         outputs.file(jniDir.file("libSDL3.so"))
         outputs.file(jniDir.file("liblolosia.so"))
         commandLine(
             "powershell", "-ExecutionPolicy", "Bypass",
-            "-File", "thirdparty/build-android.ps1",
+            "-File", "thirdparty/gradle/build-android.ps1",
             "-Abi", abi,
         )
     }

@@ -1,14 +1,14 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 RmlUi 静态库（thirdparty/<目标>/librmlui.a + thirdparty/include/RmlUi/**）。
 
 .DESCRIPTION
     RmlUi 是 UI 实验的视图层：HTML/RCSS 描述结构、Flexbox 自动算布局、data-model 做数据绑定（MVVM）。
-    与 build-sdl3.ps1 / build-freetype.ps1 同一约定：只在新增或升级时手动跑一次，
+    与 sdl3/build.ps1 / freetype/build.ps1 同一约定：只在新增或升级时手动跑一次，
     源码不入库、产物入库，日常 Gradle 构建只做 cinterop + 链接。
 
-    前提：先跑 build-freetype.ps1 —— RmlUi 的字体引擎（RMLUI_FONT_ENGINE=freetype）要链接 FreeType。
+    前提：先跑 freetype/build.ps1 —— RmlUi 的字体引擎（RMLUI_FONT_ENGINE=freetype）要链接 FreeType。
     FreeType 不走 find_package 的搜索路径（它装在 thirdparty 这个非标准前缀下），
     而是把 FREETYPE_INCLUDE_DIR_* / FREETYPE_LIBRARY 三个缓存变量直接指过去，
     CMake 自带的 FindFreetype.cmake 会原样采纳，不依赖任何 pkg-config / config 文件。
@@ -33,7 +33,7 @@
     清掉源码与中间产物，全部重来。
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File thirdparty/build-rmlui.ps1
+    powershell -ExecutionPolicy Bypass -File thirdparty/rmlui/build.ps1
 #>
 [CmdletBinding()]
 param(
@@ -45,7 +45,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'toolchain.ps1')
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
 $thirdpartyDir = Join-Path $repoRoot 'thirdparty'
@@ -67,10 +67,10 @@ Write-Host "    ninja   : $ninja"
 $ftInc = Join-Path $thirdpartyDir 'include/freetype2'
 $ftLib = Join-Path $libOut 'libfreetype.a'
 if (-not (Test-Path (Join-Path $ftInc 'ft2build.h'))) {
-    Stop-WithError "缺少 FreeType 头文件：$ftInc（先跑 thirdparty/build-freetype.ps1）"
+    Stop-WithError "缺少 FreeType 头文件：$ftInc（先跑 thirdparty/freetype/build.ps1）"
 }
 if (-not (Test-Path $ftLib)) {
-    Stop-WithError "缺少 FreeType 静态库：$ftLib（先跑 thirdparty/build-freetype.ps1）"
+    Stop-WithError "缺少 FreeType 静态库：$ftLib（先跑 thirdparty/freetype/build.ps1）"
 }
 
 # ---------------------------------------------------------------- 3. 源码

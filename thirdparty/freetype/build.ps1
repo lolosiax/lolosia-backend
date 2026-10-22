@@ -1,11 +1,11 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 FreeType 静态库（thirdparty/<目标>/libfreetype.a + thirdparty/include/freetype2/**）。
 
 .DESCRIPTION
-    RmlUi 的字体引擎（RMLUI_FONT_ENGINE=freetype）依赖它，因此它必须在 build-rmlui.ps1 之前跑。
-    与 build-sdl3.ps1 同一约定：只在新增或升级时手动跑一次，源码不入库、产物入库，
+    RmlUi 的字体引擎（RMLUI_FONT_ENGINE=freetype）依赖它，因此它必须在 rmlui/build.ps1 之前跑。
+    与 sdl3/build.ps1 同一约定：只在新增或升级时手动跑一次，源码不入库、产物入库，
     日常 Gradle 构建只做 cinterop + 链接，不碰 C 工具链。
 
     依赖裁剪 —— 只留字形解析本身需要的东西：
@@ -31,7 +31,7 @@
     清掉源码与中间产物，全部重来。
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File thirdparty/build-freetype.ps1
+    powershell -ExecutionPolicy Bypass -File thirdparty/freetype/build.ps1
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'toolchain.ps1')
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
 $thirdpartyDir = Join-Path $repoRoot 'thirdparty'
@@ -85,7 +85,7 @@ if (WIN32)
 "@
         New  = @"
 if (WIN32)
-  # 交叉编译去掉版本资源，理由见 thirdparty/build-freetype.ps1 的注释
+  # 交叉编译去掉版本资源，理由见 thirdparty/freetype/build.ps1 的注释
   list(APPEND BASE_SRCS builds/windows/ftdebug.c)
 "@
     }

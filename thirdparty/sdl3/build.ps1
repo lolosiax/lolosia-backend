@@ -1,17 +1,15 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 SDL3 静态库（thirdparty/<目标>/libSDL3.a + thirdparty/include/SDL3/**）。
 
 .DESCRIPTION
     只在新增或升级 SDL3 时手动跑一次；产物（.a + 公共头文件）提交入库，源码不入库，
-    日常 Gradle 构建只做 cinterop，不再碰 C 工具链（与 build-libs.ps1 同一约定）。
-
-    另一点与 build-libs.ps1 相同：编译器直接用 Kotlin/Native 自带的那一套
-    （clang + msys2 sysroot，见 build-libs.ps1 的文件头说明），因此产物的 ABI/glibc
+    日常 Gradle 构建只做 cinterop，不再碰 C 工具链（与 gradle/build-codecs.ps1 同一约定）。
+    另一点与 gradle/build-codecs.ps1 相同：编译器直接用 Kotlin/Native 自带的那一套
+    （clang + msys2 sysroot，见 gradle/build-codecs.ps1 的文件头说明），因此产物的 ABI/glibc
     与 Kotlin/Native 链接期的完全一致。
-
-    与 build-libs.ps1 的差异：SDL3 只支持 CMake 构建，而本机没有系统级 cmake，
+    与 gradle/build-codecs.ps1 的差异：SDL3 只支持 CMake 构建，而本机没有系统级 cmake，
     因此这里按下面的顺序找 cmake / ninja，都找不到就在提示里给出 pip 安装命令：
       1. PATH
       2. python 用户级 Scripts 目录（%APPDATA%\Python\Python3xx\Scripts）
@@ -30,7 +28,7 @@
     清掉构建目录与已下载的源码包，全部重来。
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File thirdparty/build-sdl3.ps1
+    powershell -ExecutionPolicy Bypass -File thirdparty/sdl3/build.ps1
 #>
 [CmdletBinding()]
 param(
@@ -43,15 +41,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# 工具链定位、源码下载解压、CMake 路径转换都走共享脚本（见 toolchain.ps1）
-. (Join-Path $PSScriptRoot 'toolchain.ps1')
+# 工具链定位、源码下载解压、CMake 路径转换都走共享脚本（见 gradle/toolchain.ps1）
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
+$thirdpartyDir = Join-Path $repoRoot 'thirdparty'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
 $buildDir = Join-Path $WorkDir "cmake/$Target/sdl3"
 $prefixDir = Join-Path $WorkDir "deps/$Target/sdl3"
-$incOut = Join-Path $PSScriptRoot 'include'
-$libOut = Join-Path $PSScriptRoot $Target
+$incOut = Join-Path $thirdpartyDir 'include'
+$libOut = Join-Path $thirdpartyDir $Target
 
 function Info([string]$m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn([string]$m) { Write-Host "!!  $m" -ForegroundColor Yellow }

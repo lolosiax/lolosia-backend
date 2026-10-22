@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     thirdparty 下各构建脚本共用的工具链定位（被 dot-source，不单独运行）。
@@ -19,7 +19,7 @@
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Stop-WithError([string]$Message) { throw $Message }
 
-function Get-LolosiaRepoRoot { return (Resolve-Path (Join-Path $PSScriptRoot '..')).Path }
+function Get-LolosiaRepoRoot { return (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path }
 
 function ConvertTo-CmPath([string]$Path) { return ($Path -replace '\\', '/') }
 

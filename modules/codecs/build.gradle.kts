@@ -1,3 +1,4 @@
+import moe.lolosia.gradle.thirdparty.ThirdpartyExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
@@ -8,9 +9,9 @@ plugins {
 group = "moe.lolosia"
 version = rootProject.version
 
-// 第三方 C 库：产物（thirdparty/<目标>/*.a）与公共头文件随仓库提交，见 thirdparty/build-libs.ps1
-// 模块化后 thirdparty 仍在 Gradle 根，必须用 rootProject 定位。
-val thirdpartyDir = rootProject.layout.projectDirectory.dir("thirdparty")
+// 第三方 C 库：头文件、静态库与 .def 都由 :thirdparty 的工件提供；
+// 未配置工件仓库时，插件回退到主工程现有的 thirdparty/ 目录。
+val thirdparty = rootProject.extensions.getByType<ThirdpartyExtension>()
 val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif", "msgpack")
 
 kotlin {
@@ -39,27 +40,28 @@ kotlin {
     }
 
     // ===== 第三方 C 库的 cinterop 绑定 =====
-    // thirdparty/<目标>/*.a 是预编译好的静态库（升级用 thirdparty/build-libs.ps1），
-    // 这里只让 cinterop 解析 .def + 头文件，构建期不需要任何 C 工具链；
-    // .def 里声明的 staticLibraries 会被打进 klib，链接期随可执行文件静态链入。
+    // 每个库的 .def、头文件与静态库都来自独立的工件目录（<lib>/<target>），
+    // 由根工程的 thirdparty 插件负责从仓库拉取或从本地 thirdparty/ 回退。
     targets.withType<KotlinNativeTarget>().configureEach {
         val targetName = name
         compilations.getByName("main").cinterops {
             thirdpartyLibs.forEach { lib ->
                 create(lib) {
-                    definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/$lib.def"))
-                    includeDirs.allHeaders(thirdpartyDir.dir("include").asFile)
-                    extraOpts("-libraryPath", thirdpartyDir.dir(targetName).asFile.absolutePath)
+                    definitionFile.set(rootProject.layout.projectDirectory.file("thirdparty/$lib/$lib.def"))
+                    val resolved = thirdparty.dir(lib, targetName).get()
+                    includeDirs.allHeaders(resolved.dir("include").asFile)
+                    extraOpts("-libraryPath", resolved.dir("lib").asFile.absolutePath)
                 }
             }
         }
-        // thirdparty/<目标>/*.a 会被 cinterop **复制**进 klib 的依赖目录，链接器用的是那份副本。
-        // 而 cinterop 任务自身只把 .def 与头文件当输入 —— 不把归档也声明进来，
-        // 重建静态库后 cinterop 不会重跑，副本一直停在旧版。
-        val thirdpartyArchives = rootProject.layout.projectDirectory.dir("thirdparty/$targetName")
-            .asFileTree.matching { include("*.a") }
+        // 工件目录变化时让 cinterop 重跑；并确保先执行对应的准备任务。
         val targetSuffix = targetName.replaceFirstChar { it.uppercaseChar() }
         tasks.matching { it.name.startsWith("cinterop") && it.name.endsWith(targetSuffix) }
-            .configureEach { inputs.files(thirdpartyArchives) }
+            .configureEach {
+                thirdpartyLibs.forEach { lib ->
+                    dependsOn(thirdparty.syncTask(lib, targetName))
+                    inputs.dir(thirdparty.dir(lib, targetName))
+                }
+            }
     }
 }

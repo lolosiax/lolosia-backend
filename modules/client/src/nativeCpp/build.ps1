@@ -12,17 +12,17 @@
       2. RmlUi 的后端胶水（Backends/ 下的 SDL_GPU 三件套）。它不产出独立库，
          上游也是让使用者把这些 .cpp 加进自己的目标里（见 RmlUi 的 Backends/CMakeLists.txt）。
 
-    编译器与 build-libs.ps1 / build-sdl3.ps1 / build-freetype.ps1 / build-rmlui.ps1 一致，
+    编译器与 gradle/build-codecs.ps1 / sdl3/build.ps1 / freetype/build.ps1 / rmlui/build.ps1 一致，
     都是 Kotlin/Native 自带的那套（clang + msys2 sysroot），保证 ABI 与最终可执行文件对齐。
 
     依赖（都得先跑各自的脚本）：
-      thirdparty/include/SDL3/**          thirdparty/build-sdl3.ps1
+      thirdparty/include/SDL3/**          thirdparty/sdl3/build.ps1
       thirdparty/<目标>/libSDL3.a
-      thirdparty/include/RmlUi/**         thirdparty/build-rmlui.ps1
-      thirdparty/<目标>/librmlui*.a      thirdparty/build-rmlui.ps1（含内置调试器 librmlui_debugger.a）
-      thirdparty/include/freetype2/**     thirdparty/build-freetype.ps1
+      thirdparty/include/RmlUi/**         thirdparty/rmlui/build.ps1
+      thirdparty/<目标>/librmlui*.a      thirdparty/rmlui/build.ps1（含内置调试器 librmlui_debugger.a）
+      thirdparty/include/freetype2/**     thirdparty/freetype/build.ps1
       thirdparty/<目标>/libfreetype.a
-      <repo>/build/thirdparty/tree/RmlUi-*/Backends/**（后端胶水的源码，随 build-rmlui.ps1 落到那里）
+      <repo>/build/thirdparty/tree/RmlUi-*/Backends/**（后端胶水的源码，随 rmlui/build.ps1 落到那里）
 
     ⚠️ 从引入 RmlUi 起，liblolosia.a 会引用 C++ 运行时（libstdc++）——
     之前那层「不用 STL、-fno-exceptions」的性质到此结束，链接期由 build.gradle.kts 补 -lstdc++。
@@ -48,7 +48,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '../../../../thirdparty/toolchain.ps1')
+. (Join-Path $PSScriptRoot '../../../../thirdparty/gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
 $thirdpartyDir = Join-Path $repoRoot 'thirdparty'
@@ -71,13 +71,13 @@ Write-ToolchainSummary $tool
 # ---------------------------------------------------------------- 2. 依赖自检
 Write-Step '检查依赖'
 $required = @(
-    @{ Path = (Join-Path $includeRoot 'SDL3/SDL.h'); Hint = 'thirdparty/build-sdl3.ps1' },
-    @{ Path = (Join-Path $libOut 'libSDL3.a'); Hint = 'thirdparty/build-sdl3.ps1' },
-    @{ Path = (Join-Path $includeRoot 'RmlUi/Core.h'); Hint = 'thirdparty/build-rmlui.ps1' },
-    @{ Path = (Join-Path $libOut 'librmlui.a'); Hint = 'thirdparty/build-rmlui.ps1' },
-    @{ Path = (Join-Path $libOut 'librmlui_debugger.a'); Hint = 'thirdparty/build-rmlui.ps1' },
-    @{ Path = (Join-Path $includeRoot 'freetype2/ft2build.h'); Hint = 'thirdparty/build-freetype.ps1' },
-    @{ Path = (Join-Path $libOut 'libfreetype.a'); Hint = 'thirdparty/build-freetype.ps1' }
+    @{ Path = (Join-Path $includeRoot 'SDL3/SDL.h'); Hint = 'thirdparty/sdl3/build.ps1' },
+    @{ Path = (Join-Path $libOut 'libSDL3.a'); Hint = 'thirdparty/sdl3/build.ps1' },
+    @{ Path = (Join-Path $includeRoot 'RmlUi/Core.h'); Hint = 'thirdparty/rmlui/build.ps1' },
+    @{ Path = (Join-Path $libOut 'librmlui.a'); Hint = 'thirdparty/rmlui/build.ps1' },
+    @{ Path = (Join-Path $libOut 'librmlui_debugger.a'); Hint = 'thirdparty/rmlui/build.ps1' },
+    @{ Path = (Join-Path $includeRoot 'freetype2/ft2build.h'); Hint = 'thirdparty/freetype/build.ps1' },
+    @{ Path = (Join-Path $libOut 'libfreetype.a'); Hint = 'thirdparty/freetype/build.ps1' }
 )
 foreach ($item in $required) {
     if (-not (Test-Path $item.Path)) { Stop-WithError "缺少 $($item.Path)（先跑 $($item.Hint)）" }
@@ -87,7 +87,7 @@ foreach ($item in $required) {
 $rmluiTree = Get-ChildItem (Join-Path $repoRoot 'build/thirdparty/tree') -Directory -Filter 'RmlUi-*' `
     -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
 if (-not $rmluiTree) {
-    Stop-WithError '找不到 RmlUi 源码树：<repo>/build/thirdparty/tree/RmlUi-*（先跑 thirdparty/build-rmlui.ps1）'
+    Stop-WithError '找不到 RmlUi 源码树：<repo>/build/thirdparty/tree/RmlUi-*（先跑 thirdparty/rmlui/build.ps1）'
 }
 $backendDir = Join-Path $rmluiTree.FullName 'Backends'
 foreach ($name in $backendSources) {

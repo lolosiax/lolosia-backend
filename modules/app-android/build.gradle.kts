@@ -28,7 +28,7 @@ android {
             "../ui/src/commonMain/kotlin",
             "../protocol/src/commonMain/kotlin",
         )
-        // thirdparty/build-android.ps1 产出 <ABI>/libSDL3.so 与 <ABI>/liblolosia.so
+        // thirdparty/gradle/build-android.ps1 产出 <ABI>/libSDL3.so 与 <ABI>/liblolosia.so
         jniLibs.directories.add("../../thirdparty/androidJniLibs")
     }
 

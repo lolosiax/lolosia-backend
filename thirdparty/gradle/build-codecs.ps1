@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     一次性构建 thirdparty/ 下的第三方原生静态库（zlib / libpng / libwebp / libjpeg-turbo / giflib / msgpack-c）。
@@ -29,7 +29,7 @@
     清掉构建目录与已下载的源码包，全部重来。
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File thirdparty/build-libs.ps1
+    powershell -ExecutionPolicy Bypass -File thirdparty/gradle/build-codecs.ps1
 #>
 [CmdletBinding()]
 param(
@@ -41,12 +41,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$thirdpartyRoot = Join-Path $repoRoot 'thirdparty'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
 $srcDir = Join-Path $WorkDir 'src'
 $treeDir = Join-Path $WorkDir 'tree'
 $cmakeDir = Join-Path $WorkDir 'cmake'
-$incOut = Join-Path $PSScriptRoot 'include'
+$incOut = Join-Path $thirdpartyRoot 'include'
 
 function Info([string]$m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn([string]$m) { Write-Host "!!  $m" -ForegroundColor Yellow }
@@ -236,7 +237,7 @@ foreach ($tpl in @(
 foreach ($target in $Targets) {
     Write-Host ''
     Info "================ 目标 $target ================"
-    $outDir = Join-Path $PSScriptRoot $target
+    $outDir = Join-Path $thirdpartyRoot $target
 
     # ---- zlib ----
     $zlibBuild = Join-Path $cmakeDir "$target/zlib"
@@ -377,6 +378,6 @@ Write-Host '    -> msgpack.h + msgpack/*'
 
 Write-Host ''
 Info '完成。产物：'
-Get-ChildItem ($Targets | ForEach-Object { Join-Path $PSScriptRoot $_ }) -Filter '*.a' -ErrorAction SilentlyContinue |
+Get-ChildItem ($Targets | ForEach-Object { Join-Path $thirdpartyRoot $_ }) -Filter '*.a' -ErrorAction SilentlyContinue |
     Select-Object @{ n = 'Target'; e = { Split-Path $_.DirectoryName -Leaf } }, Name, @{ n = 'KB'; e = { [math]::Round($_.Length / 1KB) } } |
     Format-Table -AutoSize | Out-String | Write-Host
