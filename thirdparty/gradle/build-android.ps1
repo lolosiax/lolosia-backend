@@ -119,6 +119,8 @@ function Invoke-CMake([string]$Name, [string]$Source, [string[]]$ExtraArgs) {
         "-DANDROID_ABI=$Abi",
         '-DANDROID_PLATFORM=android-24',
         '-DANDROID_STL=c++_static',
+        # Android 15 的 16 KB 页设备要求共享库 LOAD 段按 16 KB 对齐（NDK r28 起是默认值）
+        '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON',
         '-DCMAKE_BUILD_TYPE=Release'
     ) + $ExtraArgs
     & $cmake @cfg
@@ -236,6 +238,8 @@ if (Test-Path $so) { Remove-Item $so -Force }
     "--target=$triple",
     '-shared', '-static-libstdc++',
     '-Wl,-soname,liblolosia.so',
+    # 手工链接不走 NDK 的 CMake 工具链，16 KB 页对齐要自己加
+    '-Wl,-z,max-page-size=16384',
     '-o', $so
 ) @objects @(
     "-L$stageLib",
