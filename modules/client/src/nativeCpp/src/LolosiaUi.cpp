@@ -20,6 +20,12 @@
 #include <RmlUi/Core.h>
 #include <RmlUi/Debugger.h>
 #include <SDL3/SDL.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_SFNT_NAMES_H
+#include <atomic>
+#include <cstdint>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -230,6 +236,186 @@ void applySafeArea() {
     g_state.document->SetProperty("border-color", color);
 }
 
+#if defined(__ANDROID__)
+/**
+ * 触摸设备上关掉输入框的拖拽选择。
+ *
+ * RmlUi 的文本控件在构造时把宿主元素标成 `drag: drag`（写在元素行内样式上，样式表覆盖不掉）；
+ * Context::ProcessTouchMove 看到 drag 非空就跳过滚动 —— 症状就是从输入框里起手拖拽只框选文字、
+ * 页面纹丝不动。这里在文档加载后把输入类元素改回 `drag: none`：点按仍然定位光标，
+ * 拖动则交还给最近的滚动容器。
+ */
+void disableTextDragSelect() {
+    if (g_state.document == nullptr) return;
+    for (const char* tag : {"input", "textarea"}) {
+        Rml::ElementList elements;
+        g_state.document->GetElementsByTagName(elements, tag);
+        for (Rml::Element* element : elements) element->SetProperty("drag", "none");
+    }
+}
+
+/**
+ * 触摸按下 / 抬起的原始数据。
+ *
+ * SDL 的事件监听可能在任何线程（Android 上是 Java 线程）触发，所以只往这里塞原子量，
+ * 真正的「点按还是拖拽」判定放到帧线程做（见 applyKeyboardDecision）。
+ */
+struct TouchPress {
+    std::atomic<bool> down{false};
+    std::atomic<bool> up_pending{false};
+    std::atomic<float> down_x{0.0f};
+    std::atomic<float> down_y{0.0f};
+    std::atomic<float> up_x{0.0f};
+    std::atomic<float> up_y{0.0f};
+    std::atomic<uint64_t> down_ms{0};
+    std::atomic<uint64_t> up_ms{0};
+};
+
+TouchPress g_touch_press;
+
+/** 点按判定：位移不超过 12dp、时长不超过 400ms 才算点按，否则视为拖拽 / 长按。 */
+constexpr float kTapSlopDp = 12.0f;
+constexpr uint64_t kTapMaxMillis = 400;
+
+/**
+ * 延迟弹软键盘的系统接口包装。
+ *
+ * RmlUi 的文本框一按下就走 ShowCursor(true) → SystemInterface::ActivateKeyboard()，
+ * 而后端的实现直接 SDL_StartTextInput()：手指刚落下、还没分清是点按还是拖拽，键盘就弹出来了。
+ * 这里把激活请求先挂起，等触摸抬起后由帧线程判定：点按才补发，拖拽直接丢弃。
+ * 没有手指按着时的激活请求（例如代码里主动聚焦）照旧立刻转发。
+ */
+class DeferredKeyboardSystemInterface final : public Rml::SystemInterface {
+public:
+    void SetInner(Rml::SystemInterface* value) { inner = value; }
+    Rml::SystemInterface* GetInner() const { return inner; }
+
+    double GetElapsedTime() override { return inner->GetElapsedTime(); }
+    int TranslateString(Rml::String& translated, const Rml::String& input) override {
+        return inner->TranslateString(translated, input);
+    }
+    void JoinPath(Rml::String& translated_path, const Rml::String& document_path, const Rml::String& path) override {
+        inner->JoinPath(translated_path, document_path, path);
+    }
+    bool LogMessage(Rml::Log::Type type, const Rml::String& message) override {
+        return inner->LogMessage(type, message);
+    }
+    void SetMouseCursor(const Rml::String& cursor_name) override { inner->SetMouseCursor(cursor_name); }
+    void SetClipboardText(const Rml::String& text) override { inner->SetClipboardText(text); }
+    void GetClipboardText(Rml::String& text) override { inner->GetClipboardText(text); }
+
+    void ActivateKeyboard(Rml::Vector2f caret_position, float line_height) override {
+        if (!g_touch_press.down.load()) {
+            inner->ActivateKeyboard(caret_position, line_height);
+            return;
+        }
+        pending_position = caret_position;
+        pending_line_height = line_height;
+        has_pending = true;
+    }
+    void DeactivateKeyboard() override {
+        has_pending = false;
+        inner->DeactivateKeyboard();
+    }
+
+    /** 判定为点按：补发挂起的激活请求。 */
+    void FlushKeyboard() {
+        if (!has_pending) return;
+        has_pending = false;
+        inner->ActivateKeyboard(pending_position, pending_line_height);
+    }
+
+    /** 判定为拖拽 / 长按：丢弃挂起的请求。 */
+    void CancelKeyboard() { has_pending = false; }
+
+private:
+    Rml::SystemInterface* inner = nullptr;
+    Rml::Vector2f pending_position;
+    float pending_line_height = 0.0f;
+    bool has_pending = false;
+};
+
+DeferredKeyboardSystemInterface g_keyboard_system;
+
+/** SDL 事件监听：只记录按下的位置与时间，不在这里做判定（可能不在主线程）。 */
+bool onTouchEventWatch(void*, SDL_Event* event) {
+    switch (event->type) {
+    case SDL_EVENT_FINGER_DOWN:
+        g_touch_press.down_x = event->tfinger.x;
+        g_touch_press.down_y = event->tfinger.y;
+        g_touch_press.down_ms = SDL_GetTicks();
+        g_touch_press.down = true;
+        break;
+    case SDL_EVENT_FINGER_UP:
+        g_touch_press.up_x = event->tfinger.x;
+        g_touch_press.up_y = event->tfinger.y;
+        g_touch_press.up_ms = SDL_GetTicks();
+        // down 标志留到帧线程判定完再清：一次快速滑动可能把 down/up 塞进同一批事件，
+        // 提前清掉会让按下时的键盘激活直接透传出去（又变成「一按就弹」）。
+        g_touch_press.up_pending = true;
+        break;
+    default: break;
+    }
+    return true;
+}
+
+/** 松手后把指针移出窗口、清掉 hover（定义见下）。 */
+void scheduleHoverClear();
+
+/** 帧线程：把刚结束的这次触摸归类，然后决定补发还是丢弃挂起的键盘激活。 */
+void applyKeyboardDecision() {
+    if (g_state.window == nullptr) return;
+    if (!g_touch_press.up_pending.exchange(false)) return;
+    g_touch_press.down = false;
+
+    int width = 0;
+    int height = 0;
+    SDL_GetWindowSizeInPixels(g_state.window, &width, &height);
+    // SDL3 的触摸坐标是归一化的 0..1，换算成像素再比较距离
+    const float dx = (g_touch_press.up_x.load() - g_touch_press.down_x.load()) * float(width);
+    const float dy = (g_touch_press.up_y.load() - g_touch_press.down_y.load()) * float(height);
+    const float distance = SDL_sqrtf(dx * dx + dy * dy);
+    const float slop = kTapSlopDp * SDL_GetWindowPixelDensity(g_state.window);
+    const uint64_t elapsed = g_touch_press.up_ms.load() - g_touch_press.down_ms.load();
+
+    if (distance <= slop && elapsed <= kTapMaxMillis) g_keyboard_system.FlushKeyboard();
+    else g_keyboard_system.CancelKeyboard();
+
+    scheduleHoverClear();
+}
+
+/** 松手后过多久把「指针」移出窗口（毫秒）。 */
+constexpr uint32_t kHoverClearDelayMs = 100;
+
+/** 一次性定时器到点了；帧线程看到后执行清理。 */
+std::atomic<bool> g_hover_clear_due{false};
+
+Uint32 onHoverClearTimer(void*, SDL_TimerID, Uint32) {
+    g_hover_clear_due = true;
+    // 帧循环可能正阻塞在 SDL_WaitEventTimeout 里（power_save），戳一下
+    ll_ui_wake();
+    return 0;
+}
+
+/**
+ * 排一次「把指针移出窗口」。
+ *
+ * 移动端没有鼠标：手指抬起后 RmlUi 仍认为指针停在最后位置，:hover 会一直挂着，
+ * 看起来像有个假鼠标悬在那里。这里松手 100ms 后调 ProcessMouseLeave()，
+ * 下一次触摸（ProcessMouseMove）会重新激活，不影响后续交互。
+ */
+void scheduleHoverClear() {
+    g_hover_clear_due = false;
+    SDL_AddTimer(kHoverClearDelayMs, &onHoverClearTimer, nullptr);
+}
+
+/** 帧线程：定时器到点就清掉所有 hover。 */
+void applyPendingHoverClear() {
+    if (!g_hover_clear_due.exchange(false)) return;
+    if (g_state.context != nullptr) g_state.context->ProcessMouseLeave();
+}
+#endif
+
 int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     if (g_state.created) {
         setError("ll_ui 已初始化，同一进程只允许一个窗口");
@@ -268,6 +454,14 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     // 文件接口换成「先问宿主、再退回磁盘」的实现：界面资源在 classpath（内嵌 zip）里，
     // 而字体这类东西仍是磁盘文件，两者都要能读到。
     Rml::SetSystemInterface(Backend::GetSystemInterface());
+#if defined(__ANDROID__)
+    // 软键盘改为「点按才弹」：包一层后端的系统接口，激活请求先挂起，等触摸抬起判定
+    g_keyboard_system.SetInner(Backend::GetSystemInterface());
+    Rml::SetSystemInterface(&g_keyboard_system);
+    g_touch_press.down = false;
+    g_touch_press.up_pending = false;
+    SDL_AddEventWatch(&onTouchEventWatch, nullptr);
+#endif
     Rml::SetRenderInterface(Backend::GetRenderInterface());
     Rml::SetFileInterface(ll_resource_file_interface());
     if (!Rml::Initialise()) {
@@ -345,7 +539,80 @@ int32_t ll_ui_create(const char* title, int32_t width, int32_t height) {
     return 0;
 }
 
+namespace {
+
+/** 大小写不敏感的子串查找（字体名都是 ASCII）。 */
+bool containsIgnoreCase(const char* text, const char* needle) {
+    if (text == nullptr || needle == nullptr || needle[0] == '\0') return false;
+    const size_t length = strlen(needle);
+    for (const char* start = text; *start != '\0'; ++start) {
+        size_t i = 0;
+        while (i < length && start[i] != '\0' &&
+               tolower(static_cast<unsigned char>(start[i])) == tolower(static_cast<unsigned char>(needle[i]))) {
+            ++i;
+        }
+        if (i == length) return true;
+    }
+    return false;
+}
+
+/** 取字面的英文家族名（name 表 nameID=1、Windows Unicode BMP、en-US）。 */
+Rml::String faceFamilyName(FT_Face face) {
+    const FT_UInt count = FT_Get_Sfnt_Name_Count(face);
+    for (FT_UInt i = 0; i < count; ++i) {
+        FT_SfntName record{};
+        if (FT_Get_Sfnt_Name(face, i, &record) != 0) continue;
+        if (record.name_id != 1 || record.platform_id != 3 || record.language_id != 0x0409) continue;
+        Rml::String text;
+        for (FT_UInt k = 0; k + 1 < record.string_len; k += 2) {
+            // UTF-16BE，英文名字每个字符的高字节都是 0
+            if (record.string[k] == 0 && record.string[k + 1] != 0) text.push_back(static_cast<char>(record.string[k + 1]));
+        }
+        if (!text.empty()) return text;
+    }
+    return {};
+}
+
+/**
+ * 在字体集合里找「名字里带 hint」的字面。
+ *
+ * Noto Sans CJK 这类 .ttc 会把 HK / JP / KR / SC / TC 依次排开，0 号是香港字面；
+ * 简体中文界面要的 SC 往往在后面，所以要按名字挑，而不是无脑用 0 号。
+ * 找不到（普通 ttf/otf、或名字对不上）就退回 0 号。
+ */
+int findFaceIndex(const char* file_path, const char* hint) {
+    FT_Library library = nullptr;
+    if (FT_Init_FreeType(&library) != 0) return 0;
+
+    int face_index = 0;
+    FT_Face first = nullptr;
+    if (FT_New_Face(library, file_path, 0, &first) == 0) {
+        const FT_Long face_count = first->num_faces;
+        FT_Done_Face(first);
+        for (FT_Long i = 0; i < face_count; ++i) {
+            FT_Face face = nullptr;
+            if (FT_New_Face(library, file_path, i, &face) != 0) continue;
+            const char* postscript = FT_Get_Postscript_Name(face);
+            const Rml::String family = faceFamilyName(face);
+            const bool hit = containsIgnoreCase(postscript, hint) || containsIgnoreCase(family.c_str(), hint);
+            FT_Done_Face(face);
+            if (hit) {
+                face_index = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+    FT_Done_FreeType(library);
+    return face_index;
+}
+
+}  // namespace
+
 int32_t ll_ui_load_font(const char* file_path, const char* family) {
+    return ll_ui_load_font_face(file_path, family, nullptr);
+}
+
+int32_t ll_ui_load_font_face(const char* file_path, const char* family, const char* face_hint) {
     if (file_path == nullptr || file_path[0] == '\0') {
         setError("字体路径为空");
         return -1;
@@ -354,9 +621,10 @@ int32_t ll_ui_load_font(const char* file_path, const char* family) {
         setError("字体家族名为空");
         return -1;
     }
+    const int face_index = (face_hint == nullptr || face_hint[0] == '\0') ? 0 : findFaceIndex(file_path, face_hint);
     // 指定家族名 + fallback_face：RCSS 里写 font-family: <family> 就能命中，
     // 其他家族缺字形时也会退到它
-    if (!Rml::LoadFontFace(file_path, family, Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Auto, true)) {
+    if (!Rml::LoadFontFace(file_path, family, Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Auto, true, face_index)) {
         setNamedError("加载字体失败", file_path);
         return -1;
     }
@@ -532,6 +800,9 @@ int32_t ll_ui_load_document(const char* rml_utf8) {
     // 新文档是一张新样式表算出来的盒子，边距要重新套一遍
     g_state.safe_area_dirty = true;
     applySafeArea();
+#if defined(__ANDROID__)
+    disableTextDragSelect();
+#endif
     clearError();
     return 0;
 }
@@ -563,7 +834,14 @@ int32_t ll_ui_frame(void) {
     applySafeArea();
 
     // power_save：没有事件、也不需要动画时阻塞等待（最多等下一帧更新），不空转烧 CPU
-    if (!Backend::ProcessEvents(g_state.context, &onKeyDown, true)) return 1;
+    const bool keep_running = Backend::ProcessEvents(g_state.context, &onKeyDown, true);
+#if defined(__ANDROID__)
+    // 触摸抬起后立刻归类：点按才补发键盘激活，拖拽 / 长按不弹
+    applyKeyboardDecision();
+    // 松手 100ms 后把指针移出窗口，避免留下虚假 hover
+    applyPendingHoverClear();
+#endif
+    if (!keep_running) return 1;
 
     g_state.context->Update();
     Backend::BeginFrame();
@@ -602,6 +880,10 @@ void ll_ui_destroy(void) {
     }
     g_state.document = nullptr;
     g_state.window = nullptr;
+#if defined(__ANDROID__)
+    SDL_RemoveEventWatch(&onTouchEventWatch, nullptr);
+    if (Rml::GetSystemInterface() == &g_keyboard_system) Rml::SetSystemInterface(g_keyboard_system.GetInner());
+#endif
     g_state.model = Rml::DataModelConstructor();
     if (g_state.created) {
         Rml::Shutdown();

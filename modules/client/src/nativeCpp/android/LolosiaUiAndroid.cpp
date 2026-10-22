@@ -22,13 +22,19 @@
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
 #include <android/log.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <jni.h>
 
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -43,7 +49,7 @@ constexpr const char* kFontFamily = "lolosia-ui";
 /** 资源上限与桌面版一致：正常界面资源没有这么大，多半是路径写错。 */
 constexpr int64_t kMaxResourceBytes = 64ll * 1024 * 1024;
 
-/** 字体候选：优先带中日韩字形的系统字体，最后才是纯拉丁字体。 */
+/** 字体候选：系统配置读不出来时的兜底，优先带中日韩字形的系统字体。 */
 const char* const kFontCandidates[] = {
     "/system/fonts/NotoSansCJK-Regular.ttc",
     "/system/fonts/NotoSansCJKsc-Regular.otf",
@@ -51,6 +57,155 @@ const char* const kFontCandidates[] = {
     "/system/fonts/DroidSansFallback.ttf",
     "/system/fonts/Roboto-Regular.ttf",
 };
+
+/** 系统字体配置：Android 用它声明默认字体、回退顺序和 .ttc 里的字面（MIUI 会软链到主题字体配置）。 */
+constexpr const char* kSystemFontConfig = "/system/etc/fonts.xml";
+
+void logInfo(const char* message);
+void logError(const std::string& message);
+
+/** 配置里写的是文件名，按这些目录依次拼回绝对路径。 */
+const char* const kFontSearchDirs[] = {
+    "/system/fonts/",
+    "/product/fonts/",
+    "/system_ext/fonts/",
+    "/data/system/fonts/theme_webview/",
+};
+
+std::string readFileText(const char* path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) return {};
+    return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+}
+
+/** 取标签里 attribute="value" 的值；没有就是空串。 */
+std::string attributeValue(const std::string& tag, const std::string& name) {
+    size_t position = tag.find(name + "=");
+    while (position != std::string::npos && position > 0 &&
+           !(isspace(static_cast<unsigned char>(tag[position - 1])) || tag[position - 1] == '<')) {
+        position = tag.find(name + "=", position + 1);
+    }
+    if (position == std::string::npos) return {};
+    const size_t begin = position + name.size() + 1;
+    if (begin >= tag.size()) return {};
+    const char quote = tag[begin];
+    if (quote != '"' && quote != '\'') return {};
+    const size_t end = tag.find(quote, begin + 1);
+    if (end == std::string::npos) return {};
+    return tag.substr(begin + 1, end - begin - 1);
+}
+
+/** 配置里的文件名 → 绝对路径：按目录表找第一个存在的，都没有就用第一个目录拼。 */
+std::string resolveFontPath(const std::string& file_name) {
+    if (!file_name.empty() && file_name[0] == '/') return file_name;
+    for (const char* dir : kFontSearchDirs) {
+        const std::string candidate = std::string(dir) + file_name;
+        std::ifstream probe(candidate, std::ios::binary);
+        if (probe.good()) return candidate;
+    }
+    return std::string(kFontSearchDirs[0]) + file_name;
+}
+
+/** 这个字体文件能不能画中文：用「中」探一下，集合里任一字面覆盖就算。 */
+bool coversChinese(const char* path) {
+    FT_Library library = nullptr;
+    if (FT_Init_FreeType(&library) != 0) return false;
+
+    bool covered = false;
+    FT_Face probe = nullptr;
+    if (FT_New_Face(library, path, 0, &probe) == 0) {
+        const FT_Long face_count = probe->num_faces;
+        FT_Done_Face(probe);
+        for (FT_Long i = 0; i < face_count && !covered; ++i) {
+            FT_Face face = nullptr;
+            if (FT_New_Face(library, path, i, &face) != 0) continue;
+            covered = FT_Get_Char_Index(face, 0x4E2D) != 0;
+            FT_Done_Face(face);
+        }
+    }
+    FT_Done_FreeType(library);
+    return covered;
+}
+
+/** 一个字族里挑出来的字体：文件路径 + 配置里声明的 PostScript 名（用来选 .ttc 里的字面）。 */
+struct FamilyFont {
+    std::string path;
+    std::string postscript;
+};
+
+/** 在 <family> 块里挑 weight 最接近 400、非斜体的那个 <font>。 */
+FamilyFont pickFamilyFont(const std::string& block) {
+    FamilyFont best;
+    int best_distance = 1 << 20;
+    size_t position = 0;
+    while ((position = block.find("<font", position)) != std::string::npos) {
+        const size_t tag_end = block.find('>', position);
+        if (tag_end == std::string::npos) break;
+        const std::string attributes = block.substr(position + 5, tag_end - position - 5);
+
+        // 标签后的第一段文本就是文件名（后面可能还跟 <axis .../> 子元素）
+        size_t text_begin = tag_end + 1;
+        while (text_begin < block.size() && isspace(static_cast<unsigned char>(block[text_begin]))) ++text_begin;
+        const size_t text_end = block.find('<', text_begin);
+        std::string file_name = block.substr(text_begin, (text_end == std::string::npos ? block.size() : text_end) - text_begin);
+        while (!file_name.empty() && isspace(static_cast<unsigned char>(file_name.back()))) file_name.pop_back();
+        position = tag_end + 1;
+
+        if (file_name.empty() || attributeValue(attributes, "style") == "italic") continue;
+        int weight = 400;
+        const std::string weight_text = attributeValue(attributes, "weight");
+        if (!weight_text.empty()) weight = atoi(weight_text.c_str());
+        const int distance = weight > 400 ? weight - 400 : 400 - weight;
+        if (distance >= best_distance) continue;
+
+        best_distance = distance;
+        best.path = resolveFontPath(file_name);
+        best.postscript = attributeValue(attributes, "postScriptName");
+    }
+    return best;
+}
+
+/**
+ * 按系统配置挑字体：fonts.xml 里第一个「能画中文」的字族，就是 Android 自己会用的那个。
+ *
+ * 这样小米的 MiSans、AOSP 的 Noto CJK、以及用户装的主题字体都能自动跟上，
+ * 不用猜某个具体文件名（这台机器的 /system/etc/fonts.xml 甚至软链到主题字体配置）。
+ * 配置文件本身标注了「可能随版本变动」，所以解析失败就退回下面的候选列表。
+ */
+bool loadSystemFont() {
+    const std::string config = readFileText(kSystemFontConfig);
+    if (config.empty()) return false;
+
+    size_t position = 0;
+    while ((position = config.find("<family", position)) != std::string::npos) {
+        const size_t block_end = config.find("</family>", position);
+        if (block_end == std::string::npos) break;
+        const FamilyFont pick = pickFamilyFont(config.substr(position, block_end - position));
+        position = block_end + 9;
+        if (pick.path.empty() || !coversChinese(pick.path.c_str())) continue;
+        // 有 PostScript 名就按名字选字面；没有就让 "sc" 兜底（Noto CJK 合集里 0 号是港式字形）
+        const char* hint = pick.postscript.empty() ? "sc" : pick.postscript.c_str();
+        if (ll_ui_load_font_face(pick.path.c_str(), kFontFamily, hint) == 0) {
+            logInfo(("已加载系统字体：" + pick.path + (pick.postscript.empty() ? "" : "#" + pick.postscript)).c_str());
+            return true;
+        }
+    }
+    return false;
+}
+
+/** 系统字体通常带中日韩字形；一个都加载不上时界面仍能开，只是文字缺字。 */
+void loadFont() {
+    if (loadSystemFont()) return;
+    for (const char* path : kFontCandidates) {
+        // "sc" 是给字体集合用的：Noto Sans CJK 的 .ttc 里 0 号是香港字面，
+        // 不挑字面的话简体字形会变成繁体/港式写法（例如“复”的中间会画成目）。
+        if (ll_ui_load_font_face(path, kFontFamily, "sc") == 0) {
+            logInfo((std::string("已加载字体：") + path).c_str());
+            return;
+        }
+    }
+    logError(std::string("没有可用字体，界面文字会缺字（候选：") + kFontCandidates[0] + " 等）");
+}
 
 void logInfo(const char* message) {
     __android_log_print(ANDROID_LOG_INFO, kLogTag, "%s", message);
@@ -283,7 +438,14 @@ void drainCommands() {
         std::lock_guard<std::mutex> lock(g_queueMutex);
         local.swap(g_queue);
     }
+    if (local.empty()) return;
+
     for (const Command& command : local) applyCommand(command);
+
+    // 这批命令可能换了文档或改了模型，补一个唤醒事件让本帧立刻画出来。
+    // 入队时那次 ll_ui_wake 已经被上一帧的 ProcessEvents 用掉了，而 power_save 的等待上限是 10 秒，
+    // 不补的话新页面要等到用户下一次触摸才出现。
+    ll_ui_wake();
 }
 
 /** 文档里的 action('x') 落到 Kotlin 主线程（Kotlin 侧再切 Handler）。 */
@@ -303,17 +465,6 @@ void onAction(void* /*user_data*/, const char* name) {
         if (env->ExceptionCheck()) env->ExceptionClear();
     }
     if (attached) g_vm->DetachCurrentThread();
-}
-
-/** 系统字体通常带中日韩字形；一个都加载不上时界面仍能开，只是文字缺字。 */
-void loadFont() {
-    for (const char* path : kFontCandidates) {
-        if (ll_ui_load_font(path, kFontFamily) == 0) {
-            logInfo((std::string("已加载字体：") + path).c_str());
-            return;
-        }
-    }
-    logError(std::string("没有可用字体，界面文字会缺字（候选：") + kFontCandidates[0] + " 等）");
 }
 
 /** 从 SDLActivity 拿到 AssetManager；必须在 ll_ui_create 之后调用（SDL 已初始化）。 */

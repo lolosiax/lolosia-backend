@@ -50,6 +50,14 @@ void ll_ui_destroy(void);
 int32_t ll_ui_load_font(const char* file_path, const char* family);
 
 /*
+ * 同 ll_ui_load_font，但可以指定字体集合（.ttc，一个文件里多个字面）用哪一个：
+ * 在字面的 PostScript 名 / 英文家族名里做大小写不敏感的子串匹配，命中第一个就用它，找不到退回 0 号。
+ * 典型用法：CJK 合集的 0 号往往是香港字面（如 Noto Sans CJK），传 "sc" 才能拿到简体中文字形。
+ * face_hint 传 nullptr 或空串等价于 ll_ui_load_font。
+ */
+int32_t ll_ui_load_font_face(const char* file_path, const char* family, const char* face_hint);
+
+/*
  * 数据模型字段声明：必须在 ll_ui_load_document() 之前完成，
  * 否则文档里的 data-bind-* 找不到变量。重名会覆盖此前声明。
  */
