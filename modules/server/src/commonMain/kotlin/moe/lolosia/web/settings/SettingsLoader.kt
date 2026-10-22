@@ -25,6 +25,14 @@ private const val ENV_DB_URL: String = "KTOR_DB_URL"
 private const val ENV_DB_USERNAME: String = "KTOR_DB_USERNAME"
 private const val ENV_DB_PASSWORD: String = "KTOR_DB_PASSWORD"
 private const val ENV_LLM_API_KEY: String = "KTOR_LLM_API_KEY"
+private const val ENV_ARTIFACT_ENABLED: String = "KTOR_ARTIFACT_ENABLED"
+private const val ENV_ARTIFACT_PATH: String = "KTOR_ARTIFACT_PATH"
+private const val ENV_ARTIFACT_ROOT: String = "KTOR_ARTIFACT_ROOT"
+private const val ENV_ARTIFACT_USERNAME: String = "KTOR_ARTIFACT_USERNAME"
+private const val ENV_ARTIFACT_PASSWORD: String = "KTOR_ARTIFACT_PASSWORD"
+private const val ENV_ARTIFACT_REALM: String = "KTOR_ARTIFACT_REALM"
+private const val ENV_ARTIFACT_PUBLIC_READ: String = "KTOR_ARTIFACT_PUBLIC_READ"
+private const val ENV_ARTIFACT_MAX_UPLOAD_BYTES: String = "KTOR_ARTIFACT_MAX_UPLOAD_BYTES"
 
 private val settingsJson: Json = Json {
     ignoreUnknownKeys = true
@@ -87,15 +95,28 @@ private fun envOverrides(env: (String) -> String?): JsonObject {
     val llm = buildJsonObject {
         env(ENV_LLM_API_KEY)?.let { put("apiKey", it) }
     }
+    val artifact = buildJsonObject {
+        env(ENV_ARTIFACT_ENABLED)?.toBooleanStrictOrNull()?.let { put("enabled", it) }
+        env(ENV_ARTIFACT_PATH)?.let { put("path", it) }
+        env(ENV_ARTIFACT_ROOT)?.let { put("root", it) }
+        env(ENV_ARTIFACT_USERNAME)?.let { put("username", it) }
+        env(ENV_ARTIFACT_PASSWORD)?.let { put("password", it) }
+        env(ENV_ARTIFACT_REALM)?.let { put("realm", it) }
+        env(ENV_ARTIFACT_PUBLIC_READ)?.toBooleanStrictOrNull()?.let { put("publicRead", it) }
+        env(ENV_ARTIFACT_MAX_UPLOAD_BYTES)?.toLongOrNull()?.let { put("maxUploadBytes", it) }
+    }
     return buildJsonObject {
         if (server.isNotEmpty()) put("server", server)
         if (datasource.isNotEmpty()) put("datasource", datasource)
         if (llm.isNotEmpty()) put("llm", llm)
+        if (artifact.isNotEmpty()) put("artifact", artifact)
         env(ENV_LOG_LEVEL)?.let { put("logLevel", it) }
     }
 }
 
-/** 读磁盘设置文件；文件不存在或读不出来时返回 `null`，不阻断启动。 */
+/**
+ * 读磁盘设置文件；文件不存在或读不出来时返回 `null`，不阻断启动。
+ */
 private fun readSettingsFile(path: String): String? =
     runCatching { FileSystem.SYSTEM.read(path.toPath()) { readUtf8() } }.getOrNull()
 

@@ -22,6 +22,7 @@ data class AppSettings(
     val files: FilesConfig = FilesConfig(),
     val dashboard: DashboardConfig = DashboardConfig(),
     val anime: AnimeConfig = AnimeConfig(),
+    val artifact: ArtifactConfig = ArtifactConfig(),
     val llm: LlmSettings = LlmSettings(),
     /** 日志级别：TRACE / DEBUG / INFO / WARN / ERROR / OFF */
     val logLevel: String = "INFO",
@@ -394,5 +395,43 @@ data class AppSettings(
          * 立刻收手，避免智能体反复检索把 token 烧穿。提示 + 补全一起算。
          */
         val aiMatchTokenLimit: Long = 200_000,
+    )
+
+    /**
+     * 自建工件仓库：以**单一根目录 + Maven 布局**保存构建产物、源码包与少量原始文件。
+     *
+     * 挂载路径不走 `/api`，因此不受会话鉴权与 JSON 信封影响；鉴权用 HTTP Basic，
+     * 账号来自配置。URL 只在内网/本机使用，不写入仓库文档与提交。
+     *
+     * 默认根是启动目录下的 `work/repo`；生产环境可指向机械盘上的服务专属目录，
+     * 例如 `/mnt/hdd1/.lolosia/repo`。`.lolosia` 与影集、工程目录、开发文档等人类目录同级，
+     * 但只归后端使用，避免后端数据散落在人类目录里。
+     *
+     * 目录结构固定为 `<root>/maven`、`<root>/raw`、`<root>/sources` 与内部使用的 `_tmp`：
+     * 业务只通过 Maven 坐标（group / artifact / version）或 ASCII slug 归类，
+     * **不允许**在根下按中文名或临时想法新建一级目录，避免时间一长目录树失控。
+     */
+    @Serializable
+    data class ArtifactConfig(
+        /** 是否启用。关闭时既不挂载路由，也不创建目录。 */
+        val enabled: Boolean = false,
+        /** 对外挂载路径；不能以 `/api` 开头。 */
+        val path: String = "/repo",
+        /**
+         * 落盘根目录；相对路径按启动目录解析。
+         *
+         * 默认 `work/repo`；开发板建议改为 `/mnt/hdd1/.lolosia/repo`。
+         */
+        val root: String = "work/repo",
+        /** Basic 鉴权用户名。 */
+        val username: String = "lolosia",
+        /** Basic 鉴权密码；为空时拒绝一切请求。 */
+        val password: String = "",
+        /** 401 挑战里显示的 realm。 */
+        val realm: String = "lolosia-repo",
+        /** 是否允许匿名读取（上传永远需要鉴权）。 */
+        val publicRead: Boolean = false,
+        /** 单次上传的字节上限；超过直接 413。 */
+        val maxUploadBytes: Long = 512L * 1024 * 1024,
     )
 }

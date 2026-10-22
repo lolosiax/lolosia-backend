@@ -40,6 +40,7 @@ import moe.lolosia.web.util.classpath.FileStoreClasspath
 import moe.lolosia.web.util.classpath.StaticClasspathConfig
 import moe.lolosia.web.util.fs.FileStore
 import moe.lolosia.web.util.ktor.staticClasspath
+import moe.lolosia.web.util.ktor.artifactRepository
 import moe.lolosia.web.util.ktor.webDav
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.RouterInjection
@@ -168,6 +169,12 @@ fun Application.configureApplication(koin: Koin) {
         koin.get<AppSettings>().webdav.takeIf { it.enabled }?.let { cfg ->
             val appSetting = koin.get<AppSettingService>()
             webDav(cfg, DavStore(cfg.root) { appSetting.allowHiddenFiles }, DavLockManager())
+        }
+
+        // 自建工件仓库（可选）：独立挂载点，不走 `/api`，用 Basic 鉴权。
+        // 默认关闭；启用后默认落在 `work/repo`，也可指向机械盘（如 `/mnt/hdd1/.lolosia/repo`）。
+        koin.get<AppSettings>().artifact.takeIf { it.enabled }?.let { cfg ->
+            artifactRepository(cfg)
         }
 
         // 自研路由插件生成：全部 @Controller
