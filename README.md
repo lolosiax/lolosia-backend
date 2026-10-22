@@ -1,38 +1,43 @@
 # lolosia-backend
 
-洛洛希雅（Lolosia）的小网站后端：**Kotlin + Ktor 3 服务端**，已从 JVM 单体迁移为 **Kotlin/Native 原生可执行文件**——没有 JVM、没有 fat jar，一个二进制就是全部（前端产物、SQL 脚本、配置文件都嵌在里面）。
+洛洛希雅（Lolosia）的小网站后端：**Kotlin/Native 单文件服务端** —— 前端产物、SQL 脚本与默认配置都嵌在可执行文件里，部署时只有一个二进制。
 
-- 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k（Rust sqlx 的 FFI）+ MariaDB**
-- 目标平台：**`mingwX64`**（Windows 本地开发调试）、**`linuxArm64`**（部署到开发板）与 **`linuxX64`**（部署到 x64 云主机）；**不保留 JVM 目标**
-- 自研件：**注解式路由插件**（注解 + KSP 代码生成）、**`classpath.zip` 资源中间层**、**多级配置**、**bcrypt**、**图形验证码**（点阵算式 + `Image`，见 `util/image`、`util/captcha`）、**WebDAV 服务**（手写协议层，把机械盘挂到 `/dav`，见 `service/dav`、`util/ktor/WebDavRouting.kt`）、**在线文件管理器**（浏览 / 上传 / 复制 / 移动 / 改名 / 删除机械盘 + WebP 缩略图 + 签名直链，见 `service/files`、`controller/FileController.kt`）、**RBAC 权限体系**（组 + 点分权限 + `@Permission`，见 `service/permission`、`doc/rbac-design.md`）
+- 技术栈：**Kotlin 2.4.20（KMP）+ Ktor 3.4.2（CIO）+ Koin 4.2.2 + sqlx4k + MariaDB**
+- 目标平台：**`mingwX64`**（Windows 本地开发）、**`linuxArm64`**（开发板）、**`linuxX64`**（x64 云主机）；没有 JVM 目标
+- 自研件：注解式路由（KSP 代码生成）、`classpath.zip` 资源中间层、多级配置、bcrypt、图形验证码、WebDAV、在线文件管理器、RBAC
 
-> 项目风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 冒烟 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
-> JVM → Kotlin/Native 的迁移详设与实测记录见 [doc/native-migration-plan.md](doc/native-migration-plan.md)。
-> 本项目 MIT 许可，构建进产物的第三方组件（zlib / libpng / libjpeg-turbo / libwebp / giflib / msgpack-c / SDL3 / FreeType / RmlUi）
-> 及其许可声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+> 代码风格与硬性约定见 [AGENTS.md](AGENTS.md)；构建 / 部署 / 排障见 [doc/development-notes.md](doc/development-notes.md)；
+> 第三方组件与许可声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
-## ✨ 特性
+## 特性
 
-- **注解式控制器**：`@Controller("/api") object XxxController` + `@GET/@POST/@PUT/@DELETE/@PATCH`，KSP 编译期生成路由注册（`generatedRoutes()`），不依赖任何反射（Native 也没有反射）
-- **按类型自动注入**（Spring 风格）：形参类型标了 `@Injectable` 就**无需注解**直接注入，如 `fun whoami(ctx: Context)`、`fun config(config: AppSettings)`
-- **服务自动装配**：业务服务标 `@Service`，`router-ksp` 生成 `serviceModule()`（`single { X(get(), …) }` 构造器注入），不用手写 Koin 绑定；`@Service` 管容器绑定、`@Injectable` 管路由形参注入，两者都需要时都标
-- **生成注册表跨源集可见**：KSP 生成物只能落在各目标源集，故签名以 `expect` 写在 commonMain 的 `GeneratedRegistries.kt`、各目标生成 `actual`（编译器强制配对，签名对不上直接编译报错）；于是 `main` 与 Ktor 装配全在 commonMain，平台差异只剩 `installPlatformClasspath` / `envOrNull` / `platformModule` 三处 expect/actual
-- **请求上下文 `ctx`**：一次请求一个（挂在 `call.attributes` 上，请求结束随 `call` 释放），分四面 —— 请求面 `ctx.call`（仅控制器用；IP / UA / 请求头由控制器抽成普通参数往下传）、用户面 `ctx.session` / `ctx.userId` / `ctx.user`（当前用户与组懒查一次并缓存）、执行面 `ctx.db` / `ctx.transaction { }`、权限面 `ctx.hasPermission("a.b.c")`；另有 `ctx.data` 作请求期共享数据区。**服务层方法首参透传 `ctx`**（与旧 JVM 族同位置）
-- **参数注解名称可省略**：`@Path` / `@Query` / `@Header` / `@Form` / `@FilePart` 不写名字默认取形参名；`@Body` 直接反序列化 `@Serializable` 请求体
-- **`classpath.zip` 中间层**：源集下的 `resources/**` 就是 classpath 根，构建期嵌入可执行文件，运行时 `classpath.read("static/home/index.html")` —— 写法与 Java 打资源文件一致
-- **多级配置覆盖**：数据类默认值 < 内嵌 JSON < 磁盘 `application.json` < 环境变量 < 命令行端口
-- **数据访问**：sqlx4k 的 `@Repository` + `@Query` 编译期代码生成（无 ORM、无反射），实体时间列统一 `kotlin.time.Instant`
-- **自研 multipart 解析**：Ktor 3.4 在 Native 上未实现 `receiveMultipart()`，改为读原始字节自行解析
-- **自研图形验证码**（`util/captcha`）：Native 上没有 `java.awt` / `javax.imageio`，于是自写 5×7 点阵字形 + 算式生成，画在 `Image`（内嵌 libpng 编码）的空白画布上出图，逐字对齐 hutool `LineCaptcha` / `MathGenerator`（100×40、150 条干扰线、`a+b=` 且结果可为负）
-- **统一响应信封** `{code,msg,data}`：由 `EnvelopeInterceptor` 在 send pipeline 上按**响应 MIME** 统一包装（只认 `/api/` 下的 JSON；`text/plain` 与文件流/SSE 原样放行，要强制包一段 JSON 文本就返回 `dto.RawJson`）
-- **会话鉴权**：`Authorization: Bearer <sessionId>`（**token 就是会话 id，不是 JWT**）；拦截器链 `Traffic → Ctx → Auth`，`/api/**` 默认保护 + 白名单放行，失败回 `401` + 信封
-- **接口级权限**：`@Permission("a.b.c")` 由 KSP 生成 `call.requirePermission(...)`（失败回 `403`）；权限来自「组链（自身组 + 继承的祖先组）+ 用户直授」，规则是 `±a.b.c` / `a.b.*` / `*` 形式的点分串，**负号优先、未命中拒绝**，`owner` 组兜底放行；内置组（`owner` / `admin` / `user` / `guest`）的**默认权限登记在内嵌资源 `permissions.yaml`**，库为空时兜底生效（OSS 文件的读写就是 `user` 组的默认权限）—— 见 [doc/rbac-design.md](doc/rbac-design.md)
-- **在线文件管理器**：以 `files.root`（留空回退 `webdav.root`）为浏览根，列出目录 / 目录树 / 详情并出三档 WebP 缩略图（`/api/files/{list,dirs,detail,scan}`，挂 `lolosia.files.read`），支持新建目录 / 改名 / 删除 / 上传 / 复制 / 移动（挂 `lolosia.files.write`，默认只给 `admin` 及以上）。缩略图由后台**单工作协程**按 `files.thumbnail.scanIntervalSeconds` 周期扫描生成，用户打开目录时可插队；缓存在 `<workDir>/cache/thumb/v2`（对 WebDAV 隐藏）。`<img src>` 带不了 `Authorization`，所以 `/api/files/{thumb,raw}` 走 **URL 签名**（`exp` + `sig`，HMAC-SHA256 覆盖「相对路径 + 过期时间」）而不是会话鉴权 —— 见 `service/files/`
-- **静态资源 + SPA**：`staticClasspath` 支持 index、`ETag` + 304 协商缓存、history 路由回退
-- **WebDAV 服务**：把 `webdav.root`（如挂载的机械盘 `/mnt/hdd1`）以 WebDAV 挂在 `webdav.path`（默认 `/dav`）下，覆盖 `OPTIONS / PROPFIND / PROPPATCH / GET(含 Range) / PUT / DELETE / MKCOL / COPY / MOVE / LOCK / UNLOCK`，HTTP Basic 鉴权。挂载点在 `/api` 之外，**不套 `{code,msg,data}` 信封、也不走会话鉴权** —— Windows「映射网络驱动器」这类客户端要的是原样状态码与 207 多状态 XML
-- **单文件部署**：Gradle 插件按 `platforms.json` 生成 `deploy<服务器>` 任务，走 systemd 拉起可执行文件、或挂进基础镜像由 docker 托管（两种都自动留 `.previous` 回滚文件）
+**路由与依赖注入**
 
-## 🧱 技术栈
+- `@Controller("/api") object Xxx` + `@GET/@POST/@PUT/@DELETE/@PATCH`，KSP 编译期生成注册，运行期无反射
+- `@Injectable` 让路由形参按类型自动注入；`@Service` 自动生成 Koin 绑定（构造器注入）
+- `@Path` / `@Query` / `@Header` / `@Form` / `@FilePart` 省略名称时取形参名；无法绑定的形参编译期报错
+- 自研 multipart 解析（Ktor 在 Native 上没有 `receiveMultipart()`）
+
+**请求与鉴权**
+
+- 一次请求一个 `ctx`：`ctx.session` / `ctx.user` / `ctx.db` / `ctx.transaction { }` / `ctx.hasPermission("a.b.c")`
+- 统一响应信封 `{code,msg,data}`，由 `EnvelopeInterceptor` 按响应 MIME 包装（`text/plain`、文件流、SSE 原样放行）
+- 会话鉴权 `Authorization: Bearer <sessionId>`；接口级授权用 `@Permission("a.b.c")`
+- 图形验证码（点阵算式 + 自绘 PNG，不依赖系统字体）
+
+**资源与配置**
+
+- `classpath.zip` 中间层：各源集 `resources/**` 就是 classpath 根，构建期嵌入可执行文件
+- 多级配置覆盖：数据类默认值 < 内嵌 JSON < 磁盘配置 < 环境变量 < 命令行端口
+- 静态站 + SPA：index、`ETag` / 304 协商缓存、history 路由回退
+
+**文件与媒体**
+
+- WebDAV：把 `webdav.root` 挂到 `/dav`，HTTP Basic 鉴权，覆盖 PROPFIND / GET(含 Range) / PUT / COPY / MOVE / LOCK 等
+- 在线文件管理器：目录树、上传、复制 / 移动 / 改名 / 删除、三档 WebP 缩略图、签名直链
+- 媒体索引与标签、足迹聚类、番组订阅、仪表盘（设计见 [doc/](doc/)）
+
+## 技术栈
 
 | 类别 | 选型 |
 | --- | --- |
@@ -43,34 +48,35 @@
 | DI | Koin 4.2.2（容器实例显式传递，不用全局容器） |
 | 数据访问 | sqlx4k 1.14.0（native 侧是预编译 Rust 静态库，无需 Rust 工具链） |
 | 数据库 | MariaDB / MySQL |
-| 时间 | kotlinx-datetime 0.8.0 + `kotlin.time.Instant`（写库一律 UTC，时区语义由类型保证） |
-| IO / 压缩 | okio 3.9.1；`classpath.zip` 默认 **DEFLATED**（读取端 `platform.zlib` inflate，STORED 也支持） |
+| 时间 | kotlinx-datetime 0.8.0 + `kotlin.time.Instant`（写库一律 UTC） |
+| IO / 压缩 | okio 3.9.1；`classpath.zip` 默认 DEFLATED（读取端 `platform.zlib` inflate，STORED 也支持） |
 | 日志 | 自研（`Log.of("tag")`，级别 + 时间戳 + 异常 cause 链） |
-| 密码 | 自研 bcrypt（移植 jBCrypt 0.4，兼容库里既有的 `$2a$10$...`） |
+| 密码 | 自研 bcrypt（`$2a$`，cost 10） |
+| 图像 | 内嵌 libpng / libjpeg-turbo / libwebp / giflib（cinterop 静态链接） |
 
-## 📁 项目结构
+## 项目结构
 
 ```
 ├── buildSrc/                     # 自定义 Gradle 插件 moe.lolosia
 │   └── src/main/kotlin/moe/lolosia/gradle/
-│       ├── task/                 # ViteJar / GenerateConstants / NativeClasspath / Deploy / GitArchive
+│       ├── task/                 # ViteJar / GenerateConstants / Deploy / GitArchive
 │       ├── extension/            # lolosia { viteJar / classpath / deploy / docker } 配置
 │       └── NativeClasspath.kt    # classpath.zip 合并 + windres/objcopy 嵌入 + 链接参数
 ├── modules/
 │   ├── protocol/                 # 跨端 DTO / EventSource 契约（无平台依赖）
 │   ├── core/                     # classpath / fs / log / time / platform / json / 出站 HTTP
 │   ├── codecs/                   # 图像编解码、缩略图、EXIF、msgpack 通道（cinterop）
+│   ├── local/                    # 本地服务：dispatcher / 传输 / 系统指标（不含 Ktor server）
 │   ├── router-ksp/               # 自研路由的 KSP 处理器（JVM 件）
 │   ├── server/                   # Ktor 服务端：controller / service / database / settings
-│   ├── client/                   # UI 实验：mvvm / RmlUi 宿主（nativeCpp）
+│   ├── client/                   # UI 客户端：mvvm / RmlUi 宿主（nativeCpp）/ 事件订阅
 │   ├── app-desktop/              # 桌面唯一入口 Main.kt + 三个可执行文件
 │   └── app-android/              # Android 壳（独立 Gradle 构建，SDLActivity + JNI 宿主）
 ├── thirdparty/                   # 第三方原生库独立构建：manifest + .def + 构建/发布脚本（产物不入库）
 ├── build/thirdparty/out/         # 【生成物，不入库】下载的头文件 + 各目标 .a / .so
 ├── classpath/mingw/app.manifest  # 应用清单（RT_MANIFEST）：把进程代码页切成 UTF-8，否则中文文件名会被 okio 丢弃
-                                # 同目录的 classpath.rc 由构建期生成（classpath.zip / 清单 / 版本信息 / 图标）
-├── sql/                          # 建表脚本（15 张表 + view_user_role 视图）+ migrate_rbac_groups.sql（历史库组模型迁移）
-├── doc/                          # 方案 / 迁移记录 / 排障
+├── sql/                          # 建表脚本 + view_user_role 视图（导入顺序见下）
+├── doc/                          # 设计文档与排障笔记
 ├── lolosia-backend-native.service # systemd 单元模板（部署插件据此改写 ExecStart）
 └── platforms.json                # 【本地文件，不入库】前端工程路径 + 部署服务器列表
 ```
@@ -81,15 +87,15 @@
 > （`util/classpath/ClasspathExt.kt`）；控制器专属的 DTO 作为该 `object` 的内部类；
 > **中间件独占顶级包 `interceptor/`**，顺序由 `@Interceptor(order)` 声明、注册表由 KSP 生成。
 
-## 🚀 快速开始
+## 快速开始
 
 ### 环境要求
 
 - JDK 21（Gradle 与 KSP 处理器运行用；产物本身不需要 JVM）
 - MariaDB / MySQL
-- 首次构建自动下载 Kotlin/Native 工具链到 `~/.konan`（约 2.1GB）
-- 构建 linux 目标且宿主是 Windows 时：WSL2 + Ubuntu 24.04（`aarch64-linux-gnu-objcopy` 与 `x86_64-linux-gnu-objcopy`；编译与链接仍在 Windows 上跑）
-- （可选）Node + vite 前端工程；`platforms.json` 里配 `webPath` 后由 `viteJar` 构建并并入
+- 首次构建会自动下载 Kotlin/Native 工具链到 `~/.konan`（约 2.1GB）
+- 构建 linux 目标且宿主是 Windows 时：WSL2 + Ubuntu 24.04（提供 `aarch64-linux-gnu-objcopy` / `x86_64-linux-gnu-objcopy`；编译与链接仍在 Windows 上跑）
+- （可选）Node + vite 前端工程；`platforms.json` 配 `webPath` 后由 `viteJar` 构建并并入
 
 ### 1. 建库导表
 
@@ -97,20 +103,19 @@
 CREATE DATABASE `lolosia-backend` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 ```
 
-导入 `sql/` 下的脚本（**`view_user_role.sql` 依赖前面的表，必须最后导**）：
+`sql/` 下没有外键依赖，脚本顺序随意，只有视图 `view_user_role.sql` 必须最后导入：
 
-```bash
-mysql -u root -p -D lolosia-backend < sql/sys_user.sql
-mysql -u root -p -D lolosia-backend < sql/sys_role.sql
-mysql -u root -p -D lolosia-backend < sql/sys_sessions.sql
-mysql -u root -p -D lolosia-backend < sql/sys_cache.sql
-mysql -u root -p -D lolosia-backend < sql/sys_user_roles.sql
-mysql -u root -p -D lolosia-backend < sql/sys_logs.sql
-mysql -u root -p -D lolosia-backend < sql/oss_user_file.sql
-mysql -u root -p -D lolosia-backend < sql/sys_role_permission.sql   # 组规则（默认值在 permissions.yaml，这里不灌种子）
-mysql -u root -p -D lolosia-backend < sql/sys_user_permission.sql   # 用户直授规则
-mysql -u root -p -D lolosia-backend < sql/view_user_role.sql   # 视图放最后
+```powershell
+# 表
+Get-ChildItem sql\*.sql |
+    Where-Object Name -notin @('view_user_role.sql', 'migrate_rbac_groups.sql') |
+    ForEach-Object { & mysql -u root -p -D lolosia-backend -e "source $($_.FullName)" }
+
+# 视图（依赖前面的表）
+& mysql -u root -p -D lolosia-backend -e "source $(Resolve-Path sql\view_user_role.sql)"
 ```
+
+`sql/migrate_rbac_groups.sql` 只用于已有库升级组模型，全新库不要导入。
 
 ### 2. 本地配置（不入库）
 
@@ -146,7 +151,7 @@ $cap = curl.exe -s -X POST http://127.0.0.1:7129/api/captcha    # {"code":200,"m
 curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: application/json" -d '{"id":"<id>","code":"<算式结果>"}'   # data.message=success
 ```
 
-## 🛠 构建任务
+## 构建任务
 
 | 任务 | 说明 |
 | --- | --- |
@@ -158,10 +163,11 @@ curl.exe -s -X POST http://127.0.0.1:7129/api/verify -H "Content-Type: applicati
 | `gradlew :modules:app-desktop:classpathZip<目标>` | 把各源集 `resources` + vite 产物合并成 `classpath.zip`（link 任务自动依赖） |
 | `gradlew androidNative` | 用 NDK 构建 x86_64 + arm64-v8a 原生库（`-PandroidAbis=x86_64` 可只建一份） |
 | `gradlew androidApp` | 构建 Android debug APK（独立下游构建） |
-| `gradlew deploy<服务器名>` / `deploy` | 按 `platforms.json` 部署（`deploy` 指向 `deploy.active` 那台）；配了 `abi` 走原生二进制，否则找 `bootJar`；`mode` 选 systemd / docker |
+| `gradlew deploy<服务器名>` / `deploy` | 按 `platforms.json` 部署（`deploy` 指向 `deploy.active` 那台）；`abi` 决定产出原生二进制，`mode` 选 systemd / docker |
 | `gradlew :modules:app-desktop:gitArchive` | 按 vite 平台导出 git 归档 |
+| `gradlew -p thirdparty thirdpartySync` | 拉取（或本地回退）第三方原生库工件 |
 
-## 🧭 写一个控制器
+## 写一个控制器
 
 ```kotlin
 @Controller("/api")
@@ -191,28 +197,43 @@ object ExampleController {
 }
 ```
 
-约定（迁移前的 ktorfitx 控制器**只改 import** 即可复用）：
+约定：
 
-- `@Controller` 只能标在 `object` 上；方法返回值由生成代码 `call.respond(...)` 原样写出，信封交给 `EnvelopeInterceptor`（返回裸 `String` 会按 `text/plain` 发出、**不会被包**，要信封就返回业务对象或 `dto.RawJson`）
+- `@Controller` 只能标在 `object` 上；返回值由生成代码 `call.respond(...)` 原样写出，信封交给 `EnvelopeInterceptor`（返回裸 `String` 会按 `text/plain` 发出、**不会被包**，要信封就返回业务对象或 `dto.RawJson`）
 - 控制器专属的 DTO 声明为该 `object` 的内部类（KSP 生成的全限定名如 `…Controller.EchoReq`）；跨控制器共用时才独立成文件（或建 `dto` 包）
 - 无法绑定的形参会**编译期报错**并给出提示：要么加参数注解，要么给类型标 `@Injectable`
 - 支持的参数类型只有 `String / Int / Long / Double / Boolean / Uuid / 枚举`（不做嵌套泛型绑定，超范围请手写路由）
 
-服务层约定（与旧 JVM 族的 `ctx: Context` 同位透传）：
+服务层约定：
 
-- 请求域服务方法**首参一律 `ctx: Context`**；DB 句柄与事务都从它取（`ctx.db` / `ctx.transaction { tx -> … }`），服务**不持有连接池**（容器里的 `Database` 只注入给基础设施 `CacheManager` / `SessionManager` 与 `CtxInterceptor`）
+- 请求域服务方法**首参一律 `ctx: Context`**；DB 句柄与事务都从它取（`ctx.db` / `ctx.transaction { tx -> … }`），服务**不持有连接池**
 - 服务层**不要用 `ctx.call`**：需要客户端 IP / UA / 请求头时由控制器抽成普通参数传下去
-- 审计列的操作者（`created_by` / `updated_by`）仍**显式传 `operatorId`**，不从 `ctx.userId` 隐式取 —— 注册链路没有登录态
+- 审计列的操作者（`created_by` / `updated_by`）**显式传 `operatorId`**，不从 `ctx.userId` 隐式取 —— 注册链路没有登录态
 
-业务接口（路径与出参形状以前端工程为准）：`/api/login`、`/api/logout`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/{list,searching,get,create,edit,delete,updatePassword,myInfo,myRole}`、`/api/role/{list,queryRoleByPage,create,update,destroy}`、`/api/userRole/getByUserId`、`/api/menu/config`、`/api/oss/{list,getMetas,fileCheck,upload,get/{user}/{md5}}`、`/api/files/{list,dirs,detail,scan,mkdir,rename,delete,upload,copy,move}`（在线文件管理器，读接口需 `lolosia.files.read`，`mkdir` / `rename` / `delete` / `upload` / `copy` / `move` 需 `lolosia.files.write`）；
-权限管理：`/api/role/permission/{list,save}`（组规则）、`/api/user/permission/{list,save}`（用户直授）、`/api/permission/my`（当前用户生效权限）、`/api/permission/catalog`（`@Permission` 节点目录）。
-这些接口（以及探针里的 `/api/classpath/*`）默认都要鉴权：`Authorization: Bearer <sessionId>`；免鉴权白名单是 `/api/login`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse`、取件类前缀（`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`）以及 `/api/files/thumb`、`/api/files/raw` —— 后两个是给 `<img src>` 用的（原生标签带不了 `Authorization`），它们**自己校验 URL 签名**（`exp` + `sig`），拿不到签名一律 `403`；**`/api/logout` 不在白名单里**，它要带有效 token（否则 401）。
+## 接口与鉴权
 
-模板另留一个资源探针 `/api/classpath/{list,read}`（列出/读取内嵌资源，需鉴权），用于运维排障。
+接口都在 `/api` 下，按控制器分域：
 
-WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权与响应信封影响，鉴权走 HTTP Basic —— 配置与对外暴露见「配置」一节与 [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md)。
+| 域 | 控制器 | 内容 |
+| --- | --- | --- |
+| 登录 | `LoginController` | `/login` `/logout` `/register` `/captcha` `/verify` |
+| 系统 | `UserController` `RoleController` `UserRoleController` `MenuController` | 用户 / 角色 / 绑定 / 菜单 |
+| 权限 | `PermissionController` | 组规则、用户直授、当前用户生效权限、`@Permission` 节点目录 |
+| 设置 | `SettingController` | 运行期配置读写 |
+| 文件 | `OssController` `FileController` | OSS 上传取件、在线文件管理器（浏览 / 写操作 / 缩略图 / 直链） |
+| 媒体 | `MediaController` `FootprintController` `AnimeController` | 媒体索引与标签、足迹地图、番组订阅 |
+| 其它 | `DashboardController` `SseController` `ClasspathController` | 仪表盘、SSE 事件流、内嵌资源探针（运维排障用） |
 
-## ⚙️ 配置
+`/api/**` 默认都要鉴权（`Authorization: Bearer <sessionId>`，失败回 `401` + 信封），接口级授权由 `@Permission` 判定（失败 `403`）。免鉴权白名单：
+
+- 精确路径：`/api/login`、`/api/captcha`、`/api/verify`、`/api/register`、`/api/user/updatePassword`、`/api/user/avatar`、`/api/sse/registry`
+- 前缀：`/api/oss/show/`、`/api/oss/get/`、`/api/user/avatar/get/`、`/api/files/thumb`、`/api/files/raw`
+
+前缀放行的这几个是给 `<img src>` 用的（浏览器原生标签带不了 `Authorization`）：`files/thumb` 与 `files/raw` 由控制器**自己校验 URL 签名**（`exp` + `sig`），拿不到签名一律 `403`；`/api/sse/registry` 放行是因为 `EventSource` 也带不了自定义请求头，登录态靠建流之后的事件补绑。`/api/logout` **不在白名单里**，需带有效 token。
+
+WebDAV 挂在 `/dav`（**不在 `/api` 下**）：不受会话鉴权与响应信封影响，鉴权走 HTTP Basic。
+
+## 配置
 
 配置只有一个入口：[AppSettings](modules/server/src/commonMain/kotlin/moe/lolosia/web/settings/AppSettings.kt)（`@Serializable` 数据类）。
 优先级由低到高，**按字段深合并**：
@@ -220,8 +241,10 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 1. 数据类里的默认值
 2. classpath 内嵌的 [application.json](modules/server/src/commonMain/resources/application.json)（随二进制分发）
 3. 磁盘 `application.json`（相对启动目录；systemd 下即 `/srv/lolosia-backend/`，可用 `KTOR_CONFIG` 指定其它路径）
-4. 环境变量：`KTOR_HOST` / `KTOR_PORT` / `KTOR_LOG_LEVEL` / `KTOR_DB_URL` / `KTOR_DB_USERNAME` / `KTOR_DB_PASSWORD`
+4. 环境变量：`KTOR_HOST` / `KTOR_PORT` / `KTOR_LOG_LEVEL` / `KTOR_DB_URL` / `KTOR_DB_USERNAME` / `KTOR_DB_PASSWORD` / `KTOR_WORK_DIR` / `KTOR_LLM_API_KEY` / `KTOR_ARTIFACT_*`
 5. 命令行第一个参数（仅端口，如 `lolosia-backend.exe 8080`）
+
+段落：`server` / `datasource` / `ddns` / `webdav` / `files` / `dashboard` / `anime` / `artifact` / `llm`，另有 `workDir` 与 `logLevel`。示例（省略了默认关闭的 `ddns` / `artifact` / `llm`）：
 
 ```json
 {
@@ -266,7 +289,7 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
 > 其它环境变量：`KTOR_CLASSPATH_DIR` 指向磁盘资源目录，开发期改前端/资源不必重编二进制。
 > 加配置项 = 改 `AppSettings`（+ 必要时改 `envOverrides`），不要另起一套读取逻辑；磁盘 JSON 带 BOM 也能解析（解析失败会记 WARN 而不是静默忽略）。
 
-## 🗄 数据层约定（sqlx4k）
+## 数据层约定（sqlx4k）
 
 - **实体**：`@Table("表名")` + `@Id`（库自增）或 `@Id(insert = true)`（应用给主键），列名自动按 snake_case 映射
 - **仓库**：接口标 `@Repository` + `@Injectable`（后者必须，否则控制器形参注入报「无法绑定」），继承 `CrudRepository<T>`
@@ -275,47 +298,40 @@ WebDAV 挂载点是 `/dav`（**不在 `/api` 下**）：因此不受会话鉴权
   - **不支持 `IN (列表)`**（占位符在编译期固定），批量场景在服务层循环单条方法
   - MySQL 方言下**不要用生成的 `insert` / `update`**（会拼成多语句脚本，MariaDB 报 `1064`），写入用单语句 `@Query`
 - **连接池懒建**：`Database` 构造只存配置、不连库；启动由后台协程周期重连（失败只记日志，不崩进程）。库未就绪时**读库的请求返回 `503 数据库暂不可用`**（静态资源、SSE 不受影响），库恢复后自动可用；别在启动路径上建池（`mySQL(...)` 会阻塞到超时）
-- **建池前鉴权预检**：sqlx4k 底层是 Rust FFI，**账号密码错时会直接 panic 崩进程**（Kotlin 侧捕获不了）。故 `Database.connect()` 在建池前先跑 `MySqlAuthProbe`（自写裸 TCP 握手）：能连且登录成功（`Ok`）才交 sqlx4k；主机不可达（`Unreachable`，顺带省掉 ~30s 阻塞）或鉴权失败 / 库不存在（`Denied`）直接判失败并交给后台重连；协议不认识 / 需 TLS（`Inconclusive`）才回退 sqlx4k
-- **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）。DI 绑定**不用手写**：`router-ksp` 扫 `@Repository` / `@Injectable` / `@Service` 生成 `GeneratedInjection.kt`（`repositoryModules()` + `serviceModule()` + `Koin.registerInjectables()`），签名在 commonMain 的 [GeneratedRegistries.kt](modules/server/src/commonMain/kotlin/moe/lolosia/web/generated/GeneratedRegistries.kt) 声明为 `expect`、生成物是 `actual`，[Main.kt](modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt) 直接调用；实现类名按 sqlx4k 的固定约定 `<接口名>Impl` 推导，对不上会在 KSP 阶段报错
+- **建池前鉴权预检**：`Database.connect()` 先跑 `MySqlAuthProbe`（自写裸 TCP 握手）——能连且登录成功（`Ok`）才建池；主机不可达（`Unreachable`，顺带省掉约 30s 阻塞）或鉴权失败 / 库不存在（`Denied`）直接判失败并交给后台重连；协议不认识 / 需 TLS（`Inconclusive`）才回退 sqlx4k
+- **生成物位置**：实现类在目标源集（`moe.lolosia.web.database.generated`，KSP2 在 KMP 下没有 common 编译单元）。DI 绑定**不用手写**：`router-ksp` 扫 `@Repository` / `@Injectable` / `@Service` 生成绑定，签名在 commonMain 的 [GeneratedRegistries.kt](modules/server/src/commonMain/kotlin/moe/lolosia/web/generated/GeneratedRegistries.kt) 声明为 `expect`、生成物是 `actual`，[Main.kt](modules/app-desktop/src/commonMain/kotlin/moe/lolosia/web/Main.kt) 直接调用
 - **时间列一律 `kotlin.time.Instant`**（业务用 `Clock.System.now()`），驱动按 UTC 往返；只有日志用本地时间展示
 
-## 🚢 部署
+## 部署
 
-1. `platforms.json` 里给目标服务器配 `abi`（`arm64`/`aarch64` → linuxArm64，`x64`/`amd64`/`x86_64` → linuxX64；配了就部署原生二进制，不配则走 `bootJar`）与 `mode`
+1. `platforms.json` 里给目标服务器配 `abi`（`arm64` / `aarch64` → linuxArm64，`x64` / `amd64` / `x86_64` → linuxX64）与 `mode`
 2. `gradlew deploy<服务器名>`（或 `deploy`）→ 上传可执行文件 → `mv old old.previous` 再替换（避免覆盖运行中的文件报 `ETXTBSY`）→ 交给 systemd / docker 拉起
 
 **`mode: "systemd"`**：改写远端 `<名字>-native.service` 的 `ExecStart` 为可执行文件路径后重启服务。首次部署由插件生成单元文件；想自定义 `User=` / 资源限制，就在**服务器上**改，插件不会覆盖已有单元。
 仓库模板 `lolosia-backend-native.service` 已带 `LimitNOFILE=524288`（**必须给**：不写会继承软限制 1024，缩略图 / 索引 / WebDAV 并发一高就 `EMFILE` 崩在 `accept`）；老机器需手工补，详见 [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) §4。
 
-**`mode: "docker"`**：不构建镜像，产物以挂载方式注入基础镜像运行（JVM 项目另有那套 Dockerfile 流程，原生不用）。
+**`mode: "docker"`**：不构建镜像，产物以挂载方式注入基础镜像运行。
 
 - 基础镜像配在 `build.gradle.kts` 的 `binary { dockerImage }`，加速源配在 `docker { image("ubuntu:24.04") { mirror } }`；国内直连 docker.io 拉不动，模板默认走华为云 SWR 的 docker.io 代理
 - 挂载：`/srv/lolosia-backend` → `/app`（可执行文件、配置、`work/` 都在其中），另挂宿主 `/etc/localtime` `/etc/timezone` `/usr/share/zoneinfo`（基础镜像不带 tzdata，少挂一个日志就整片落在 UTC）
 - 网络用 `--network host`：应用直接绑宿主端口，容器里的 `127.0.0.1` 就是宿主（库地址按这个配）
 - 回滚：旧容器**先停**再改名成 `<名字>-old`，新版确认活着才删；失败会打印容器日志并删掉新容器
 
-部署目录约定为 `/srv/lolosia-backend/`（磁盘 `application.json` / `application.yaml` 也放这里）。CIO 引擎无 HTTPS 与压缩，这两件事交给前置 Nginx（WebDAV 的 Basic 鉴权另需一条 TLS 反代，见 `doc/lolosia-backend-notes.md`）。
+部署目录约定为 `/srv/lolosia-backend/`（磁盘 `application.json` / `application.yaml` 也放这里）。CIO 引擎不带 HTTPS 与压缩，这两件事交给前置 Nginx（WebDAV 的 Basic 鉴权另需一条 TLS 反代，见 `doc/lolosia-backend-notes.md`）。
 
-## 🗺 迁移进度与路线图
+## 延伸阅读
 
-| P0 项 | 状态 |
+| 文档 | 内容 |
 | --- | --- |
-| 0.1 KMP 多目标骨架 + KSP2 多目标接线 | ✅ |
-| 0.2 最小 CIO 服务（JSON + 信封 + StatusPages） | ✅ |
-| 0.3 自研路由插件（注解 + KSP + 运行时 + multipart） | ✅ |
-| 0.4 `classpath.zip` 中间层 | ✅ |
-| 0.5 基础设施替换（日志 / 配置 / Koin / datetime / okio / Uuid） | ✅ |
-| 0.6 sqlx4k 数据层 | ✅ 会话/缓存 + 用户/角色/绑定的读写与 Service 层（当时以自检端点验证，该端点已在 P0 收尾删除） |
-| 0.7 自研 bcrypt（`$2a$` cost 10） | ✅ 移植完成（官方向量锁定），已接进建用户/改密码/登录校验 |
-| 0.8 鉴权拦截器链 + 登录 + 系统接口 | ✅ 信封统一由 `EnvelopeInterceptor` 按响应 MIME 包；链 = Traffic → Ctx → SSE → Auth → Envelope；`/api/login` `/api/logout` + 用户/角色/绑定/菜单控制器（**以前端工程契约为准**） |
-| 0.9 部署（systemd 拉起原生二进制） | ✅ |
-| 0.10 自研图形验证码 + `/captcha` `/verify` `/register` | ✅ 自写 PNG + 点阵算式验证码（复刻 hutool），验证码存 `sys_cache`（随机 token、5 分钟、一次性消费）；注册沿用前端两步流程（固定进 `user` 组，即 `sys_role.id = 4`） |
+| [AGENTS.md](AGENTS.md) | 代码风格与硬性约定（改代码前先读） |
+| [doc/development-notes.md](doc/development-notes.md) | 构建 / 部署 / 冒烟 / 排障 / 环境依赖 |
+| [doc/lolosia-backend-notes.md](doc/lolosia-backend-notes.md) | WebDAV、文件管理器、部署与网络实测 |
+| [doc/rbac-design.md](doc/rbac-design.md) | RBAC：组 + 点分权限 + 用户直授 |
+| [doc/media-index-design.md](doc/media-index-design.md) | 媒体索引：文件身份、标签、EXIF、评级与遮罩 |
+| [doc/footprint-map-design.md](doc/footprint-map-design.md) | 足迹地图：聚类与区域 |
+| [doc/anime-timetable-design.md](doc/anime-timetable-design.md) | 番组表：RSS 与 Bangumi 订阅 |
+| [doc/local-service-design.md](doc/local-service-design.md) | 本地服务：dispatcher 与两种传输 |
 
-> P0 已收尾（临时探针 `DemoController` / `DEV_PROBES` 已删），进入 P1。
-
-- **P1（进行中）**：✅ 图形验证码 · ✅ 头像上传/读取 · ✅ SSE 事件总线（含开发板实机回归）· ✅ OSS 文件服务（`/api/oss/{list,getMetas,fileCheck,upload,get}`）· ✅ WebDAV（机械盘挂载到 `/dav`）· ✅ 在线文件管理器（浏览 + 写操作 + 三档 WebP 缩略图 + 签名直链，`/api/files/*`）· ✅ `classpath.zip` 改 DEFLATED · 🚧 媒体库（P1/P3 已实现：索引 / 标签 / 评级 / 遮罩 / 外发分析；P2 检索与词表管理、P4 语义检索、P5 加固未做，见 [doc/media-index-design.md](doc/media-index-design.md)）；待办：`?webp` 已可用但前端尚未使用、gzip/br 压缩交给 Nginx、前端工程与契约副本对齐
-- **P2**：AI 相关按需改为纯 Ktor Client 直连 LLM HTTP API（不引入 AI 框架）
-
-## 📜 License
+## License
 
 [MIT](LICENSE) © 洛洛希雅Lolosia
