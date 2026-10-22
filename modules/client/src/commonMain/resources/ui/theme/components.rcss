@@ -157,6 +157,64 @@ select
 	font-size: 15dp;
 }
 
+select:hover
+{
+	border-color: #B3CCF2;
+}
+
+select:focus
+{
+	border-color: #4A8FE7;
+}
+
+/* 当前值由控件摆在内容盒顶部，不补行高就会贴着上边框。 */
+select selectvalue
+{
+	height: 100%;
+	line-height: 44dp;
+}
+
+/* 展开时的选项列表是控件自己造的 selectbox（不在 RML 里），
+   不给背景就会变成一行行裸文字，直接压在下面的控件上。 */
+select selectbox
+{
+	box-sizing: border-box;
+	width: 100%;
+	max-height: 240dp;
+	margin-top: 4dp;
+	margin-bottom: 4dp;
+	padding: 6dp 0;
+	border-radius: 10dp;
+	border: 1dp #D1D1D6;
+	background-color: #FFFFFF;
+}
+
+select selectbox option
+{
+	display: block;
+	box-sizing: border-box;
+	width: auto;
+	height: 40dp;
+	padding: 0 14dp;
+	line-height: 40dp;
+	background-color: #FFFFFF;
+	color: #1C1C1E;
+	font-size: 15dp;
+	white-space: nowrap;
+}
+
+select selectbox option:hover
+{
+	background-color: #E8F0FC;
+	color: #2D5F9E;
+}
+
+select selectbox option:checked
+{
+	background-color: #F3F7FE;
+	color: #2D5F9E;
+}
+
 input.range
 {
 	display: block;
