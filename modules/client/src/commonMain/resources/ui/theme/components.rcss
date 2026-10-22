@@ -9,6 +9,8 @@ button.small
 	padding: 0 14dp;
 	font-size: 13dp;
 	border-radius: 8dp;
+	/* 行高与高度一致，见 theme.rcss 的 button */
+	line-height: 34dp;
 }
 
 button.danger

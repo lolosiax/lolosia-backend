@@ -235,6 +235,9 @@ button
 	border: 0;
 	color: #F8F8FA;
 	font-size: 15dp;
+	/* RmlUi 不带默认样式表：不写 text-align 会左对齐，不写 line-height 会把行盒贴在顶部 */
+	text-align: center;
+	line-height: 46dp;
 	cursor: pointer;
 }
 
@@ -253,6 +256,8 @@ button.secondary
 	background-color: #FFFFFF;
 	color: #4A8FE7;
 	border: 1dp #4A8FE7;
+	/* 1dp 边框占掉内容高度，行高跟着减，文字才垂直居中 */
+	line-height: 44dp;
 }
 
 button.secondary:hover
