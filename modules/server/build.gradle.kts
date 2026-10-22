@@ -75,7 +75,7 @@ val platformConfig = rootProject.extra["lolosia.platforms"] as? Map<String, Any?
 
 lolosia {
     packageName = "moe.lolosia.web"
-    projectName = "洛洛希雅的小网站"
+    projectName = "洛洛希雅的午后梦乡"
 
     // 服务端只负责生成 VITE_DEFAULT；vite 产物与 classpath 嵌入都在 app-desktop
     constants {

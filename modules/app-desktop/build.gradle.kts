@@ -79,7 +79,7 @@ val platformConfig = rootProject.extra["lolosia.platforms"] as? Map<String, Any?
 
 lolosia {
     packageName = "moe.lolosia.web"
-    projectName = "洛洛希雅的小网站"
+    projectName = "洛洛希雅的午后梦乡"
 
     viteJar {
         val webPath = platformConfig["webPath"] as? String

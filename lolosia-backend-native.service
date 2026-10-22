@@ -1,5 +1,5 @@
 [Unit]
-Description=洛洛希雅的小网站 (Kotlin/Native)
+Description=洛洛希雅的午后梦乡 (Kotlin/Native)
 After=network-online.target
 Wants=network-online.target
 
