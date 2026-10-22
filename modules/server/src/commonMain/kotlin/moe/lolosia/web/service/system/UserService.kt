@@ -25,7 +25,7 @@ import kotlin.uuid.Uuid
  * - `delete` 除了软删角色绑定，**同时软删 `sys_user`**（旧版只删绑定，用户仍能登录）；
  * - 时间字段输出 `yyyy-MM-dd HH:mm:ss`（固定 +08:00），与旧版 `@JsonFormat` 一致；
  * - 旧版依赖 Ebean `@SoftDelete` 自动过滤，这里 `deleted = 0` 由仓库 SQL 显式写；
- * - 头像（[saveAvatar] / [avatarOf]）落 `work/image/avatar/<用户 id>.<扩展名>`，`sys_user.avatar`
+ * - 头像（[saveAvatar] / [avatarOf]）落 `<workDir>/image/avatar/<用户 id>.<扩展名>`，`sys_user.avatar`
  *   只存**文件名**（与列长 `varchar(255)` 和旧版 `avatarPathOf` 的解析方式一致）。
  *
  * `operatorId` 是「谁在操作」（审计列的 `created_by` / `updated_by`），仍**显式传参**而不从

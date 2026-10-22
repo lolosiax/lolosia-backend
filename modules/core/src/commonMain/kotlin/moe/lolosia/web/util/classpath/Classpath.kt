@@ -35,7 +35,7 @@ interface Classpath {
      * 新二进制里的内容。否则重新部署后浏览器会拿缓存的旧 `index.html` 去请求已被删掉的 chunk
      * （前端产物名带内容哈希），页面直接白屏，手机上又没法强制刷新。
      *
-     * 磁盘实现（开发期回退、`work/resources`）一律用文件真实 mtime。
+     * 磁盘实现（开发期回退、`<workDir>/resources`）一律用文件真实 mtime。
      */
     fun lastModified(path: String): Long? = null
 

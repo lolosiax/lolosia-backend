@@ -15,7 +15,7 @@ import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 /**
- * 用户文件服务（OSS）。文件本体按 `work/files/<userId>/<md5>/<fileName>` 落盘，元数据进 `oss_user_file`。
+ * 用户文件服务（OSS）。文件本体按 `<workDir>/files/<userId>/<md5>/<fileName>` 落盘，元数据进 `oss_user_file`。
  *
  * 与旧 JVM 版的差异：
  * - 落盘走 [FileStore]（native 侧是 `PosixFileStore`），不再直接用 `java.nio.file`；

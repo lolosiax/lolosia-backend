@@ -57,7 +57,8 @@ internal fun isLocalAnimeCover(cover: String?): Boolean = cover?.startsWith(ANIM
 /**
  * 封面**缩略图**缓存版本：算法 / 规格变更时递增，旧缓存整体失效（目录名带版本）。
  *
- * 缓存的**根目录**由 `anime.coverCacheRoot` 配置（默认 `work/.cache/anime/cover`，生产可指到大容量盘）；
+ * 缓存的**根目录**由 `anime.coverCacheRoot` 配置（留空默认 `<workDir>/cache/anime/cover`，
+ * 生产可指到大容量盘）；
  * 大图仍留在 [ANIME_COVER_STORE_DIR]，这里只缓存缩小的 WebP（档位 + 元数据，键 = SHA-1），
  * 复用文件管理器那套 `ThumbnailCache` 机制（见 `service/files/ThumbnailCache.kt`）。
  */

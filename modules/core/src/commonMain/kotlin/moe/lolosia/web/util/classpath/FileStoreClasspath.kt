@@ -5,7 +5,7 @@ import moe.lolosia.web.util.fs.FileStore
 /**
  * 把 [FileStore] 存储根下的 [root] 子目录当作只读 [Classpath] 挂载。
  *
- * 用于让运行期目录（如 `work/resources`）走 `Route.staticClasspath` 暴露成静态文件。
+ * 用于让运行期目录（如 `<workDir>/resources`）走 `Route.staticClasspath` 暴露成静态文件。
  * `entries` / `list` 不做目录遍历，恒为空，只支持按路径 [read]；越界（`..`）由 [FileStore] 拒绝。
  *
  * @param store 文件存储，根目录由实现决定（如 `PosixFileStore`）

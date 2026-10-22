@@ -20,6 +20,8 @@ out/
 
 # 日志与运行时数据
 /work/
+# workDir 指向仓库内时的服务专属目录（生产通常在 /mnt/hdd1/.lolosia，不在仓库里）
+/.lolosia/
 /log/
 *.log
 

@@ -7,7 +7,7 @@ package moe.lolosia.web.util.fs
  * 这里是可写的运行期文件。接口放在 commonMain、实现放在 nativeMain，是因为文件系统访问
  * 要走平台 posix 调用（见 `PosixFileStore`）。
  *
- * 具体绑定在平台模块里手写（`PosixFileStore` 需要 `WORK_DIR`，无法由类型推导）。
+ * 具体绑定在平台模块里手写（`PosixFileStore` 需要 `AppSettings.workDir`，无法由类型推导）。
  *
  * @author 洛洛希雅Lolosia
  */

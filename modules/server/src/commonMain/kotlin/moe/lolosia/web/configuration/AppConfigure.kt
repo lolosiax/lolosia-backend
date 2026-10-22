@@ -39,6 +39,7 @@ import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.classpath.FileStoreClasspath
 import moe.lolosia.web.util.classpath.StaticClasspathConfig
 import moe.lolosia.web.util.fs.FileStore
+import moe.lolosia.web.util.fs.WorkPaths
 import moe.lolosia.web.util.ktor.staticClasspath
 import moe.lolosia.web.util.ktor.artifactRepository
 import moe.lolosia.web.util.ktor.webDav
@@ -134,7 +135,7 @@ fun Application.configureApplication(koin: Koin) {
         get("/") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
         get("/$VITE_DEFAULT") { call.respondRedirect("/$VITE_DEFAULT/", permanent = true) }
 
-        // 运行期资源目录：旧版 `/res/resources/**` → `work/resources/**`（landing 页背景图走这里）。
+        // 运行期资源目录：旧版 `/res/resources/**` → `<workDir>/resources/**`（landing 页背景图走这里）。
         // `?webp` 时按旧版语义转 WebP 并落盘缓存（见 WebpCache）；不支持的格式或转换失败回退原图。
         val webpCache = koin.get<WebpCache>()
         staticClasspath("/res/resources", cp = FileStoreClasspath(koin.get<FileStore>(), "resources")) {
@@ -148,7 +149,7 @@ fun Application.configureApplication(koin: Koin) {
             }
         }
 
-        // 番剧封面**缩略图**：大图（`work/resources/anime/cover`）照样留着，这里按需从缓存根目录
+        // 番剧封面**缩略图**：大图（`<workDir>/resources/anime/cover`）照样留着，这里按需从缓存根目录
         // （`anime.coverCacheRoot`）生成/读取缩小的 WebP 再下发（见 AnimeCoverService / doc §4.5）。
         // 与 `/res/resources` 一样**公开** —— `<img>` 带不了鉴权头（同文件缩略图的签名直链思路，这里封面本就公开）。
         val animeCovers = koin.get<AnimeCoverService>()
@@ -172,9 +173,9 @@ fun Application.configureApplication(koin: Koin) {
         }
 
         // 自建工件仓库（可选）：独立挂载点，不走 `/api`，用 Basic 鉴权。
-        // 默认关闭；启用后默认落在 `work/repo`，也可指向机械盘（如 `/mnt/hdd1/.lolosia/repo`）。
+        // 默认关闭；启用后落在 `<workDir>/repo`，把 workDir 指到 `/mnt/hdd1/.lolosia` 即可。
         koin.get<AppSettings>().artifact.takeIf { it.enabled }?.let { cfg ->
-            artifactRepository(cfg)
+            artifactRepository(cfg, koin.get<WorkPaths>())
         }
 
         // 自研路由插件生成：全部 @Controller
@@ -201,7 +202,7 @@ fun Application.configureApplication(koin: Koin) {
     // 番组表：MioBT 系发布站 RSS 采集（轮询 + 单实例）+ Bangumi 目录同步（由 anime.enabled 控制）
     koin.get<AnimeFeedService>().start(this)
     koin.get<AnimeMetaService>().start(this)
-    // 封面回源：把 Bangumi 图床的封面逐步拉到 work/resources/anime/cover（墙内取不到）
+    // 封面回源：把 Bangumi 图床的封面逐步拉到 `<workDir>/resources/anime/cover`（墙内取不到）
     koin.get<AnimeCoverService>().start(this)
 
     // 数据库：启动即后台探一次，失败只记日志并周期重连 —— 不阻塞启动，库恢复后自动可用。

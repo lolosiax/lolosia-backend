@@ -21,7 +21,7 @@ import kotlin.random.Random
  *
  * 路径逐段校验并拒绝 `.` / `..` / 空白 / 分隔符，因此解析结果必然落在根内。
  *
- * @param root 根目录；相对路径按启动目录解析，默认 `work/repo`
+ * @param root 根目录；相对路径按启动目录解析，默认取 `<workDir>/repo`
  * @author 洛洛希雅Lolosia
  */
 class ArtifactStore(root: String) {

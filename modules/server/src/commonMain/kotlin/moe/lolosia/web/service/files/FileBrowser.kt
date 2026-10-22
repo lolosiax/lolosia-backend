@@ -14,6 +14,7 @@ import moe.lolosia.web.dto.FileOpResult
 import moe.lolosia.web.dto.FileTransferItem
 import moe.lolosia.web.dto.FileTransferResult
 import moe.lolosia.web.settings.AppSettings
+import moe.lolosia.web.util.fs.WorkPaths
 import moe.lolosia.web.util.image.Image
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.media.isMediaName
@@ -38,8 +39,8 @@ private const val MAX_UPLOAD_DEDUP: Int = 200
  * 上传落点：目标目录里不冲突的最终名字，以及「先写临时文件、写完原子改名」这两条路径。
  *
  * [temp] 与 [target] 在**同一个目录**里：一是保证 `atomicMove` 一定不跨文件系统，
- * 二是别的目录（比如隐藏的 `.cache`）不一定可写 —— 开发机把线上机的 `/dav` 挂成 `Z:` 时，
- * 线上 WebDAV 默认拒绝隐藏项访问，写 `.cache` 下会被 403。
+ * 二是别的目录（比如隐藏的 `.lolosia`）不一定可写 —— 开发机把线上机的 `/dav` 挂成 `Z:` 时，
+ * 线上 WebDAV 默认拒绝隐藏项访问，写 `.lolosia` 下会被 403。
  */
 data class UploadTarget(val relative: String, val name: String, val target: Path, val temp: Path)
 
@@ -56,7 +57,11 @@ data class UploadTarget(val relative: String, val name: String, val target: Path
  */
 @Injectable
 @Service
-class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
+class FileBrowser(
+    settings: AppSettings,
+    private val signer: FileSigner,
+    workPaths: WorkPaths,
+) {
 
     private val log = Log.of("Files")
     private val fs: FileSystem = FileSystem.SYSTEM
@@ -68,11 +73,14 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
 
     val rootPath: Path = root.toPath()
 
+    /** 缩略图缓存根：`<workDir>/cache/thumb/v<版本>`（与浏览根解耦，不再写进机械盘目录树）。 */
+    val cacheRoot: Path = workPaths.cache("thumb").resolve("v$THUMBNAIL_CACHE_VERSION")
+
     /** 缩略图缓存（目录结构见 [ThumbnailCache]）。 */
-    val cache: ThumbnailCache = ThumbnailCache("$root/$CACHE_DIR/v$THUMBNAIL_CACHE_VERSION", config.thumbnail.sizes)
+    val cache: ThumbnailCache = ThumbnailCache(cacheRoot.toString(), config.thumbnail.sizes)
 
     init {
-        log.info { "文件管理器根目录：$root（缩略图档位 ${cache.orderedSizes}）" }
+        log.info { "文件管理器根目录：$root（缓存 $cacheRoot，缩略图档位 ${cache.orderedSizes}）" }
     }
 
     /** 把 URL 里的相对路径解析成真实路径；非法或越界抛 400。 */
@@ -265,7 +273,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
      * 递归复制文件或整棵目录树。
      *
      * 隐藏项（见 [isHiddenName]）一律跳过：它们在文件管理器里本来就看不见，
-     * 一并搬过去只会让用户莫名其妙多出一份 `.cache`。
+     * 一并搬过去只会让用户莫名其妙多出一份 `.lolosia`。
      */
     private suspend fun copyRecursive(source: Path, target: Path) {
         val meta = fs.metadataOrNull(source) ?: error("源已不存在：$source")
@@ -418,7 +426,7 @@ class FileBrowser(settings: AppSettings, private val signer: FileSigner) {
      * 递归收集 [relative] 子树下的图片条目（用于后台全量扫描）。
      *
      * 每层目录之间让出一次（`delay`），避免在机械盘上长时间独占 IO；跳过隐藏名（见 [isHiddenName]），
-     * 因此 `.cache`、`lost+found` 不会被扫到。返回的条目**不算缩略图存在性**（那是一次额外 stat，
+     * 因此 `.lolosia`、`lost+found` 不会被扫到。返回的条目**不算缩略图存在性**（那是一次额外 stat，
      * 这里不需要）。
      */
     suspend fun collectImages(relative: String): List<FileEntry> {

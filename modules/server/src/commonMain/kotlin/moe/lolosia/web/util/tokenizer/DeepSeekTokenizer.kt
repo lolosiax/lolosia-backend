@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import moe.lolosia.web.api.get
 import moe.lolosia.web.service.files.FileBrowser
 import moe.lolosia.web.settings.AppSettings
+import moe.lolosia.web.util.fs.WorkPaths
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
@@ -17,25 +18,28 @@ import kotlin.concurrent.Volatile
 import kotlin.time.Duration.Companion.minutes
 
 /**
- * DeepSeek 分词器门面：**运行时**拉取 `tokenizer.json`、缓存到 `<root>/.cache/lolosia/llm/`，
+ * DeepSeek 分词器门面：**运行时**拉取 `tokenizer.json`，默认缓存到 `<workDir>/cache/llm/`，
  * 之后离线用缓存；拉不到 / 解析失败则**降级**为字符启发式（[estimateTokens]），不阻断打标。
  *
  * 它是「全局统计消耗」的文本侧口径（见 `doc/vision-autotag-design.md` §6.3 / §6.4）：
  * 图片 token 以响应 `usage` 为准，文本 token 用它精确算。
  *
- * **不进二进制资源包**（6.3MB 的 JSON 不适合内嵌），故用 [FileBrowser] 的浏览根当缓存父目录。
+ * 显式配置 `cacheDir` 时仍按旧语义相对 [FileBrowser] 的浏览根解析（兼容已有配置）。
  *
  * @author 洛洛希雅Lolosia
  */
 @Injectable
 @Service
-class DeepSeekTokenizer(settings: AppSettings, browser: FileBrowser) {
+class DeepSeekTokenizer(settings: AppSettings, browser: FileBrowser, workPaths: WorkPaths) {
 
     private val log = Log.of("Tokenizer")
     private val config = settings.files.media.vision.tokenizer
     private val fs: FileSystem = FileSystem.SYSTEM
-    private val cacheDir = config.cacheDir.ifBlank { TOKENIZER_CACHE_DIR }.trim('/')
-    private val cacheFile = browser.rootPath.resolve(cacheDir).resolve(TOKENIZER_CACHE_FILE)
+    private val cacheFile = if (config.cacheDir.isBlank()) {
+        workPaths.cache("llm").resolve(TOKENIZER_CACHE_FILE)
+    } else {
+        browser.rootPath.resolve(config.cacheDir.trim('/')).resolve(TOKENIZER_CACHE_FILE)
+    }
 
     private val mutex = Mutex()
     private var tried = false

@@ -6,11 +6,8 @@ package moe.lolosia.web.util.tokenizer
  * @author 洛洛希雅Lolosia
  */
 
-/** 缓存文件名（下载后落 `<root>/<cacheDir>/tokenizer.json`）。 */
+/** 缓存文件名（默认落 `<workDir>/cache/llm/tokenizer.json`）。 */
 const val TOKENIZER_CACHE_FILE: String = "tokenizer.json"
-
-/** 缓存目录名（相对浏览根）。 */
-const val TOKENIZER_CACHE_DIR: String = ".cache/lolosia/llm"
 
 /**
  * 字符启发式估算（拉不到分词器时的降级口径，只保证**量级正确**）。

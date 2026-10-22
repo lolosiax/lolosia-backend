@@ -24,6 +24,13 @@ data class AppSettings(
     val anime: AnimeConfig = AnimeConfig(),
     val artifact: ArtifactConfig = ArtifactConfig(),
     val llm: LlmSettings = LlmSettings(),
+    /**
+     * 运行期可写数据的根目录；相对路径按启动目录解析。
+     *
+     * 默认 `work`。生产环境可整体改到机械盘上的服务专属目录（如 `/mnt/hdd1/.lolosia`），
+     * 头像、用户文件、资源缓存、工件仓库等**未显式配置路径**的内容会自动跟着搬过去。
+     */
+    val workDir: String = "work",
     /** 日志级别：TRACE / DEBUG / INFO / WARN / ERROR / OFF */
     val logLevel: String = "INFO",
 ) {
@@ -91,9 +98,9 @@ data class AppSettings(
         /**
          * 是否允许客户端访问**隐藏项**（`.` 开头的名字，以及文件系统自建的 `lost+found`）。
          *
-         * 默认关闭，与在线文件管理器口径一致：`.cache`（缩略图缓存）之类不该混进机械盘的正常目录树。
+         * 默认关闭，与在线文件管理器口径一致：`.lolosia`（服务数据）之类不该混进机械盘的正常目录树。
          * 但有例外场景需要打开 —— 开发机把线上机的 `/dav` 映射成网络驱动器当本地盘用时，
-         * 缩略图缓存就落在 `<root>/.cache` 下，不开这个开关客户端连建目录都会被拒（403）。
+         * 服务数据就落在 `<root>/.lolosia` 下，不开这个开关客户端连建目录都会被拒（403）。
          *
          * 这里只是**配置文件里的初值**；面板上改过的值存在 `sys_cache`，以库里的为准
          * （见 `AppSettingService`）。
@@ -105,7 +112,7 @@ data class AppSettings(
      * 在线文件管理器：以 [root] 为浏览根（留空则回退 [WebdavConfig.root]），列出目录、生成
      * 缩略图（浏览走 `lolosia.files.read`），并允许新建目录 / 改名 / 删除 / 上传
      * （写操作走 `lolosia.files.write`）。
-     * 缩略图落在 `<root>/.cache/lolosia/thumb/v<版本>`，该目录对 WebDAV 隐藏
+     * 缩略图落在 `<workDir>/cache/thumb/v<版本>`，该目录对 WebDAV 隐藏
      * （见 `DavStore`），避免污染机械盘的正常目录树。
      *
      * 缩略图生成会在后台按 [ThumbnailConfig.scanIntervalSeconds] 周期扫描，也会在用户打开目录时
@@ -257,8 +264,13 @@ data class AppSettings(
                     /** 备用源（不可用时回退字符启发式）。 */
                     val mirrorUrl: String =
                         "https://modelscope.cn/models/deepseek-ai/DeepSeek-V4.1-Flash/resolve/master/tokenizer.json",
-                    /** 下载后缓存目录（相对浏览根）。 */
-                    val cacheDir: String = ".cache/lolosia/llm",
+                    /**
+                     * 下载后缓存目录。
+                     *
+                     * 留空时落在 `<workDir>/cache/llm`；显式填写时按旧语义相对浏览根解析
+                     * （保留给已有配置，默认不再写进机械盘目录树）。
+                     */
+                    val cacheDir: String = "",
                 )
             }
         }
@@ -361,7 +373,7 @@ data class AppSettings(
         /** 通知中继后隔多久去取结果（秒）；中继侧还会再叠加自身延迟与抖动。 */
         val bangumiRelayWaitSeconds: Int = 300,
         /**
-         * 是否把封面图**回源到本地**（`work/resources/anime/cover/{bangumiId}.jpg`）。
+         * 是否把封面图**回源到本地**（`<workDir>/resources/anime/cover/{bangumiId}.jpg`）。
          *
          * Bangumi 图床在墙内打不开，中继模式下由境外节点先备好、后端再分批取回；直连模式直接取原图。
          * 落盘后 `anime_series.cover` 会被改写成 `/res/resources/...`，前端再拼 `?webp` 取图。
@@ -379,10 +391,12 @@ data class AppSettings(
         /** 封面缩略图的有损 WebP 质量（1~100）。 */
         val coverThumbQuality: Int = 80,
         /**
-         * 封面缩略图缓存的根目录（相对启动目录或绝对路径）。默认 `work/.cache/anime/cover`；
-         * 生产建议指向大容量盘（如 tsp-1m 的 `/mnt/hdd1/.cache/anime/cover`），别往系统 SD 卡上写。
+         * 封面缩略图缓存的根目录。
+         *
+         * 留空时落在 `<workDir>/cache/anime/cover`；显式填写时按旧语义相对启动目录，
+         * 生产环境应确保它位于大容量盘（如 `/mnt/hdd1/.lolosia/cache/anime/cover`）。
          */
-        val coverCacheRoot: String = "work/.cache/anime/cover",
+        val coverCacheRoot: String = "",
         /**
          * 规则匹配不上时是否自动交给大模型兜底（RSS 事件触发，见 `AnimeMatchAiService`）。
          * 关掉只是不做**自动**兜底；右上角「匹配所有未识别」仍可手动触发。
@@ -403,8 +417,8 @@ data class AppSettings(
      * 挂载路径不走 `/api`，因此不受会话鉴权与 JSON 信封影响；鉴权用 HTTP Basic，
      * 账号来自配置。URL 只在内网/本机使用，不写入仓库文档与提交。
      *
-     * 默认根是启动目录下的 `work/repo`；生产环境可指向机械盘上的服务专属目录，
-     * 例如 `/mnt/hdd1/.lolosia/repo`。`.lolosia` 与影集、工程目录、开发文档等人类目录同级，
+     * 默认根是 `<workDir>/repo`；生产环境把 [AppSettings.workDir] 指到机械盘上的服务专属目录
+     * （例如 `/mnt/hdd1/.lolosia`）即可，`.lolosia` 与影集、工程目录、开发文档等人类目录同级，
      * 但只归后端使用，避免后端数据散落在人类目录里。
      *
      * 目录结构固定为 `<root>/maven`、`<root>/raw`、`<root>/sources` 与内部使用的 `_tmp`：
@@ -418,11 +432,12 @@ data class AppSettings(
         /** 对外挂载路径；不能以 `/api` 开头。 */
         val path: String = "/repo",
         /**
-         * 落盘根目录；相对路径按启动目录解析。
+         * 落盘根目录。
          *
-         * 默认 `work/repo`；开发板建议改为 `/mnt/hdd1/.lolosia/repo`。
+         * 留空时落在 `<workDir>/repo`；显式填写时按旧语义相对启动目录或绝对路径。
+         * 开发板通常把 [AppSettings.workDir] 指到 `/mnt/hdd1/.lolosia`，这里就不必再写。
          */
-        val root: String = "work/repo",
+        val root: String = "",
         /** Basic 鉴权用户名。 */
         val username: String = "lolosia",
         /** Basic 鉴权密码；为空时拒绝一切请求。 */

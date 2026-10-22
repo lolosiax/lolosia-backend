@@ -21,6 +21,7 @@ private const val SETTINGS_RESOURCE: String = "application.json"
 private const val ENV_HOST: String = "KTOR_HOST"
 private const val ENV_PORT: String = "KTOR_PORT"
 private const val ENV_LOG_LEVEL: String = "KTOR_LOG_LEVEL"
+private const val ENV_WORK_DIR: String = "KTOR_WORK_DIR"
 private const val ENV_DB_URL: String = "KTOR_DB_URL"
 private const val ENV_DB_USERNAME: String = "KTOR_DB_USERNAME"
 private const val ENV_DB_PASSWORD: String = "KTOR_DB_PASSWORD"
@@ -110,6 +111,7 @@ private fun envOverrides(env: (String) -> String?): JsonObject {
         if (datasource.isNotEmpty()) put("datasource", datasource)
         if (llm.isNotEmpty()) put("llm", llm)
         if (artifact.isNotEmpty()) put("artifact", artifact)
+        env(ENV_WORK_DIR)?.let { put("workDir", it) }
         env(ENV_LOG_LEVEL)?.let { put("logLevel", it) }
     }
 }

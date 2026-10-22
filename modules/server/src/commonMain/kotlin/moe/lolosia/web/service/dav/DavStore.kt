@@ -12,11 +12,11 @@ import okio.buffer
  *
  * 路径**逐段校验**，拒绝 `.` / `..` / 空段 / 含分隔符与 NUL 的段，因此解析结果必然落在根内
  * （目录穿越防护）。另外隐藏名（见 `isHiddenName`：`.` 开头，以及文件系统自建的 `lost+found`）
- * 默认一律被拒（`resolve` 返回 `null` → 403），目录列举也会跳过它们：这样 `.cache`（缩略图缓存）
+ * 默认一律被拒（`resolve` 返回 `null` → 403），目录列举也会跳过它们：这样 `.lolosia`（服务数据）
  * 与 `lost+found` 在 WebDAV 客户端里完全不可见，不会混进机械盘的正常目录树。
  *
  * [allowHidden] 返回 `true` 时上面的隐藏规则失效 —— 开发机把线上机的 `/dav` 映射成网络驱动器
- * 当本地盘用时，缩略图缓存要落在 `<root>/.cache` 下，客户端得能建目录、能读写。取值走回调而不是
+ * 当本地盘用时，服务数据要落在 `<root>/.lolosia` 下，客户端得能建目录、能读写。取值走回调而不是
  * 构造参数，是为了让设置面板改了立刻生效（见 `AppSettingService`）。
  *
  * 文件系统访问走 `FileSystem.SYSTEM`，native 与 Windows 同一套 API。
@@ -41,7 +41,7 @@ class DavStore(val root: String, private val allowHidden: () -> Boolean = { fals
         for (seg in segments) {
             if (seg.isEmpty() || seg == "." || seg == "..") return null
             if (seg.any { it == '/' || it == '\\' || it == '\u0000' }) return null
-            // 隐藏项（`.cache` 缓存目录、`lost+found` 保留目录）默认对 WebDAV 不暴露：列举不显示，直连路径也拒绝
+            // 隐藏项（`.lolosia` 服务目录、`lost+found` 保留目录）默认对 WebDAV 不暴露：列举不显示，直连路径也拒绝
             if (hidden(seg)) return null
             path = path.resolve(seg)
         }

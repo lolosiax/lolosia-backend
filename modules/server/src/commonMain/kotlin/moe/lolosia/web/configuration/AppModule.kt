@@ -47,4 +47,4 @@ fun startAppKoin(
 }.koin
 
 /** 平台特有的 Koin 绑定（`actual` 见各目标源集，如 native 绑 `PosixFileStore`）。 */
-expect fun platformModule(): Module
+expect fun platformModule(config: AppSettings): Module

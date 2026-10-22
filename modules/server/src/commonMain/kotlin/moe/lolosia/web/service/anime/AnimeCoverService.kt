@@ -18,14 +18,17 @@ import moe.lolosia.web.service.files.ThumbnailCache
 import moe.lolosia.web.service.files.ThumbnailGenerator
 import moe.lolosia.web.settings.AppSettings
 import moe.lolosia.web.util.fs.FileStore
+import moe.lolosia.web.util.fs.WorkPaths
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.router.Injectable
 import moe.lolosia.web.util.router.Service
 import okio.Buffer
+import okio.Path
+import okio.Path.Companion.toPath
 import kotlin.time.Clock
 
 /**
- * 番剧**封面回源**：把 Bangumi 图床的封面图拉到本地 `work/resources/anime/cover/`，
+ * 番剧**封面回源**：把 Bangumi 图床的封面图拉到本地 `<workDir>/resources/anime/cover/`，
  * 前端再经 `/res/resources/anime/cover/{bangumiId}.jpg?webp` 取（见 `doc/anime-timetable-design.md` §3.1 / §4.4）。
  *
  * Bangumi 图床在墙内打不开：中继模式下境外节点先备好、这里分批问「已经好了多少张」再逐张取回；
@@ -41,6 +44,7 @@ class AnimeCoverService(
     private val db: Database,
     private val store: FileStore,
     private val series: AnimeSeriesRepository,
+    workPaths: WorkPaths,
 ) {
 
     private val log = Log.of("Anime")
@@ -50,9 +54,16 @@ class AnimeCoverService(
     private val relayBase: String get() = config.bangumiRelayUrl.trimEnd('/')
     private val relayHeaders: Map<String, String> get() = mapOf("X-Relay-Token" to config.bangumiRelayToken)
 
+    /** 封面缩略图缓存根；留空走 `<workDir>/cache/anime/cover`，显式配置保持旧语义。 */
+    private val coverCacheRoot: Path = if (config.coverCacheRoot.isBlank()) {
+        workPaths.cache("anime", "cover")
+    } else {
+        config.coverCacheRoot.toPath()
+    }
+
     /** 封面缩略图缓存（复用文件管理器那套：档位 + SHA-1 分片 + 元数据，见 [ThumbnailCache]）。 */
     private val thumbs: ThumbnailCache = ThumbnailCache(
-        root = "${config.coverCacheRoot}/v$ANIME_COVER_CACHE_VERSION",
+        root = coverCacheRoot.resolve("v$ANIME_COVER_CACHE_VERSION").toString(),
         sizes = config.coverThumbSizes.filter { it > 0 }.ifEmpty { listOf(256) },
     )
 
@@ -123,7 +134,7 @@ class AnimeCoverService(
     /**
      * 取一张封面的**缩略图**（最长边 [size]，缺省取最小档）。
      *
-     * 命中 `.cache` 直接返回；没有就从回源大图 `work/resources/anime/cover/{id}.jpg` 解码缩放一次并落盘
+     * 命中缓存直接返回；没有就从回源大图 `<workDir>/resources/anime/cover/{id}.jpg` 解码缩放一次并落盘
      * （解码是纯 CPU 重活，挪到默认调度器上跑，别占着请求线程）。大图不存在时返回 `null`。
      */
     suspend fun thumbnail(bangumiId: Long, size: Int?): ByteArray? {

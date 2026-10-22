@@ -11,6 +11,7 @@ import kotlinx.serialization.json.*
 import moe.lolosia.web.service.artifact.ArtifactStore
 import moe.lolosia.web.service.dav.httpDate
 import moe.lolosia.web.settings.AppSettings
+import moe.lolosia.web.util.fs.WorkPaths
 import moe.lolosia.web.util.log.Log
 import moe.lolosia.web.util.log.Logger
 import okio.ByteString.Companion.decodeBase64
@@ -36,7 +37,7 @@ private val ROOTS = setOf("maven", "raw", "sources")
  *
  * @author 洛洛希雅Lolosia
  */
-fun Route.artifactRepository(config: AppSettings.ArtifactConfig) {
+fun Route.artifactRepository(config: AppSettings.ArtifactConfig, workPaths: WorkPaths) {
     val base = "/" + config.path.trim('/')
     val log = Log.of("ArtifactRepo")
     if (base.startsWith("/api")) {
@@ -44,7 +45,7 @@ fun Route.artifactRepository(config: AppSettings.ArtifactConfig) {
         return
     }
 
-    val store = ArtifactStore(config.root.ifBlank { "work/repo" })
+    val store = ArtifactStore(config.root.ifBlank { workPaths.artifactRoot.toString() })
     log.info { "工件仓库已挂载：$base -> ${store.rootPath}" }
     if (config.password.isEmpty()) {
         log.warn { "artifact.password 为空：所有请求都会因鉴权失败被拒，请在配置里设置密码" }

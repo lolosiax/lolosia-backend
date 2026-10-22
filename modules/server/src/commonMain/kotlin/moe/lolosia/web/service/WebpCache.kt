@@ -8,7 +8,7 @@ import moe.lolosia.web.util.router.Service
 import okio.ByteString.Companion.toByteString
 
 /**
- * WebP 磁盘缓存：按源文件内容的 MD5 存到 `work/cache/webp/{md5}.webp`。
+ * WebP 磁盘缓存：按源文件内容的 MD5 存到 `<workDir>/cache/webp/{md5}.webp`。
  *
  * 只落盘不占内存（开发板内存小），命中直接返回；转换失败返回 `null`，调用方回退原图。
  * 与旧 JVM 版的缓存路径和键完全一致，已有的缓存文件可直接复用。

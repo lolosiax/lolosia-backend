@@ -105,7 +105,7 @@ fun main(args: Array<String>) {
     Log.level = LogLevel.parse(config.logLevel)
 
     // Koin 容器：common 的配置/包路径 + 平台模块（sqlx4k 仓库实现、`@Service` 服务、平台绑定）
-    val koin = startAppKoin(config, cp, repositoryModules() + serviceModule() + platformModule())
+    val koin = startAppKoin(config, cp, repositoryModules() + serviceModule() + platformModule(config))
 
     log.info { "classpath 已装载：${cp.entries.size} 个条目（来源：${cp.origin}）" }
     log.info { "配置已加载：port=${config.server.port}, db=${config.datasource.url}, 日志级别=${Log.level}" }

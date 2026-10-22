@@ -5,7 +5,7 @@ import io.github.smyrgeorge.sqlx4k.annotation.Table
 import kotlin.time.Instant
 
 /**
- * `media_embedding`：向量**索引**（本体在 `<root>/.cache/…/vec/<model>.f32`）。
+ * `media_embedding`：向量**索引**（本体在 `<workDir>/cache/…/vec/<model>.f32`）。
  *
  * 一行 = 一个资产 × 一个模型，[rowIndex] 是向量本体在第几个 dim 的起始偏移。
  * 检索时整块读进内存做点积即可 —— 十万级数据暴力算够用，不值得为此引一套向量数据库

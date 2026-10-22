@@ -7,7 +7,7 @@ import kotlin.time.Instant
 /**
  * `oss_user_file`：用户文件元数据。
  *
- * 文件本体按 `work/files/<created_by>/<md5>/<file_name>` 落盘（见 `service/oss/UserFileService`），
+ * 文件本体按 `<workDir>/files/<created_by>/<md5>/<file_name>` 落盘（见 `service/oss/UserFileService`），
  * 这里只存元数据。`id` 由应用侧生成（`varchar(40)`），与 `sys_user` 一致。
  *
  * @author 洛洛希雅Lolosia

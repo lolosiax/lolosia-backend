@@ -7,7 +7,7 @@ import okio.Path.Companion.toPath
  * 文件管理器的路径与类型工具：把 URL 里的相对路径安全地映射成真实路径，并给出 MIME / 图片判定。
  *
  * 路径**逐段校验**（拒绝空段、`.`、`..`、含分隔符或 NUL 的段，以及一切隐藏名，见 [isHiddenName]），
- * 因此解析结果必然落在浏览根内，且天然看不到 `.cache`、`lost+found` 之类不该露出的目录。
+ * 因此解析结果必然落在浏览根内，且天然看不到 `.lolosia`、`lost+found` 之类不该露出的目录。
  *
  * @author 洛洛希雅Lolosia
  */
@@ -26,9 +26,6 @@ fun isHiddenName(name: String): Boolean = name.startsWith(".") || name == "lost+
 
 /** 共享的缩略图缓存版本号：规格或算法变更时递增，旧缓存整体失效（目录名带版本）。 */
 const val THUMBNAIL_CACHE_VERSION: Int = 3
-
-/** 缩略图缓存相对浏览根的目录（对 WebDAV 隐藏，见 `DavStore`）。 */
-const val CACHE_DIR: String = ".cache/lolosia/thumb"
 
 /** 扩展名 → MIME；未收录的一律 `application/octet-stream`。 */
 private val MIME_TYPES: Map<String, String> = mapOf(

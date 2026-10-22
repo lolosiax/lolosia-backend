@@ -12,7 +12,7 @@ import okio.Path.Companion.toPath
 /**
  * 缩略图磁盘缓存。
  *
- * 目录结构（`<浏览根>/.cache/lolosia/thumb/v<版本>/`，该目录对 WebDAV 隐藏）：
+ * 目录结构（`<workDir>/cache/thumb/v<版本>/`，不再写进媒体浏览根）：
  * ```
  * v2/
  *   ab/ab12…ef.json           源文件的缓存元数据（大小 / 修改时间 / 尺寸 / 已生成档位）
