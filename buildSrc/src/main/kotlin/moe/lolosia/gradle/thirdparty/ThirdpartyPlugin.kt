@@ -18,7 +18,7 @@ import org.gradle.api.tasks.TaskProvider
  * - 按 `thirdparty/manifest.json` 为每个库 × 目标建一个独立依赖配置与 `thirdpartySync<库><目标>` 任务；
  * - 启用仓库时从 `moe.lolosia.thirdparty:<库>-<目标>:<版本>@zip` 拉取并解压；
  * - 未启用仓库（例如没有 `local.properties`）时，自动先跑源码构建脚本，再回退到
- *   `thirdparty/include` 与 `thirdparty/<目标>`；
+ *   `build/thirdparty/out/include` 与 `build/thirdparty/out/<目标>`；
  * - 暴露 [ThirdpartyExtension.dir] / [ThirdpartyExtension.syncTask] 给各模块的 cinterop 使用。
  *
  * @author 洛洛希雅Lolosia
@@ -59,6 +59,7 @@ class ThirdpartyPlugin : Plugin<Project> {
         val sourceBuildTasks = mutableMapOf<String, TaskProvider<Exec>>()
         if (!settings.enabled) {
             val root = project.rootProject
+            val outRoot = root.layout.buildDirectory.dir("thirdparty/out")
 
             fun sourceBuild(
                 name: String,
@@ -112,12 +113,12 @@ class ThirdpartyPlugin : Plugin<Project> {
             codecLibraries.forEach { library ->
                 val spec = manifest["libraries"][library] ?: return@forEach
                 spec["headers"].forEach { header ->
-                    val path = root.file("thirdparty/include/${header.asText()}")
+                    val path = outRoot.get().dir("include/${header.asText()}").asFile
                     if (header.asText().endsWith(".h")) codecFiles += path else codecDirectories += path
                 }
                 spec["libs"].fields().forEach { (target, archives) ->
                     archives.forEach { archive ->
-                        codecFiles += root.file("thirdparty/$target/${archive.asText()}")
+                        codecFiles += outRoot.get().dir(target).file(archive.asText()).asFile
                     }
                 }
             }
@@ -132,23 +133,23 @@ class ThirdpartyPlugin : Plugin<Project> {
             val sdl3 = sourceBuild(
                 "thirdpartyBuildSdl3",
                 "thirdparty/sdl3/build.ps1",
-                outputFiles = listOf(root.file("thirdparty/mingwX64/libSDL3.a")),
-                outputDirectories = listOf(root.file("thirdparty/include/SDL3")),
+                outputFiles = listOf(outRoot.get().dir("mingwX64").file("libSDL3.a").asFile),
+                outputDirectories = listOf(outRoot.get().dir("include/SDL3").asFile),
             )
             val freetype = sourceBuild(
                 "thirdpartyBuildFreetype",
                 "thirdparty/freetype/build.ps1",
-                outputFiles = listOf(root.file("thirdparty/mingwX64/libfreetype.a")),
-                outputDirectories = listOf(root.file("thirdparty/include/freetype2")),
+                outputFiles = listOf(outRoot.get().dir("mingwX64").file("libfreetype.a").asFile),
+                outputDirectories = listOf(outRoot.get().dir("include/freetype2").asFile),
             )
             val rmlui = sourceBuild(
                 "thirdpartyBuildRmlui",
                 "thirdparty/rmlui/build.ps1",
                 outputFiles = listOf(
-                    root.file("thirdparty/mingwX64/librmlui.a"),
-                    root.file("thirdparty/mingwX64/librmlui_debugger.a"),
+                    outRoot.get().dir("mingwX64").file("librmlui.a").asFile,
+                    outRoot.get().dir("mingwX64").file("librmlui_debugger.a").asFile,
                 ),
-                outputDirectories = listOf(root.file("thirdparty/include/RmlUi")),
+                outputDirectories = listOf(outRoot.get().dir("include/RmlUi").asFile),
                 dependencies = listOf("thirdpartyBuildFreetype"),
             )
 
@@ -187,13 +188,13 @@ class ThirdpartyPlugin : Plugin<Project> {
                     if (settings.enabled) {
                         from(project.provider { project.zipTree(configuration.singleFile) })
                     } else {
-                        from(project.rootProject.file("thirdparty/include")) {
+                        from(project.rootProject.layout.buildDirectory.dir("thirdparty/out/include")) {
                             headers.forEach { header ->
                                 if (header.endsWith(".h")) include(header) else include("$header/**")
                             }
                             into("include")
                         }
-                        from(project.rootProject.file("thirdparty/$target")) {
+                        from(project.rootProject.layout.buildDirectory.dir("thirdparty/out/$target")) {
                             archives.forEach { include(it) }
                             into("lib")
                         }

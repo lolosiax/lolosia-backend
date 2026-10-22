@@ -1,12 +1,12 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    一次性构建 RmlUi 静态库（thirdparty/<目标>/librmlui.a + thirdparty/include/RmlUi/**）。
+    一次性构建 RmlUi 静态库（build/thirdparty/out/<目标>/librmlui.a + build/thirdparty/out/include/RmlUi/**）。
 
 .DESCRIPTION
     RmlUi 是 UI 实验的视图层：HTML/RCSS 描述结构、Flexbox 自动算布局、data-model 做数据绑定（MVVM）。
     与 sdl3/build.ps1 / freetype/build.ps1 同一约定：只在新增或升级时手动跑一次，
-    源码不入库、产物入库，日常 Gradle 构建只做 cinterop + 链接。
+    源码与产物都不入库（产物落 build/thirdparty/out/），日常 Gradle 构建只做 cinterop + 链接。
 
     前提：先跑 freetype/build.ps1 —— RmlUi 的字体引擎（RMLUI_FONT_ENGINE=freetype）要链接 FreeType。
     FreeType 不走 find_package 的搜索路径（它装在 thirdparty 这个非标准前缀下），
@@ -48,11 +48,10 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path $PSScriptRoot -Parent) 'gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
-$thirdpartyDir = Join-Path $repoRoot 'thirdparty'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
 $buildDir = Join-Path $WorkDir "cmake/$Target/rmlui"
-$libOut = Join-Path $thirdpartyDir $Target
-$incOut = Join-Path $thirdpartyDir 'include/RmlUi'
+$libOut = Join-Path $WorkDir "out/$Target"
+$incOut = Join-Path $WorkDir 'out/include/RmlUi'
 
 # ---------------------------------------------------------------- 1. 工具链
 Write-Step '定位工具链'
@@ -64,7 +63,7 @@ Write-Host "    cmake   : $cmake"
 Write-Host "    ninja   : $ninja"
 
 # ---------------------------------------------------------------- 2. 依赖自检
-$ftInc = Join-Path $thirdpartyDir 'include/freetype2'
+$ftInc = Join-Path $WorkDir 'out/include/freetype2'
 $ftLib = Join-Path $libOut 'libfreetype.a'
 if (-not (Test-Path (Join-Path $ftInc 'ft2build.h'))) {
     Stop-WithError "缺少 FreeType 头文件：$ftInc（先跑 thirdparty/freetype/build.ps1）"
@@ -111,7 +110,7 @@ $cfg = @(
     # 预编译头：核心有 200+ 个 cpp，开了能省一多半编译时间
     '-DRMLUI_PRECOMPILED_HEADERS=ON',
     '-DRMLUI_WARNINGS_AS_ERRORS=OFF',
-    # FreeType 装在非标准前缀下，直接喂给 FindFreetype.cmake 的缓存变量
+    # FreeType 装在 build/thirdparty/out 这个非标准前缀下，直接喂给 FindFreetype.cmake 的缓存变量
     "-DFREETYPE_LIBRARY=$(ConvertTo-CmPath $ftLib)",
     "-DFREETYPE_INCLUDE_DIR_ft2build=$(ConvertTo-CmPath $ftInc)",
     "-DFREETYPE_INCLUDE_DIR_freetype2=$(ConvertTo-CmPath $ftInc)"

@@ -41,7 +41,7 @@ gradlew deploy<服务器名>                   # 构建 + 部署到开发板 / �
 ### Android（Stage 3 首版）
 
 ```powershell
-# 1) 原生库：NDK r27c + ninja（源码/中间产物在 build/thirdparty，产物落 thirdparty/androidJniLibs）
+# 1) 原生库：NDK r27c + ninja（源码/中间产物在 build/thirdparty，产物落 build/thirdparty/out/androidJniLibs）
 gradlew androidNative                       # 默认 x86_64 + arm64-v8a
 gradlew androidNative -PandroidAbis=x86_64  # 只构建模拟器那一份
 
@@ -65,7 +65,7 @@ adb shell am start -n moe.lolosia.android/.MainActivity
   - 根构建会自动探测 Android SDK / NDK / cmake / ninja；缺失时打印警告并跳过 `androidNative` / `androidApp`，
     `buildBinaries` 仍会产出桌面二进制。也可用 `-PskipAndroid=true` 显式跳过。
 - `modules/app-android/local.properties` 写 `sdk.dir=D:\\AndroidSdk`（gitignored）；NDK 默认找 `D:\AndroidSdk\ndk\android-ndk-r27c`。
-- APK 里的 `assets/ui/probe.rml`、`sample.png` 直接引用 `modules/client/src/commonMain/resources`；`jniLibs` 引用 `thirdparty/androidJniLibs`。
+- APK 里的 `assets/ui/**`（RML / RCSS / sample）直接引用 `modules/client/src/commonMain/resources`；`jniLibs` 引用 `build/thirdparty/out/androidJniLibs`。
 - 字体用系统 `NotoSansCJK-Regular.ttc`；图片解码走 `BitmapFactory` + `libjnigraphics`，不引入 Android 版 png/jpeg/webp 静态库。
 
 **提交前自检**（防「文件在磁盘上但被 `.gitignore` 吃掉」）：
@@ -87,11 +87,13 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
 ### 第三方 C 静态库（`thirdparty/`）
 
 图像编解码（WebP / PNG / JPEG / GIF）用 5 个 C 库：libwebp、libpng、zlib、libjpeg-turbo、giflib。
-**源码不入库、产物入库**：`thirdparty/<目标>/` 放 6 个 `.a`（`libwebp.a` 已并入编码侧的私有依赖 SharpYuv，见下），
-`thirdparty/include/` 放绑定需要的公共头文件，`thirdparty/gradle/build-codecs.ps1` 是一次性重建脚本。目标有 `mingwX64` / `linuxArm64` / `linuxX64` 三份。
+**源码、产物、下载的头文件都不入库**：构建脚本把 `.a` 与公共头文件写到 `build/thirdparty/out/<目标>/` 与 `build/thirdparty/out/include/`
+（`libwebp.a` 已并入编码侧的私有依赖 SharpYuv，见下）；仓库只保留 `thirdparty/manifest.json`、`thirdparty/<库>/<库>.def` 与构建脚本。
+目标有 `mingwX64` / `linuxArm64` / `linuxX64` 三份。
 
 日常 `gradlew` 构建完全不碰 C 工具链 —— `build.gradle.kts` 只把 `.def` 与 `-libraryPath` 交给 cinterop，
 `.def` 里 `staticLibraries` 声明的 `.a` 会打进 klib、在链接期随可执行文件静态链入（与 ktor 的 curl klib 同一机制）。
+配置了工件仓库时 `thirdpartySync` 从仓库拉 zip 解到 `build/thirdparty/<库>/<目标>/`；未配置时回退到 `build/thirdparty/out/`。
 
 只在换库版本 / 改编译选项时重建：
 
@@ -108,7 +110,7 @@ git ls-files --others --ignored --exclude-standard | Select-String "\.(kt|kts|sq
   zlib 的真 `zconf.h` 在**构建目录**里（源码树那份被 CMake 改名成 `zconf.h.included`）。
 - libjpeg-turbo 只构建静态库目标（`jpeg-static` / `turbojpeg-static`）：`all` 会连带构建 CLI 可执行文件，Linux 目标链接不过。
 - ⚠️ **libwebp 1.6 起编码侧的 SharpYuv 拆成独立归档 `libsharpyuv.a`，脚本会把它合并回单个 `libwebp.a`**（`.def` 里只声明 `libwebp.a`）。分成两个归档时，K/N 的 ELF 链接（ld.gold）按归档逐个解析，顺序被重排后 `libwebp.a` 里对 `SharpYuv*` 的引用会解析不到 —— arm64 与 x64 都会 `linkReleaseExecutable<目标>` 失败（mingw 的 PE 链接器宽容，才没暴露）。
-- 绑定：`.def` 在 `modules/codecs/src/nativeInterop/cinterop/`，门面在 `modules/codecs/src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
+- 绑定：`.def` 在 `thirdparty/<库>/<库>.def`，门面在 `modules/codecs/src/nativeMain/kotlin/moe/lolosia/thirdparty/<库名>/`，
   包名一律 `moe.lolosia.thirdparty.<库名>`。`gradle.properties` 开了 `kotlin.mpp.enableCInteropCommonization=true`，
   让 cinterop 声明对 `nativeMain` 可见（`kotlinx.cinterop` 的指针 API 本身仍只在 native 源集可用）。
 - 目标相关的类型宽度要当心：`size_t` 三个目标都是 64 位可以安全传递，`unsigned long` 不是（mingw 32 位 / linux 64 位），

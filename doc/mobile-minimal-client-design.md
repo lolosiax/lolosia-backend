@@ -1,6 +1,7 @@
 # 最小移动客户端设计：登录、基础框架与本地服务
 
-> 状态：**设计稿，未实现**。目标是把当前 RmlUi 实验推进到「能登录、能看两页、能接本地服务」的最小客户端，同时把后续页面需要的底层机制一次定清楚。
+> 状态：**M1–M3 与 M5 主体已实现**（Windows / Android 共用 `ClientApp` 与同一套页面代码，Android 为 SDLActivity + JNI 宿主）；
+> 剩余：Android 本地服务（当前固定离线）、番组关注/取关、图标资源接入；Linux UI 按设计不提供。验收记录见 §10。
 > 规范约定见 [AGENTS.md](../AGENTS.md)；进程模型沿用 [modularization-plan.md](modularization-plan.md) §5.6。
 > 本文不写线上域名、IP、SSH/数据库口令与测试账号，统一用占位符；实际值从本机 `platforms.json` 或本地配置读取。
 

@@ -1,7 +1,10 @@
 # 构建工件服务与第三方原生库管理方案
 
-> 状态：**方案稿，未实施**。
+> 状态：**部分实施**。已落地：`moe.lolosia.thirdparty` 消费插件与源码回退、自建工件服务（`/repo`）、`gradlew -p thirdparty publishAll` 发布插件；
+> 产物与下载的头文件统一落在 `build/thirdparty/out/`，不再入库。未完成：消费端 SHA-256 / `meta.json` 校验、`thirdparty/LICENSES` 与 `NOTICE`、公共源（GitHub Releases / Gitee）与 CI 发布、可选的历史重写。
 > 范围：`thirdparty/` 的第三方 C 库产物与头文件、Gradle 解析链路、后续自建工件服务、Git 历史清理。
+> 实施变更（2026-10）：`.a` / `.so` / 下载的 `.h` 已统一落到 `build/thirdparty/out/` 并从 Git 索引移除，
+> `.gitignore` 覆盖 `thirdparty/{include,mingwX64,linuxArm64,linuxX64,androidJniLibs}/`；下文 §1 与 §4 保留的是决策时的历史现状与步骤。
 > 现行工程约定以 [AGENTS.md](../AGENTS.md) 为准；模块化背景见 [modularization-plan.md](modularization-plan.md)。
 
 ---
@@ -72,7 +75,7 @@ Gitee 免费仓库的容量档位更值得关注。当前体积不会触发任�
 | 类别 | 例子 | 归属 | 存储方式 |
 | --- | --- | --- | --- |
 | 第三方二进制 | `libz.a`、`libwebp.a`、`libSDL3.a`、`librmlui.a`、`libfreetype.a` | 外部依赖 | 工件库，按 bundle 版本发布 |
-| 第三方头文件 | `thirdparty/include/**` | 外部依赖 | 一期可留在 Git；二期随 bundle 下载到 `build/` |
+| 第三方头文件 | `build/thirdparty/out/include/**` | 外部依赖 | 随 bundle 下载或源码构建生成，不入库（`.gitignore` 已覆盖） |
 | 自有原生门面 | `liblolosia.a`、`liblolosia.so` | 本仓库代码 | 由 CI/本机构建，只做任务输出缓存，不进工件库 |
 
 `thirdparty/include` 是所有第三方库头文件的合集，**不要**把 `modules/client/src/nativeCpp/include`

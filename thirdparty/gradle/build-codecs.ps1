@@ -4,8 +4,8 @@
     一次性构建 thirdparty/ 下的第三方原生静态库（zlib / libpng / libwebp / libjpeg-turbo / giflib / msgpack-c）。
 
 .DESCRIPTION
-    只在需要新增或升级库时手动跑一次；产物（.a + 公共头文件）提交入库，
-    日常 Gradle 构建只做 cinterop，不再碰 C 工具链。
+    只在需要新增或升级库时手动跑一次；产物（.a + 公共头文件）落在 build/thirdparty/out/
+    （不入库），日常 Gradle 构建只做 cinterop，不再碰 C 工具链。
 
     编译器直接用 Kotlin/Native 自带的那一套，不依赖本机 MSYS2/Visual Studio：
       - 解析 gradle/libs.versions.toml 里的 kotlin 版本，找到 ~/.konan/kotlin-native-prebuilt-*-<ver>；
@@ -43,12 +43,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'toolchain.ps1')
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$thirdpartyRoot = Join-Path $repoRoot 'thirdparty'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
 $srcDir = Join-Path $WorkDir 'src'
 $treeDir = Join-Path $WorkDir 'tree'
 $cmakeDir = Join-Path $WorkDir 'cmake'
-$incOut = Join-Path $thirdpartyRoot 'include'
+$incOut = Join-Path $WorkDir 'out/include'
 
 function Info([string]$m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn([string]$m) { Write-Host "!!  $m" -ForegroundColor Yellow }
@@ -258,7 +257,7 @@ foreach ($tpl in @(
 foreach ($target in $Targets) {
     Write-Host ''
     Info "================ 目标 $target ================"
-    $outDir = Join-Path $thirdpartyRoot $target
+    $outDir = Join-Path $WorkDir "out/$target"
 
     # ---- zlib ----
     $zlibBuild = Join-Path $cmakeDir "$target/zlib"
@@ -368,7 +367,7 @@ foreach ($target in $Targets) {
 }
 
 # ---------------------------------------------------------------- 5. 公共头文件
-Info '复制公共头文件到 thirdparty/include'
+Info '复制公共头文件到 build/thirdparty/out/include'
 $headerMap = @(
     @{ From = "$zlibTree/zlib.h";      To = 'zlib/zlib.h' }
     @{ From = "$cmakeDir/$($Targets[0])/zlib/zconf.h"; To = 'zlib/zconf.h' }
@@ -399,6 +398,6 @@ Write-Host '    -> msgpack.h + msgpack/*'
 
 Write-Host ''
 Info '完成。产物：'
-Get-ChildItem ($Targets | ForEach-Object { Join-Path $thirdpartyRoot $_ }) -Filter '*.a' -ErrorAction SilentlyContinue |
+Get-ChildItem ($Targets | ForEach-Object { Join-Path $WorkDir "out/$_" }) -Filter '*.a' -ErrorAction SilentlyContinue |
     Select-Object @{ n = 'Target'; e = { Split-Path $_.DirectoryName -Leaf } }, Name, @{ n = 'KB'; e = { [math]::Round($_.Length / 1KB) } } |
     Format-Table -AutoSize | Out-String | Write-Host

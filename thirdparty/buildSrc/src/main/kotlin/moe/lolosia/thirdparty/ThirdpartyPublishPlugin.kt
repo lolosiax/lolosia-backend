@@ -16,7 +16,7 @@ import java.util.Properties
  *
  * 每个子项目只声明 `thirdpartyLibrary { id = "..." }`，插件负责：
  * - 从 `thirdparty/manifest.json` 读取版本、头文件与各目标静态库；
- * - 生成 `package<目标>` 任务，把 `thirdparty/include` 与 `thirdparty/<目标>` 中属于该库的
+ * - 生成 `package<目标>` 任务，把 `build/thirdparty/out/include` 与 `build/thirdparty/out/<目标>` 中属于该库的
  *   文件打成 `moe.lolosia.thirdparty:<库>-<目标>:<版本>@zip`；
  * - 配置 `maven-publish`，仓库地址与账号来自主工程根目录的 `local.properties`；
  * - 若子项目存在 `build.ps1`，注册 `buildFromSource`（仅 Windows）。
@@ -40,7 +40,7 @@ class ThirdpartyPublishPlugin : Plugin<Project> {
             val groupId = manifest["groupId"].asText()
             val libraryVersion = spec["version"].asText()
             val headers = spec["headers"].map { it.asText() }
-            val includeRoot = backendRoot.resolve("thirdparty/include")
+            val includeRoot = backendRoot.resolve("build/thirdparty/out/include")
 
             val targets = mutableListOf<Pair<String, List<String>>>()
             val targetIterator = spec["libs"].fields()
@@ -61,7 +61,7 @@ class ThirdpartyPublishPlugin : Plugin<Project> {
                         }
                         into("include")
                     }
-                    from(backendRoot.resolve("thirdparty/$target")) {
+                    from(backendRoot.resolve("build/thirdparty/out/$target")) {
                         archives.forEach { include(it) }
                         into("lib")
                     }

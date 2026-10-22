@@ -1,11 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    一次性构建 SDL3 静态库（thirdparty/<目标>/libSDL3.a + thirdparty/include/SDL3/**）。
+    一次性构建 SDL3 静态库（build/thirdparty/out/<目标>/libSDL3.a + build/thirdparty/out/include/SDL3/**）。
 
 .DESCRIPTION
-    只在新增或升级 SDL3 时手动跑一次；产物（.a + 公共头文件）提交入库，源码不入库，
-    日常 Gradle 构建只做 cinterop，不再碰 C 工具链（与 gradle/build-codecs.ps1 同一约定）。
+    只在新增或升级 SDL3 时手动跑一次；产物（.a + 公共头文件）落在 build/thirdparty/out/（不入库），
+    源码不入库，日常 Gradle 构建只做 cinterop，不再碰 C 工具链（与 gradle/build-codecs.ps1 同一约定）。
     另一点与 gradle/build-codecs.ps1 相同：编译器直接用 Kotlin/Native 自带的那一套
     （clang + msys2 sysroot，见 gradle/build-codecs.ps1 的文件头说明），因此产物的 ABI/glibc
     与 Kotlin/Native 链接期的完全一致。
@@ -45,12 +45,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path $PSScriptRoot -Parent) 'gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
-$thirdpartyDir = Join-Path $repoRoot 'thirdparty'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
 $buildDir = Join-Path $WorkDir "cmake/$Target/sdl3"
 $prefixDir = Join-Path $WorkDir "deps/$Target/sdl3"
-$incOut = Join-Path $thirdpartyDir 'include'
-$libOut = Join-Path $thirdpartyDir $Target
+$incOut = Join-Path $WorkDir 'out/include'
+$libOut = Join-Path $WorkDir "out/$Target"
 
 function Info([string]$m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn([string]$m) { Write-Host "!!  $m" -ForegroundColor Yellow }
@@ -179,7 +178,7 @@ Copy-Item $sdlLib.FullName (Join-Path $libOut 'libSDL3.a') -Force
 $size = [math]::Round((Get-Item (Join-Path $libOut 'libSDL3.a')).Length / 1KB)
 Write-Host "    -> $Target/libSDL3.a (${size} KB)"
 
-Info '复制公共头文件到 thirdparty/include/SDL3'
+Info '复制公共头文件到 build/thirdparty/out/include/SDL3'
 $hdrSrc = Join-Path $sdlTree 'include/SDL3'
 if (-not (Test-Path $hdrSrc)) { Fail "头文件目录不存在：$hdrSrc" }
 $hdrDst = Join-Path $incOut 'SDL3'

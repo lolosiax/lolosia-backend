@@ -1,11 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    编译自研的 C/C++ 门面层为 thirdparty/<目标>/liblolosia.a。
+    编译自研的 C/C++ 门面层为 build/thirdparty/out/<目标>/liblolosia.a。
 
 .DESCRIPTION
     src/nativeCpp 下的 C++ 代码把 RmlUi / SDL3 包成 ll_ui_* 这套 C ABI，供 Kotlin 侧用 cinterop 调用。
-    产物与第三方静态库放在一起（thirdparty/<目标>/），这样 cinterop 只需要一个 libraryPath。
+    自研 .a 与第三方静态库放在一起（build/thirdparty/out/<目标>/），这样 cinterop 只需要一个 libraryPath。
 
     编进来的有两部分：
       1. 自研门面 src/nativeCpp/src/*.cpp；
@@ -16,12 +16,12 @@
     都是 Kotlin/Native 自带的那套（clang + msys2 sysroot），保证 ABI 与最终可执行文件对齐。
 
     依赖（都得先跑各自的脚本）：
-      thirdparty/include/SDL3/**          thirdparty/sdl3/build.ps1
-      thirdparty/<目标>/libSDL3.a
-      thirdparty/include/RmlUi/**         thirdparty/rmlui/build.ps1
-      thirdparty/<目标>/librmlui*.a      thirdparty/rmlui/build.ps1（含内置调试器 librmlui_debugger.a）
-      thirdparty/include/freetype2/**     thirdparty/freetype/build.ps1
-      thirdparty/<目标>/libfreetype.a
+      build/thirdparty/out/include/SDL3/**          thirdparty/sdl3/build.ps1
+      build/thirdparty/out/<目标>/libSDL3.a
+      build/thirdparty/out/include/RmlUi/**        thirdparty/rmlui/build.ps1
+      build/thirdparty/out/<目标>/librmlui*.a      thirdparty/rmlui/build.ps1（含内置调试器 librmlui_debugger.a）
+      build/thirdparty/out/include/freetype2/**    thirdparty/freetype/build.ps1
+      build/thirdparty/out/<目标>/libfreetype.a
       <repo>/build/thirdparty/tree/RmlUi-*/Backends/**（后端胶水的源码，随 rmlui/build.ps1 落到那里）
 
     ⚠️ 从引入 RmlUi 起，liblolosia.a 会引用 C++ 运行时（libstdc++）——
@@ -51,11 +51,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '../../../../thirdparty/gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
-$thirdpartyDir = Join-Path $repoRoot 'thirdparty'
+$outRoot = Join-Path $repoRoot 'build/thirdparty/out'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot "build/nativeCpp/$Target" }
 $objDir = Join-Path $WorkDir 'obj'
-$libOut = Join-Path $thirdpartyDir $Target
-$includeRoot = Join-Path $thirdpartyDir 'include'
+$libOut = Join-Path $outRoot $Target
+$includeRoot = Join-Path $outRoot 'include'
 
 $backendSources = @(
     'RmlUi_Backend_SDL_GPU.cpp',

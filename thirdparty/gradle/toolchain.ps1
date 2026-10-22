@@ -151,7 +151,7 @@ function Get-LolosiaArtifactRepo {
     下载并解压第三方源码包，返回解压后的目录。
 .DESCRIPTION
     源码落在 <WorkDir>/src 与 <WorkDir>/tree（默认 <repo>/build/thirdparty，已被 .gitignore 忽略），
-    不随仓库提交；产物才提交。下载时会检查前两个字节，避免把 404 页面当成 tar 包解压。
+    不随仓库提交；产物也写在 build/thirdparty/out/ 下，同样不入库。下载时会检查前两个字节，避免把 404 页面当成 tar 包解压。
 
     给了 -Library / -Version / -FileName 且 local.properties 配了工件仓库时，先按
     <repo>/sources/<Library>/<Version>/<FileName> 取；镜像不可用或文件缺失再回退 [Url]。

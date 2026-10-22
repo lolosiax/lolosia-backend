@@ -10,7 +10,7 @@ group = "moe.lolosia"
 version = rootProject.version
 
 // 第三方 C 库：头文件、静态库与 .def 都由 :thirdparty 的工件提供；
-// 未配置工件仓库时，插件回退到主工程现有的 thirdparty/ 目录。
+// 未配置工件仓库时，插件回退到主工程的 build/thirdparty/out/。
 val thirdparty = rootProject.extensions.getByType<ThirdpartyExtension>()
 val thirdpartyLibs = listOf("zlib", "png", "webp", "jpeg", "gif", "msgpack")
 
@@ -41,7 +41,7 @@ kotlin {
 
     // ===== 第三方 C 库的 cinterop 绑定 =====
     // 每个库的 .def、头文件与静态库都来自独立的工件目录（<lib>/<target>），
-    // 由根工程的 thirdparty 插件负责从仓库拉取或从本地 thirdparty/ 回退。
+    // 由根工程的 thirdparty 插件负责从仓库拉取或从 build/thirdparty/out/ 回退。
     targets.withType<KotlinNativeTarget>().configureEach {
         val targetName = name
         compilations.getByName("main").cinterops {

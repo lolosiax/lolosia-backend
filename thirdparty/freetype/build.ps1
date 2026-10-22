@@ -1,11 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    一次性构建 FreeType 静态库（thirdparty/<目标>/libfreetype.a + thirdparty/include/freetype2/**）。
+    一次性构建 FreeType 静态库（build/thirdparty/out/<目标>/libfreetype.a + build/thirdparty/out/include/freetype2/**）。
 
 .DESCRIPTION
     RmlUi 的字体引擎（RMLUI_FONT_ENGINE=freetype）依赖它，因此它必须在 rmlui/build.ps1 之前跑。
-    与 sdl3/build.ps1 同一约定：只在新增或升级时手动跑一次，源码不入库、产物入库，
+    与 sdl3/build.ps1 同一约定：只在新增或升级时手动跑一次，源码与产物都不入库（产物落 build/thirdparty/out/），
     日常 Gradle 构建只做 cinterop + 链接，不碰 C 工具链。
 
     依赖裁剪 —— 只留字形解析本身需要的东西：
@@ -46,12 +46,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path $PSScriptRoot -Parent) 'gradle/toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
-$thirdpartyDir = Join-Path $repoRoot 'thirdparty'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
 $buildDir = Join-Path $WorkDir "cmake/$Target/freetype"
 $stageDir = Join-Path $WorkDir "deps/$Target/freetype"
-$libOut = Join-Path $thirdpartyDir $Target
-$incOut = Join-Path $thirdpartyDir 'include/freetype2'
+$libOut = Join-Path $WorkDir "out/$Target"
+$incOut = Join-Path $WorkDir 'out/include/freetype2'
 
 # ---------------------------------------------------------------- 1. 工具链
 Write-Step '定位工具链'
@@ -141,7 +140,7 @@ if ($LASTEXITCODE -ne 0) { Stop-WithError "cmake build 失败：freetype [$Targe
 
 # ---------------------------------------------------------------- 4. 收产物
 # 走 CMake 自己的 install 规则（头文件分两处放、配置头是构建期生成的，自己拼容易漏），
-# 装到 build/ 下的暂存前缀后再拣需要的搬进 thirdparty。
+# 装到 build/ 下的暂存前缀后再拣需要的搬进 build/thirdparty/out。
 Write-Step '安装到暂存前缀并收集产物'
 if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
 & $cmake '--install' $buildDir '--prefix' (ConvertTo-CmPath $stageDir)

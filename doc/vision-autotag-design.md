@@ -187,7 +187,7 @@
 模型对**视觉属性**是稳的：发色、瞳色、发型、服饰、配饰、姿势。这些**不依赖先验名字**，且**恰好是搜索/推荐真正吃的维度**。
 
 - 命名空间：**已定新增 `attribute`**（`attribute:粉发` / `attribute:双马尾` / `attribute:水手服` …）。
-- 路线：**阶段 A 顺带（免费）出少量高频属性 → 需要时阶段 B 出全**；等有了参考库，再把 `attribute:粉发` 这类**收敛/合并**到 `character:萌`（`media/tag/merge` 已有，§7.5）。
+- 路线：**阶段 A 顺带（免费）出少量高频属性 → 需要时阶段 B 出全**；等有了参考库，再把 `attribute:粉发` 这类**收敛/合并**到 `character:萌`（`media/tag/merge` 尚未落地，见 `MediaController` 的 KDoc）。
 - 这与 [media-index-design.md](./media-index-design.md) §7.5"标签是事后长出来的"完全一致：**先随便写属性，之后再收拾成角色**。
 
 ---

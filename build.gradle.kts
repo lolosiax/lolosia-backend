@@ -263,7 +263,7 @@ fun androidCapable(): Boolean {
 }
 
 val androidNativeTasks = androidAbis.map { abi ->
-    val jniDir = layout.projectDirectory.dir("thirdparty/androidJniLibs/$abi")
+    val jniDir = layout.buildDirectory.dir("thirdparty/out/androidJniLibs/$abi")
     tasks.register<Exec>("androidNative${androidTaskSuffix(abi)}") {
         group = "build"
         description = "用 NDK 重新生成 Android 原生库（$abi）"
@@ -271,8 +271,8 @@ val androidNativeTasks = androidAbis.map { abi ->
         workingDir = rootDir
         inputs.files(fileTree("modules/client/src/nativeCpp") { exclude("**/build/**") })
         inputs.file("thirdparty/gradle/build-android.ps1")
-        outputs.file(jniDir.file("libSDL3.so"))
-        outputs.file(jniDir.file("liblolosia.so"))
+        outputs.file(jniDir.map { it.file("libSDL3.so") })
+        outputs.file(jniDir.map { it.file("liblolosia.so") })
         commandLine(
             "powershell", "-ExecutionPolicy", "Bypass",
             "-File", "thirdparty/gradle/build-android.ps1",

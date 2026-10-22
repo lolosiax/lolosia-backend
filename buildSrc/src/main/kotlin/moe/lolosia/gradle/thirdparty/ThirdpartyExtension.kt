@@ -8,7 +8,7 @@ import org.gradle.api.tasks.TaskProvider
  * 第三方原生库的解析结果。
  *
  * 每个库、每个目标都有独立的目录（`include/` + `lib/`），由 `thirdpartySync<库><目标>` 任务准备。
- * 默认从工件仓库拉取；未配置仓库时回退到主工程现有的 `thirdparty/include` 与 `thirdparty/<目标>`。
+ * 默认从工件仓库拉取；未配置仓库时回退到主工程 `build/thirdparty/out/include` 与 `build/thirdparty/out/<目标>`。
  *
  * @author 洛洛希雅Lolosia
  */

@@ -9,7 +9,7 @@
 
     与桌面那几个脚本的差异只在工具链：这里用 Android NDK 的 clang + sysroot，
     而不是 Kotlin/Native 自带的那套。源码仍放 <repo>/build/thirdparty（gitignore），
-    产物落到 thirdparty/androidJniLibs/<ABI>/，由 :modules:app-android 直接引用。
+    产物落到 build/thirdparty/out/androidJniLibs/<ABI>/，由 :modules:app-android 直接引用。
 
     前提：
       - NDK r27c（默认在 D:\AndroidSdk\ndk\android-ndk-r27c，可用 -Ndk 指定）
@@ -44,10 +44,10 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'toolchain.ps1')
 
 $repoRoot = Get-LolosiaRepoRoot
-$thirdpartyDir = Join-Path $repoRoot 'thirdparty'
 if (-not $WorkDir) { $WorkDir = Join-Path $repoRoot 'build/thirdparty' }
+$outRoot = Join-Path $WorkDir 'out'
 $buildRoot = Join-Path $WorkDir "cmake/android-$Abi"
-$libOut = Join-Path $thirdpartyDir "androidJniLibs/$Abi"
+$libOut = Join-Path $outRoot "androidJniLibs/$Abi"
 $objDir = Join-Path $WorkDir "nativeCpp/android-$Abi/obj"
 
 # ---------------------------------------------------------------- 0. NDK / 构建工具
@@ -105,7 +105,7 @@ $rmluiTree = Get-ThirdpartySource -Name 'RmlUi-6.3' `
     -Url 'https://github.com/mikke89/RmlUi/archive/refs/tags/6.3.tar.gz' `
     -WorkDir $WorkDir -Force:$Force
 
-$includeRoot = Join-Path $thirdpartyDir 'include'
+$includeRoot = Join-Path $outRoot 'include'
 $freetypeInc = Join-Path $includeRoot 'freetype2'
 
 function Invoke-CMake([string]$Name, [string]$Source, [string[]]$ExtraArgs) {

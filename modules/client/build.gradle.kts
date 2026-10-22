@@ -1,5 +1,4 @@
 import moe.lolosia.gradle.thirdparty.ThirdpartyExtension
-import org.gradle.api.tasks.Sync
 
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
@@ -10,10 +9,10 @@ group = "moe.lolosia"
 version = rootProject.version
 
 // 第三方原生库（SDL3 / FreeType / RmlUi）由根工程的 thirdparty 插件解析；
-// 自研门面 liblolosia.a 仍从 thirdparty/mingwX64 取。
+// 自研门面 liblolosia.a 由 buildLolosia 现场编译到 build/thirdparty/out/mingwX64。
 val thirdparty = rootProject.extensions.getByType<ThirdpartyExtension>()
 
-val lolosiaLibDir = layout.buildDirectory.dir("thirdparty/lolosia/mingwX64/lib")
+val lolosiaLibDir = rootProject.layout.buildDirectory.dir("thirdparty/out/mingwX64")
 
 // 仓库地址与账号不入库；Gradle 从 local.properties 读入后经环境变量交给脚本
 fun Exec.passThirdpartyRepo() {
@@ -55,14 +54,12 @@ val buildLolosia = tasks.register<Exec>("buildLolosia") {
     inputs.dir(layout.projectDirectory.dir("src/nativeCpp/src"))
     inputs.dir(layout.projectDirectory.dir("src/nativeCpp/include"))
     inputs.file(layout.projectDirectory.file("src/nativeCpp/build.ps1"))
-    inputs.dir(rootProject.layout.projectDirectory.dir("thirdparty/include"))
-    outputs.file(rootProject.layout.projectDirectory.file("thirdparty/mingwX64/liblolosia.a"))
-}
-
-val copyLolosiaLib = tasks.register<Sync>("copyLolosiaStaticLib") {
-    dependsOn(buildLolosia)
-    from(rootProject.layout.projectDirectory.file("thirdparty/mingwX64/liblolosia.a"))
-    into(lolosiaLibDir)
+    // 只依赖 UI 图形栈的头文件；不要写整个 out/include，否则会与编解码库的产出
+    // 形成未声明的隐式依赖（Gradle 会直接报错）。
+    inputs.dir(rootProject.layout.buildDirectory.dir("thirdparty/out/include/SDL3"))
+    inputs.dir(rootProject.layout.buildDirectory.dir("thirdparty/out/include/RmlUi"))
+    inputs.dir(rootProject.layout.buildDirectory.dir("thirdparty/out/include/freetype2"))
+    outputs.file(lolosiaLibDir.map { it.file("liblolosia.a") })
 }
 
 kotlin {
@@ -86,7 +83,7 @@ kotlin {
             }
         }
         tasks.matching { it.name == "cinteropLolosiaMingwX64" }.configureEach {
-            dependsOn(copyLolosiaLib)
+            dependsOn(buildLolosia)
             dependsOn(thirdparty.syncTask("sdl3", "mingwX64"))
             dependsOn(thirdparty.syncTask("freetype", "mingwX64"))
             dependsOn(thirdparty.syncTask("rmlui", "mingwX64"))

@@ -1,6 +1,8 @@
 # 媒体库索引设计：标签 · 元数据 · 语义检索
 
-> 状态：**设计稿（尚未实现）**。落地后按 [rbac-design.md](./rbac-design.md) 的做法在文末补「实现落点与偏差」。
+> 状态：**P1/P3 已实现，P2/P4/P5 未完成**。已落地：身份与元数据、属性页与遮罩（P1）、标签体系与人工/规则打标、显式外发分析（P3）；
+> 未落地：`media/search` / `facets` / `manifest`、标签词表管理（`tag/tree|rename|move|merge`）、P4 语义检索（向量落盘 + `similar`）、P5 直链 flags 等加固。
+> 接口现状以 [`MediaController`](../modules/server/src/commonMain/kotlin/moe/lolosia/web/controller/MediaController.kt) 的 KDoc 为准。
 > 规范约定见 [AGENTS.md](../AGENTS.md)；在线文件管理器的现状与实测数据见 [lolosia-backend-notes.md](./lolosia-backend-notes.md) §3。
 
 ---
@@ -672,7 +674,7 @@ namespace:name            object:巧克力
 
 | 理由 | 事实 |
 | --- | --- |
-| 没有运行时 | K/N 侧没有可用的推理框架；ONNX Runtime 的 C API 要 cinterop + 三目标静态库，与「产物入库、日常构建不碰 C 工具链」的既定策略直接冲突 |
+| 没有运行时 | K/N 侧没有可用的推理框架；ONNX Runtime 的 C API 要 cinterop + 三目标静态库，与「产物落 `build/`、日常构建不碰 C 工具链」的既定策略直接冲突 |
 | 没有算力 | 板子 ARM64 4 核跑 CLIP 每张图数秒；10 万张要跑几天，还会把机械盘读满 |
 | 模型会换 | 模型迭代很快（WD14 → v3、CLIP → SigLIP）；把模型关进可执行文件，等于每次换模型都要重新链接发布二进制 |
 
